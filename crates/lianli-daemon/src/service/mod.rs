@@ -35,6 +35,7 @@ mod streaming;
 mod subsystems;
 mod suspend;
 mod sync;
+mod usb_rescan;
 mod wired_identity;
 mod wireless_rebind;
 mod wireless_recovery;
@@ -274,6 +275,7 @@ pub struct ServiceManager {
     mode_switch_suppression: HashMap<String, Instant>,
     lcd_transfer_recovery: HashMap<String, runtime::TransferRecovery>,
     post_switch_refresh: display_mode::PostSwitchRefresh,
+    usb_rescan: usb_rescan::UsbRescanPolicy,
     display_switch: Option<display_mode::DisplaySwitch>,
     serial_rewrite_backoff: Option<Instant>,
     pixel_clean_sessions: Vec<crate::pixel_cleaner::PixelCleanSession>,
@@ -344,6 +346,7 @@ impl ServiceManager {
             mode_switch_suppression: HashMap::new(),
             lcd_transfer_recovery: HashMap::new(),
             post_switch_refresh: display_mode::PostSwitchRefresh::default(),
+            usb_rescan: usb_rescan::UsbRescanPolicy::default(),
             display_switch: None,
             serial_rewrite_backoff: None,
             pixel_clean_sessions: Vec::new(),
@@ -820,6 +823,7 @@ impl ServiceManager {
                     break;
                 }
                 DaemonEvent::USBCheck => {
+                    self.rescan_stale_usb_devices();
                     self.refresh_usb_device_cache();
                     self.supervise_wireless();
                 }

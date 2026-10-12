@@ -13,7 +13,7 @@ pub struct H2WinUsbLcd {
 
 impl H2WinUsbLcd {
     pub(crate) fn new(
-        device: rusb::Device<rusb::GlobalContext>,
+        device: rusb::Device<lianli_transport::UsbContext>,
         screen: ScreenInfo,
         name: &str,
     ) -> Result<Self> {
@@ -134,7 +134,7 @@ impl WinUsbLcd for H2WinUsbLcd {
 }
 
 pub(crate) fn boxed(
-    device: rusb::Device<rusb::GlobalContext>,
+    device: rusb::Device<lianli_transport::UsbContext>,
     screen: ScreenInfo,
     name: &str,
 ) -> Result<BoxedWinUsbLcd> {

@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use lianli_shared::config::HidBackend;
 use lianli_transport::HidTransport;
-use rusb::GlobalContext;
+use lianli_transport::UsbContext;
 use tracing::debug;
 
 /// V2 dongle HID companion interface (CH340 VID `0x1A86`, PID `0x2107`).
@@ -25,7 +25,7 @@ pub struct V2HidEntry {
 pub fn query_v2_hid_macs(backend: HidBackend) -> Vec<V2HidEntry> {
     let mut results = Vec::new();
 
-    let Ok(devices) = rusb::devices() else {
+    let Ok(devices) = lianli_transport::usb_context::devices() else {
         return results;
     };
 
@@ -83,7 +83,7 @@ pub fn query_v2_hid_macs(backend: HidBackend) -> Vec<V2HidEntry> {
 /// vendor's wire format, and auto-detect the MAC offset on read (the
 /// response may or may not include the Report ID byte depending on the
 /// device's HID descriptor).
-fn query_single_mac(device: rusb::Device<GlobalContext>, backend: HidBackend) -> Result<[u8; 6]> {
+fn query_single_mac(device: rusb::Device<UsbContext>, backend: HidBackend) -> Result<[u8; 6]> {
     let mut hid = crate::detect::open_hid_transient(
         &device,
         None,

@@ -21,8 +21,9 @@ use lianli_shared::rgb::{
     RgbEffect, RgbMode, RgbPlaybackTiming, RgbRenderFamily, RgbRenderProfile, RgbScope, RgbZoneInfo,
 };
 use lianli_transport::usb::{RusbBulk, LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
+use lianli_transport::UsbContext;
 use parking_lot::Mutex;
-use rusb::{Device, GlobalContext};
+use rusb::Device;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -94,7 +95,7 @@ pub struct WiredReceiverController {
 }
 
 impl WiredReceiverController {
-    pub fn new(device: Device<GlobalContext>, pid: u16) -> Result<Self> {
+    pub fn new(device: Device<UsbContext>, pid: u16) -> Result<Self> {
         let params = ReceiverParams::from_pid(pid)
             .ok_or_else(|| anyhow::anyhow!("unknown wired receiver PID {pid:#06x}"))?;
         let render_family = ReceiverParams::render_family(pid)

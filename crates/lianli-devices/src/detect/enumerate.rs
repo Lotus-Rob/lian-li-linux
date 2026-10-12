@@ -24,45 +24,46 @@ fn ep0_serial_failed() -> &'static Ep0SerialFailures {
 /// Supported devices the kernel lists but libusb does not. libusb learns about
 /// new devices only from udev events, which some containers never deliver.
 pub fn known_devices_missing_from_libusb() -> Vec<String> {
-    let Ok(listed) = rusb::devices() else {
+    let Ok(entries) = std::fs::read_dir("/sys/bus/usb/devices") else {
+        return Vec::new();
+    };
+    let mut known = Vec::new();
+    for entry in entries.flatten().take(1024) {
+        let path = entry.path();
+        let read = |name: &str| std::fs::read_to_string(path.join(name)).ok();
+        let read_id = |name: &str| u16::from_str_radix(read(name)?.trim(), 16).ok();
+        let read_number = |name: &str| read(name)?.trim().parse::<u8>().ok();
+        let (Some(vid), Some(pid)) = (read_id("idVendor"), read_id("idProduct")) else {
+            continue;
+        };
+        let id = UsbId::new(vid, pid);
+        if !KNOWN_DEVICES.iter().any(|known| known.id == id) {
+            continue;
+        }
+        let (Some(bus), Some(address)) = (read_number("busnum"), read_number("devnum")) else {
+            continue;
+        };
+        let name = format!(
+            "{vid:04x}:{pid:04x} at {}",
+            entry.file_name().to_string_lossy()
+        );
+        known.push(((bus, address), name));
+    }
+    if known.is_empty() {
+        return Vec::new();
+    }
+    let Ok(listed) = lianli_transport::usb_context::devices() else {
         return Vec::new();
     };
     let listed: HashSet<(u8, u8)> = listed
         .iter()
         .map(|device| (device.bus_number(), device.address()))
         .collect();
-    let Ok(entries) = std::fs::read_dir("/sys/bus/usb/devices") else {
-        return Vec::new();
-    };
-    let mut missing = Vec::new();
-    for entry in entries.flatten().take(1024) {
-        let path = entry.path();
-        let read = |name: &str| std::fs::read_to_string(path.join(name)).ok();
-        let (Some(vid), Some(pid), Some(bus), Some(address)) = (
-            read("idVendor"),
-            read("idProduct"),
-            read("busnum"),
-            read("devnum"),
-        ) else {
-            continue;
-        };
-        let (Ok(vid), Ok(pid), Ok(bus), Ok(address)) = (
-            u16::from_str_radix(vid.trim(), 16),
-            u16::from_str_radix(pid.trim(), 16),
-            bus.trim().parse::<u8>(),
-            address.trim().parse::<u8>(),
-        ) else {
-            continue;
-        };
-        let id = UsbId::new(vid, pid);
-        if KNOWN_DEVICES.iter().any(|known| known.id == id) && !listed.contains(&(bus, address)) {
-            missing.push(format!(
-                "{vid:04x}:{pid:04x} at {}",
-                entry.file_name().to_string_lossy()
-            ));
-        }
-    }
-    missing
+    known
+        .into_iter()
+        .filter(|(location, _)| !listed.contains(location))
+        .map(|(_, name)| name)
+        .collect()
 }
 
 /// Serial the kernel cached at enumeration, matched on bus/device number.
@@ -89,7 +90,7 @@ fn sysfs_serial(bus: u8, address: u8) -> Option<String> {
 }
 
 pub fn enumerate_devices() -> Result<Vec<DetectedDevice>> {
-    let usb_devices = rusb::devices()?;
+    let usb_devices = lianli_transport::usb_context::devices()?;
     let mut found = Vec::new();
 
     for device in usb_devices.iter() {
@@ -214,14 +215,17 @@ pub fn probe_tl_lcd_port_indices(
 }
 
 /// Find the rusb `Device` matching a VID/PID pair.
-pub(super) fn find_usb_device(vid: u16, pid: u16) -> Option<rusb::Device<GlobalContext>> {
-    rusb::devices().ok()?.iter().find(|d| {
-        d.device_descriptor()
-            .map(|desc| desc.vendor_id() == vid && desc.product_id() == pid)
-            .unwrap_or(false)
-    })
+pub(super) fn find_usb_device(vid: u16, pid: u16) -> Option<rusb::Device<UsbContext>> {
+    lianli_transport::usb_context::devices()
+        .ok()?
+        .iter()
+        .find(|d| {
+            d.device_descriptor()
+                .map(|desc| desc.vendor_id() == vid && desc.product_id() == pid)
+                .unwrap_or(false)
+        })
 }
 
 /// Re-export so callers can refer to the rusb context type without depending
 /// on rusb directly.
-pub use rusb::GlobalContext;
+pub use lianli_transport::UsbContext;

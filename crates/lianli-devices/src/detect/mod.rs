@@ -17,12 +17,13 @@ pub use enumerate::{
 };
 
 use lianli_shared::device_id::DeviceFamily;
-use rusb::{Device, GlobalContext};
+use lianli_transport::UsbContext;
+use rusb::Device;
 
 /// A detected USB device with its identified family.
 #[derive(Debug)]
 pub struct DetectedDevice {
-    pub device: Device<GlobalContext>,
+    pub device: Device<UsbContext>,
     pub family: DeviceFamily,
     pub name: &'static str,
     pub vid: u16,

@@ -3,11 +3,12 @@ use super::DetectedDevice;
 use anyhow::Result;
 use lianli_shared::config::HidBackend;
 use lianli_shared::device_id::DeviceFamily;
+use lianli_transport::UsbContext;
 use lianli_transport::{
     HidTransport, HidrawReopener, HidrawTransport, RusbBulk, RusbHid, RusbHidReopener,
 };
 use parking_lot::Mutex;
-use rusb::{Device, GlobalContext};
+use rusb::Device;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::warn;
@@ -103,7 +104,7 @@ fn make_rusb_reopener(
     usage_page: Option<u16>,
 ) -> RusbHidReopener {
     Arc::new(move || {
-        let usb_dev = rusb::devices()
+        let usb_dev = lianli_transport::usb_context::devices()
             .map_err(|e| anyhow::anyhow!("rusb devices: {e}"))?
             .iter()
             .find(|d| {
@@ -130,7 +131,7 @@ fn make_rusb_reopener(
 }
 
 fn try_open_with_retry<T>(
-    usb_device: Option<&Device<GlobalContext>>,
+    usb_device: Option<&Device<UsbContext>>,
     label: &str,
     mut open_fn: impl FnMut() -> Result<T>,
 ) -> Result<T> {
@@ -173,7 +174,7 @@ fn try_open_with_retry<T>(
 }
 
 fn open_rusb_with_retry<T>(
-    usb_device: &Device<GlobalContext>,
+    usb_device: &Device<UsbContext>,
     open_fn: impl FnMut() -> Result<T>,
 ) -> Result<T> {
     try_open_with_retry(Some(usb_device), "rusb open", open_fn)
@@ -223,7 +224,7 @@ fn open_hidraw_device(
 }
 
 pub fn open_shared_hid(
-    device: &Device<GlobalContext>,
+    device: &Device<UsbContext>,
     usage_page: Option<u16>,
     vid: u16,
     pid: u16,
@@ -255,7 +256,7 @@ pub fn open_shared_hid(
 }
 
 pub fn open_hid_transient_for_device(
-    device: &Device<GlobalContext>,
+    device: &Device<UsbContext>,
     usage_page: Option<u16>,
     backend: HidBackend,
 ) -> Result<Box<dyn HidTransport>> {
@@ -279,7 +280,7 @@ pub fn open_hid_transient_for_device(
 }
 
 pub fn open_hid_transient(
-    device: &Device<GlobalContext>,
+    device: &Device<UsbContext>,
     usage_page: Option<u16>,
     vid: u16,
     pid: u16,
@@ -346,7 +347,7 @@ pub fn open_hid_lcd_by_topology(
     port_numbers: &[u8],
     backend: HidBackend,
 ) -> Result<Box<dyn crate::traits::LcdDevice>> {
-    let device = rusb::devices()?
+    let device = lianli_transport::usb_context::devices()?
         .iter()
         .find(|d| {
             d.bus_number() == bus

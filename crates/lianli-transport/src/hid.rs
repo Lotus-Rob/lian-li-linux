@@ -10,7 +10,8 @@
 
 use crate::error::TransportError;
 use crate::hid_trait::HidTransport;
-use rusb::{Device, DeviceHandle, GlobalContext};
+use crate::UsbContext;
+use rusb::{Device, DeviceHandle};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -29,7 +30,7 @@ pub type RusbHidReopener = Arc<dyn Fn() -> anyhow::Result<RusbHid> + Send + Sync
 /// On `Drop`, all claimed interfaces are released and the kernel driver is
 /// reattached.
 pub struct RusbHid {
-    handle: DeviceHandle<GlobalContext>,
+    handle: DeviceHandle<UsbContext>,
     iface: u8,
     /// All HID interfaces we hold for the lifetime of this transport, so the
     /// kernel can't re-bind hidraw and reject our writes.
@@ -74,7 +75,7 @@ impl RusbHid {
     /// the handle used for descriptor reads is dropped before a new handle
     /// claims the interface.
     pub fn open_by_usage(
-        device: Device<GlobalContext>,
+        device: Device<UsbContext>,
         usage_page: Option<u16>,
     ) -> Result<Self, TransportError> {
         Self::open_by_usage_impl(device, usage_page, None)
@@ -83,7 +84,7 @@ impl RusbHid {
     /// Like [`open_by_usage`](Self::open_by_usage) but with a reopener closure
     /// for self-healing on I/O failure.
     pub fn open_by_usage_with_reopener(
-        device: Device<GlobalContext>,
+        device: Device<UsbContext>,
         usage_page: Option<u16>,
         reopener: RusbHidReopener,
     ) -> Result<Self, TransportError> {
@@ -91,7 +92,7 @@ impl RusbHid {
     }
 
     fn open_by_usage_impl(
-        device: Device<GlobalContext>,
+        device: Device<UsbContext>,
         usage_page: Option<u16>,
         reopener: Option<RusbHidReopener>,
     ) -> Result<Self, TransportError> {
@@ -233,7 +234,7 @@ impl RusbHid {
 
     /// Perform a USB port reset on the device (USBDEVFS_RESET ioctl).
     /// Used during device binding/unbinding to force kernel re-enumeration.
-    pub fn reset_usb_device(device: &Device<GlobalContext>) -> Result<(), TransportError> {
+    pub fn reset_usb_device(device: &Device<UsbContext>) -> Result<(), TransportError> {
         let handle = device.open()?;
 
         let mut hid_ifaces: Vec<u8> = Vec::new();
@@ -297,7 +298,7 @@ impl RusbHid {
         self.reopen_count.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    fn handle(&self) -> Result<&DeviceHandle<GlobalContext>, TransportError> {
+    fn handle(&self) -> Result<&DeviceHandle<UsbContext>, TransportError> {
         if !self.interfaces_claimed {
             return Err(rusb::Error::NoDevice.into());
         }
@@ -490,7 +491,7 @@ impl Drop for RusbHid {
 /// probing the interface, and other userspace tools (OpenRGB) may briefly hold
 /// a claim; retrying the full detach+claim cycle gives them time to release.
 fn detach_and_claim_interface(
-    handle: &DeviceHandle<GlobalContext>,
+    handle: &DeviceHandle<UsbContext>,
     iface: u8,
 ) -> Result<(), rusb::Error> {
     const ATTEMPTS: u32 = 15;

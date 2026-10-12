@@ -38,7 +38,7 @@ impl TurzxDisplay {
     }
 
     pub fn open_device(
-        device: rusb::Device<rusb::GlobalContext>,
+        device: rusb::Device<lianli_transport::UsbContext>,
         cancelled: impl Fn() -> bool,
     ) -> Result<Self> {
         anyhow::ensure!(

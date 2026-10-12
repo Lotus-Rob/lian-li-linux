@@ -13,7 +13,7 @@ pub struct BaseWinUsbLcd {
 
 impl BaseWinUsbLcd {
     pub(crate) fn new(
-        device: rusb::Device<rusb::GlobalContext>,
+        device: rusb::Device<lianli_transport::UsbContext>,
         screen: ScreenInfo,
         name: &str,
     ) -> Result<Self> {
@@ -129,7 +129,7 @@ impl WinUsbLcd for BaseWinUsbLcd {
 }
 
 pub(crate) fn boxed(
-    device: rusb::Device<rusb::GlobalContext>,
+    device: rusb::Device<lianli_transport::UsbContext>,
     screen: ScreenInfo,
     name: &str,
 ) -> Result<BoxedWinUsbLcd> {

@@ -7,7 +7,8 @@
 //! displays.
 
 use crate::error::TransportError;
-use rusb::{Device, DeviceHandle, GlobalContext};
+use crate::UsbContext;
+use rusb::{Device, DeviceHandle};
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
@@ -69,7 +70,7 @@ fn transfer_timeout(timeout: Duration) -> Result<Duration, TransportError> {
 }
 
 pub struct RusbBulk {
-    handle: DeviceHandle<GlobalContext>,
+    handle: DeviceHandle<UsbContext>,
     ep_out: u8,
     ep_in: u8,
     ep_in_interrupt: bool,
@@ -81,7 +82,7 @@ pub struct RusbBulk {
 
 impl RusbBulk {
     pub fn open(vid: u16, pid: u16) -> Result<Self, TransportError> {
-        let device = rusb::devices()?
+        let device = crate::usb_context::devices()?
             .iter()
             .find(|d| {
                 d.device_descriptor()
@@ -101,7 +102,7 @@ impl RusbBulk {
         })
     }
 
-    pub fn open_device(device: Device<GlobalContext>) -> Result<Self, TransportError> {
+    pub fn open_device(device: Device<UsbContext>) -> Result<Self, TransportError> {
         let (ep_in_interrupt, ep_out_interrupt) = detect_endpoint_types(&device);
         let handle = device.open()?;
         Ok(Self {
@@ -381,11 +382,11 @@ impl RusbBulk {
         Ok(self.handle.clear_halt(endpoint)?)
     }
 
-    pub fn inner(&self) -> &DeviceHandle<GlobalContext> {
+    pub fn inner(&self) -> &DeviceHandle<UsbContext> {
         &self.handle
     }
 
-    pub fn read_serial(&self, device: &Device<GlobalContext>) -> Option<String> {
+    pub fn read_serial(&self, device: &Device<UsbContext>) -> Option<String> {
         let desc = device.device_descriptor().ok()?;
         self.handle.read_serial_number_string_ascii(&desc).ok()
     }
@@ -428,7 +429,7 @@ fn read_chunks_until_silence(
 
 /// Detect whether EP_IN and EP_OUT are interrupt endpoints by reading the
 /// USB descriptor. Returns `(ep_in_is_interrupt, ep_out_is_interrupt)`.
-fn detect_endpoint_types(device: &Device<GlobalContext>) -> (bool, bool) {
+fn detect_endpoint_types(device: &Device<UsbContext>) -> (bool, bool) {
     let config = match device.active_config_descriptor() {
         Ok(c) => c,
         Err(_) => return (false, false),
@@ -458,8 +459,8 @@ fn detect_endpoint_types(device: &Device<GlobalContext>) -> (bool, bool) {
 }
 
 /// Find all USB devices matching a VID/PID, sorted by bus/address.
-pub fn find_usb_devices(vid: u16, pid: u16) -> Result<Vec<Device<GlobalContext>>, TransportError> {
-    let devices = rusb::devices()?;
+pub fn find_usb_devices(vid: u16, pid: u16) -> Result<Vec<Device<UsbContext>>, TransportError> {
+    let devices = crate::usb_context::devices()?;
     let mut list = Vec::new();
     for device in devices.iter() {
         if let Ok(desc) = device.device_descriptor() {

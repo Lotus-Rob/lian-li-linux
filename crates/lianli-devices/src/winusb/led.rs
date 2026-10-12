@@ -13,8 +13,9 @@ use anyhow::{bail, Context, Result};
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbRenderFamily, RgbRenderProfile, RgbZoneInfo};
 use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
 use lianli_transport::TransportError;
+use lianli_transport::UsbContext;
 use parking_lot::Mutex;
-use rusb::{Device, GlobalContext};
+use rusb::Device;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -31,7 +32,7 @@ pub struct WinUsbLedDevice {
 }
 
 impl WinUsbLedDevice {
-    pub fn new(device: Device<GlobalContext>, led_count: u16, name: &str) -> Result<Self> {
+    pub fn new(device: Device<UsbContext>, led_count: u16, name: &str) -> Result<Self> {
         let desc = device
             .device_descriptor()
             .context("reading device descriptor")?;

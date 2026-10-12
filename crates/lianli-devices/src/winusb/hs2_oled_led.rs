@@ -10,8 +10,9 @@ use lianli_shared::rgb::{
 };
 use lianli_transport::usb::{RusbBulk, EP_IN, LCD_WRITE_TIMEOUT, SHUTTING_DOWN};
 use lianli_transport::TransportError;
+use lianli_transport::UsbContext;
 use parking_lot::Mutex;
-use rusb::{Device, GlobalContext};
+use rusb::Device;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -136,7 +137,7 @@ pub struct Hs2OledLedController {
 }
 
 impl Hs2OledLedController {
-    pub fn new(device: Device<GlobalContext>) -> Result<Self> {
+    pub fn new(device: Device<UsbContext>) -> Result<Self> {
         let mut transport =
             RusbBulk::open_device(device).context("opening HS2 OLED Curve LED MCU")?;
         transport

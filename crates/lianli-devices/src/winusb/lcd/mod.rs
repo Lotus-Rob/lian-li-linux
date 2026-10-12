@@ -13,7 +13,8 @@ use crate::traits::LcdDevice;
 use anyhow::{bail, Result};
 use lianli_shared::device_id::DeviceFamily;
 use lianli_shared::screen::ScreenInfo;
-use rusb::{Device, GlobalContext};
+use lianli_transport::UsbContext;
+use rusb::Device;
 use std::sync::Arc;
 
 mod base;
@@ -32,7 +33,7 @@ use self::trait_::BoxedWinUsbLcd;
 pub struct WinUsbLcdDevice(BoxedWinUsbLcd, u16);
 
 impl WinUsbLcdDevice {
-    pub fn open(device: Device<GlobalContext>, pid: u16) -> Result<Self> {
+    pub fn open(device: Device<UsbContext>, pid: u16) -> Result<Self> {
         Ok(Self(make_device(device, pid)?, pid))
     }
 
@@ -192,7 +193,7 @@ impl LcdDevice for WinUsbLcdDevice {
     }
 }
 
-fn make_device(device: Device<GlobalContext>, pid: u16) -> Result<BoxedWinUsbLcd> {
+fn make_device(device: Device<UsbContext>, pid: u16) -> Result<BoxedWinUsbLcd> {
     let (screen, _family, name) = screen_for_pid(pid)
         .ok_or_else(|| anyhow::anyhow!("unknown WinUSB LCD PID {:#06x}", pid))?;
     match pid {

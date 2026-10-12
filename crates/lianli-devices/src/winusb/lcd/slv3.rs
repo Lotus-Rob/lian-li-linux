@@ -13,7 +13,7 @@ pub struct Slv3WinUsbLcd {
 
 impl Slv3WinUsbLcd {
     pub(crate) fn new(
-        device: rusb::Device<rusb::GlobalContext>,
+        device: rusb::Device<lianli_transport::UsbContext>,
         screen: ScreenInfo,
         name: &str,
         stop_play_supported: bool,
@@ -141,7 +141,7 @@ impl WinUsbLcd for Slv3WinUsbLcd {
 }
 
 pub(crate) fn boxed(
-    device: rusb::Device<rusb::GlobalContext>,
+    device: rusb::Device<lianli_transport::UsbContext>,
     screen: ScreenInfo,
     name: &str,
     stop_play_supported: bool,

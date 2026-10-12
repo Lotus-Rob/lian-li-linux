@@ -397,7 +397,7 @@ fn group_still_missing(
     }
     let mut present = 0;
     let mut anchor_present = false;
-    for device in rusb::devices()?.iter() {
+    for device in lianli_transport::usb_context::devices()?.iter() {
         let descriptor = device.device_descriptor()?;
         let relevant = (descriptor.vendor_id() == 0x1cbe
             && descriptor.product_id() == group.lcd_pid)

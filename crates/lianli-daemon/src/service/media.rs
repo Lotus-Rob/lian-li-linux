@@ -287,7 +287,7 @@ impl ServiceManager {
         struct LcdCandidate {
             family: DeviceFamily,
             device_id: String,
-            usb_device: Option<Device<rusb::GlobalContext>>,
+            usb_device: Option<Device<lianli_transport::UsbContext>>,
             vid: u16,
             pid: u16,
             bus: u8,

@@ -14,8 +14,9 @@ use anyhow::Result;
 use lianli_shared::config::HidBackend;
 use lianli_shared::device_id::{DeviceCapabilities, DeviceFamily, TransportKind};
 use lianli_shared::id::DeviceId;
+use lianli_transport::UsbContext;
 use parking_lot::Mutex;
-use rusb::{Device, GlobalContext};
+use rusb::Device;
 use std::sync::Arc;
 
 use crate::traits::{AioDevice, FanDevice, LcdDevice, RgbDevice};
@@ -23,7 +24,7 @@ use crate::traits::{AioDevice, FanDevice, LcdDevice, RgbDevice};
 /// Context passed to [`DeviceDriver::open`]. Carries everything a driver needs
 /// to locate, open, and claim its USB interface.
 pub struct OpenContext {
-    pub device: Device<GlobalContext>,
+    pub device: Device<UsbContext>,
     pub family: DeviceFamily,
     pub vid: u16,
     pub pid: u16,

@@ -4,8 +4,9 @@ use crate::crypto::PacketBuilder;
 use anyhow::{bail, Context, Result};
 use lianli_shared::screen::ScreenInfo;
 use lianli_transport::usb::{RusbBulk, EP_IN, EP_OUT};
+use lianli_transport::UsbContext;
 use parking_lot::{Mutex, MutexGuard};
-use rusb::{Device, GlobalContext};
+use rusb::Device;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -91,7 +92,7 @@ pub struct LcdLink {
     bulk: Mutex<RusbBulk>,
     /// The rusb device the handle was opened from, so any core on this
     /// transport can close and reopen it (vendor ReInitDev).
-    raw_device: Option<Device<GlobalContext>>,
+    raw_device: Option<Device<UsbContext>>,
     streaming: AtomicBool,
     h264_chunk_size: NegotiatedH264ChunkSize,
     /// Set by `push_and_recover`: the handle was reopened behind the LCD
@@ -106,7 +107,7 @@ pub struct LcdLink {
 }
 
 impl LcdLink {
-    pub fn new(bulk: RusbBulk, raw_device: Option<Device<GlobalContext>>) -> Self {
+    pub fn new(bulk: RusbBulk, raw_device: Option<Device<UsbContext>>) -> Self {
         Self {
             bulk: Mutex::new(bulk),
             raw_device,
@@ -604,7 +605,7 @@ fn sysfs_serial(bus: u8, address: u8) -> Option<String> {
 
 impl WinUsbLcdCore {
     pub(crate) fn open(
-        device: Device<GlobalContext>,
+        device: Device<UsbContext>,
         screen: ScreenInfo,
         name: &str,
         write_timeout: Duration,

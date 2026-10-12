@@ -35,7 +35,7 @@ fn is_lancool_pid(pid: u16) -> bool {
 
 /// The selected device reboots and re-enumerates as VID=0x1CBE.
 pub fn switch_to_lcd_mode(
-    device: &rusb::Device<rusb::GlobalContext>,
+    device: &rusb::Device<lianli_transport::UsbContext>,
     backend: HidBackend,
 ) -> Result<()> {
     let desc = device

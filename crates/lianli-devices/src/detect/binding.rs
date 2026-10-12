@@ -1,7 +1,8 @@
 use super::enumerate::enumerate_devices;
 use lianli_shared::device_id::uses_hid;
 use lianli_transport::RusbHid;
-use rusb::{Device, GlobalContext};
+use lianli_transport::UsbContext;
+use rusb::Device;
 use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
@@ -32,13 +33,15 @@ pub fn ensure_hid_devices_bound() {
             continue;
         }
         info!("No hidraw node for {name} ({vid:04x}:{pid:04x}), performing USB reset");
-        let dev = rusb::devices().ok().and_then(|devs| {
-            devs.iter().find(|d| {
-                d.device_descriptor()
-                    .map(|desc| desc.vendor_id() == *vid && desc.product_id() == *pid)
-                    .unwrap_or(false)
-            })
-        });
+        let dev = lianli_transport::usb_context::devices()
+            .ok()
+            .and_then(|devs| {
+                devs.iter().find(|d| {
+                    d.device_descriptor()
+                        .map(|desc| desc.vendor_id() == *vid && desc.product_id() == *pid)
+                        .unwrap_or(false)
+                })
+            });
         if let Some(usb_dev) = dev {
             if device_responds_to_descriptor(&usb_dev) {
                 nudge_kernel_to_bind_hid(&usb_dev);
@@ -107,7 +110,7 @@ fn read_hex_file(path: &Path) -> Option<u16> {
     u16::from_str_radix(text.trim(), 16).ok()
 }
 
-fn nudge_kernel_to_bind_hid(device: &Device<GlobalContext>) {
+fn nudge_kernel_to_bind_hid(device: &Device<UsbContext>) {
     let Ok(handle) = device.open() else {
         return;
     };
@@ -134,7 +137,7 @@ fn poll_for_hidraw(vid: u16, pid: u16, max_wait: Duration) -> bool {
     false
 }
 
-fn device_responds_to_descriptor(device: &Device<GlobalContext>) -> bool {
+fn device_responds_to_descriptor(device: &Device<UsbContext>) -> bool {
     let Ok(desc) = device.device_descriptor() else {
         return false;
     };

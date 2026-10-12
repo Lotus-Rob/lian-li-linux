@@ -82,7 +82,7 @@ pub struct DonglePresence {
 impl DonglePresence {
     pub fn scan() -> Self {
         let mut presence = Self::default();
-        let Ok(devices) = rusb::devices() else {
+        let Ok(devices) = lianli_transport::usb_context::devices() else {
             return presence;
         };
         for device in devices.iter() {

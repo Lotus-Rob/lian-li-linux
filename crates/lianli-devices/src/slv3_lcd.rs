@@ -2,7 +2,8 @@ use crate::crypto::PacketBuilder;
 use anyhow::{bail, Context, Result};
 use lianli_shared::screen::ScreenInfo;
 use lianli_transport::usb::{RusbBulk, LCD_WRITE_TIMEOUT, USB_TIMEOUT};
-use rusb::{Device, GlobalContext};
+use lianli_transport::UsbContext;
+use rusb::Device;
 use tracing::{debug, info};
 
 /// SLV3/TLV2 wireless LCD fan — USB bulk with DES-encrypted headers.
@@ -18,7 +19,7 @@ pub struct Slv3LcdDevice {
 }
 
 impl Slv3LcdDevice {
-    pub fn new(device: Device<GlobalContext>) -> Result<Self> {
+    pub fn new(device: Device<UsbContext>) -> Result<Self> {
         let bus = device.bus_number();
         let address = device.address();
 

@@ -5,14 +5,14 @@ use lianli_devices::turzx;
 /// A single detected TURZX device from a bus scan.
 #[derive(Debug, Clone)]
 pub struct TurzxDeviceMatch {
-    pub device: rusb::Device<rusb::GlobalContext>,
+    pub device: rusb::Device<lianli_transport::UsbContext>,
     pub pid: u16,
     pub key: DeviceKey,
 }
 
 /// Enumerate currently-attached TURZX panels on the USB bus.
 pub fn enumerate_turzx() -> Result<Vec<TurzxDeviceMatch>> {
-    let devices = rusb::devices().context("rusb::devices")?;
+    let devices = lianli_transport::usb_context::devices().context("rusb::devices")?;
     let mut out = Vec::new();
     for device in devices.iter() {
         let desc = match device.device_descriptor() {
