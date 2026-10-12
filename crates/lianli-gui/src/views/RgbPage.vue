@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
+import { Layers, Palette, Wifi } from "lucide-vue-next";
+import type { RgbDeviceCapabilities } from "@/types";
 import { useDaemonStore } from "@/stores/daemon";
 import { useConfigStore } from "@/stores/config";
 import RgbDeviceCard from "@/components/rgb/RgbDeviceCard.vue";
 import RgbSyncEditor from "@/components/rgb/RgbSyncEditor.vue";
 import OpenRgbRegionsToggle from "@/components/rgb/OpenRgbRegionsToggle.vue";
 import StatusDot from "@/components/common/StatusDot.vue";
+import { motherboardSyncEnabled, quickSyncControls } from "@/components/rgb/syncSettings";
+
+const QUICK_SYNC = "quick-sync";
 
 const daemon = useDaemonStore();
 const config = useConfigStore();
@@ -16,7 +21,6 @@ const openrgbEnabled = computed({
   get: () => rgb.value.openrgb_server,
   set: (v: boolean) => {
     rgb.value.openrgb_server = v;
-    // OpenRGB toggles auto-save (matching Slint behaviour).
     void config.save();
   },
 });
@@ -37,47 +41,135 @@ const statusText = computed(() => {
 });
 
 const rgbCaps = computed(() => config.rgbCaps.filter((c) => !c.rf_owned));
+
+const syncedCount = computed(() => rgbCaps.value.filter((cap) => quickSyncControls(cap, rgb.value)).length);
+const syncSummary = computed(() => {
+  if (!rgb.value.merge_lighting?.enabled) return "Off";
+  return `On · ${syncedCount.value} device${syncedCount.value === 1 ? "" : "s"}`;
+});
+
+const selectedRaw = ref<string | null>(null);
+const selected = computed(() => {
+  const wanted = selectedRaw.value;
+  if (!rgbCaps.value.length) return null;
+  if (wanted === QUICK_SYNC || (wanted && rgbCaps.value.some((cap) => cap.device_id === wanted))) return wanted;
+  if (rgb.value.merge_lighting?.enabled) return QUICK_SYNC;
+  return rgbCaps.value[0]?.device_id ?? null;
+});
+const selectedCap = computed(() => rgbCaps.value.find((cap) => cap.device_id === selected.value));
+
+type Tone = "success" | "warning" | "muted" | "info";
+function capState(cap: RgbDeviceCapabilities): { label: string; tone: Tone } {
+  if (!daemon.connected) return { label: "Offline", tone: "muted" };
+  if (cap.deferred_reason) return { label: "Waiting", tone: "warning" };
+  if (openrgbEnabled.value) return { label: "OpenRGB", tone: "info" };
+  if (motherboardSyncEnabled(cap, rgb.value)) return { label: "Motherboard", tone: "info" };
+  if (quickSyncControls(cap, rgb.value)) return { label: "Quick Sync", tone: "info" };
+  return { label: "Online", tone: "success" };
+}
+
+function isWireless(cap: RgbDeviceCapabilities): boolean {
+  return cap.device_id.startsWith("wireless:");
+}
+
+function capSummary(cap: RgbDeviceCapabilities): string {
+  const zones = `${cap.zones.length} zone${cap.zones.length === 1 ? "" : "s"}`;
+  return isWireless(cap) ? `Wireless · ${zones}` : zones;
+}
 </script>
 
 <template>
   <div class="page rgb-page">
-    <!-- OpenRGB status card -->
     <section class="card openrgb">
-      <div class="openrgb-head">
-        <h2 class="section-title">OpenRGB</h2>
+      <div class="openrgb-row">
+        <span class="openrgb-title">OpenRGB</span>
         <span class="status-tag">
           <StatusDot
             :color="openrgbEnabled ? (daemon.openrgbRunning ? 'success' : 'warning') : 'muted'"
           />
           {{ statusText }}
         </span>
-      </div>
-      <div class="openrgb-body">
-        <n-checkbox v-model:checked="openrgbEnabled">Enable OpenRGB SDK server</n-checkbox>
-        <div class="port-row" v-if="openrgbEnabled">
-          <label class="muted">Port</label>
-          <n-input-number
-            v-model:value="openrgbPort"
-            size="small"
-            :min="1"
-            :max="65535"
-          />
+        <div class="openrgb-controls">
+          <label v-if="openrgbEnabled" class="port-row">
+            <span class="muted">Port</span>
+            <n-input-number
+              v-model:value="openrgbPort"
+              size="small"
+              :min="1"
+              :max="65535"
+            />
+          </label>
+          <n-checkbox v-model:checked="openrgbEnabled">Enable OpenRGB SDK server</n-checkbox>
         </div>
-        <p class="hint" v-if="openrgbEnabled">
+      </div>
+      <template v-if="openrgbEnabled">
+        <p class="hint">
           The OpenRGB SDK server binds to a TCP port without authentication. Any local process
           can control your RGB devices. While enabled, the daemon will not apply its own RGB effects.
         </p>
-        <OpenRgbRegionsToggle v-if="openrgbEnabled" />
-      </div>
+        <OpenRgbRegionsToggle />
+      </template>
     </section>
 
-    <RgbSyncEditor />
+    <div class="layout">
+      <aside class="card rgb-list">
+        <div class="list-head">
+          <span class="list-title">Lighting</span>
+          <span v-if="rgbCaps.length" class="list-count muted">{{ rgbCaps.length }} device{{ rgbCaps.length === 1 ? "" : "s" }}</span>
+        </div>
 
-    <!-- Per-device RGB cards -->
-    <RgbDeviceCard v-for="cap in rgbCaps" :key="cap.device_id" :cap="cap" />
+        <template v-if="rgbCaps.length">
+          <div
+            class="rgb-item"
+            :class="{ active: selected === QUICK_SYNC }"
+            role="button"
+            tabindex="0"
+            @click="selectedRaw = QUICK_SYNC"
+            @keydown.enter="selectedRaw = QUICK_SYNC"
+          >
+            <Layers :size="16" class="item-icon" />
+            <span class="item-text">
+              <span class="item-name">Quick Sync</span>
+              <span class="item-sub">{{ syncSummary }}</span>
+            </span>
+          </div>
+          <div class="list-divider" />
+        </template>
 
-    <div v-if="!rgbCaps.length" class="card empty-state muted">
-      No RGB-capable devices detected.
+        <div
+          v-for="cap in rgbCaps"
+          :key="cap.device_id"
+          class="rgb-item"
+          :class="{ active: cap.device_id === selected, offline: !daemon.connected }"
+          role="button"
+          tabindex="0"
+          @click="selectedRaw = cap.device_id"
+          @keydown.enter="selectedRaw = cap.device_id"
+        >
+          <component :is="isWireless(cap) ? Wifi : Palette" :size="16" class="item-icon" />
+          <span class="item-text">
+            <span class="item-name">{{ cap.device_name }}</span>
+            <span class="item-sub">
+              <span class="state" :class="`tone-${capState(cap).tone}`" :title="capState(cap).label">
+                <span class="dot" />
+                <template v-if="capState(cap).tone !== 'success'">{{ capState(cap).label }}</template>
+              </span>
+              {{ capSummary(cap) }}
+            </span>
+          </span>
+        </div>
+
+        <p v-if="!rgbCaps.length" class="list-empty muted">
+          <Palette :size="16" />
+          No RGB devices detected.
+        </p>
+      </aside>
+
+      <RgbSyncEditor v-if="selected === QUICK_SYNC" class="detail" />
+      <RgbDeviceCard v-else-if="selectedCap" :key="selectedCap.device_id" class="detail" :cap="selectedCap" />
+      <div v-else class="card detail empty muted">
+        {{ daemon.connected ? "No RGB-capable devices detected." : "Waiting for the daemon to report RGB devices." }}
+      </div>
     </div>
   </div>
 </template>
@@ -92,16 +184,17 @@ const rgbCaps = computed(() => config.rgbCaps.filter((c) => !c.rf_owned));
 .openrgb {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
 }
-.openrgb-head {
+.openrgb-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-2) var(--space-4);
 }
-.openrgb-head .section-title {
-  margin: 0;
+.openrgb-title {
+  font-weight: 600;
 }
 .status-tag {
   display: inline-flex;
@@ -111,18 +204,138 @@ const rgbCaps = computed(() => config.rgbCaps.filter((c) => !c.rf_owned));
   color: var(--text-secondary);
   white-space: nowrap;
 }
-.openrgb-body {
+.openrgb-controls {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+  align-items: center;
+  gap: var(--space-4);
+  margin-left: auto;
 }
 .port-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  font-size: var(--font-size-sm);
 }
-.empty-state {
+.port-row .n-input-number {
+  width: 110px;
+}
+.openrgb .hint {
+  margin: 0;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.rgb-list {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+}
+.list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+.list-title {
+  font-weight: 600;
+}
+.list-count {
+  font-size: var(--font-size-xs);
+}
+.list-divider {
+  height: 1px;
+  margin: var(--space-1) 0;
+  background: var(--border);
+}
+.rgb-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.rgb-item:hover {
+  background: var(--bg-hover);
+}
+.rgb-item.active {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.rgb-item.active .item-icon {
+  color: var(--accent);
+}
+.item-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--text-secondary);
+}
+.item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.item-name {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.item-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.rgb-item.offline .item-name {
+  color: var(--text-muted);
+}
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.tone-success { color: var(--success); }
+.tone-warning { color: var(--warning); }
+.tone-info { color: var(--accent); }
+.tone-muted { color: var(--text-muted); }
+.list-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-size-sm);
+}
+.empty {
   padding: var(--space-6);
   text-align: center;
+}
+@media (max-width: 760px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  .rgb-list {
+    position: static;
+  }
 }
 </style>

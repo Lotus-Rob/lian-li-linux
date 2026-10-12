@@ -209,9 +209,9 @@ function patchEffect(patch: Partial<RgbEffect>) {
 <template>
   <section class="card sync-card">
     <div class="sync-head">
-      <div>
-        <h2 class="section-title">Quick Sync</h2>
-        <p class="muted sync-description">Run one coordinated effect across multiple devices.</p>
+      <div class="title-wrap">
+        <span class="title">Quick Sync</span>
+        <span class="sync-description">Run one coordinated effect across multiple devices.</span>
       </div>
       <n-switch v-model:value="enabled" :disabled="!enabled && (participantCount < 2 || !modeOptions.some((option) => option.value === sync.effect.mode))" />
     </div>
@@ -275,13 +275,16 @@ function patchEffect(patch: Partial<RgbEffect>) {
 .sync-card, .field { display: flex; flex-direction: column; gap: var(--space-3); }
 .sync-head, .sync-device { display: flex; align-items: center; gap: var(--space-3); }
 .sync-head { justify-content: space-between; }
-.section-title, .sync-description { margin: 0; }
+.title-wrap { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-2); min-width: 0; }
+.title { font-weight: 600; }
+.sync-description { font-size: var(--font-size-xs); color: var(--text-secondary); }
+.hint { margin: 0; }
 .sync-options { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .devices { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
 .sync-device { min-height: 42px; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border); }
 .sync-device:last-child { border-bottom: 0; }
 .unavailable, .led-count { margin-left: auto; font-size: var(--font-size-sm); }
 .order-buttons { display: flex; margin-left: var(--space-1); }
-.sync-active { margin: 0; color: var(--primary-color); font-size: var(--font-size-sm); }
+.sync-active { margin: 0; color: var(--accent); font-size: var(--font-size-sm); }
 @media (max-width: 700px) { .sync-options { grid-template-columns: 1fr; } }
 </style>

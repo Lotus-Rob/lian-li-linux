@@ -1,20 +1,19 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useDialog } from "naive-ui";
-import { ChevronDown, ChevronRight, Save, Trash2, Locate } from "lucide-vue-next";
+import { Save, Trash2, Locate } from "lucide-vue-next";
 import type { RgbDeviceCapabilities } from "@/types";
 import { useRgbStore } from "@/stores/rgb";
 import { useConfigStore } from "@/stores/config";
-import { useDevicesStore } from "@/stores/devices";
 import { useIpc } from "@/composables/useIpc";
 import RgbZoneEditor from "@/components/rgb/RgbZoneEditor.vue";
 import RgbRegionEditor from "@/components/rgb/RgbRegionEditor.vue";
+import { motherboardSyncEnabled, quickSyncControls } from "@/components/rgb/syncSettings";
 
 const props = defineProps<{ cap: RgbDeviceCapabilities }>();
 
 const rgb = useRgbStore();
 const config = useConfigStore();
-const devices = useDevicesStore();
 const dialog = useDialog();
 const ipc = useIpc();
 
@@ -31,9 +30,7 @@ async function ping() {
 }
 
 const devConfig = computed(() => config.rgbDeviceConfig(props.cap.device_id));
-const device = computed(() => devices.byId(props.cap.device_id));
 
-const expanded = ref(true);
 const regional = computed(() => (props.cap.effect_regions?.length ?? 0) > 0);
 const portGroups = computed(() => (props.cap.group_effect_modes?.length ?? 0) > 0);
 const controlTab = ref<"regions" | "direct">("regions");
@@ -41,15 +38,7 @@ watch(() => devConfig.value.zones[0]?.effect.scope, (scope) => {
   if (portGroups.value) controlTab.value = scope === "Fan" ? "direct" : "regions";
 }, { immediate: true });
 const visibleZones = computed(() => devConfig.value.zones.slice(0, props.cap.zones.length));
-const syncActive = computed(() => {
-  const sync = config.ensureRgb().merge_lighting;
-  if (devConfig.value.mb_rgb_sync) return false;
-  if (!sync?.enabled || !sync.device_order.includes(props.cap.device_id)) return false;
-  if (sync.disabled_devices.includes(props.cap.device_id)) return false;
-  return sync.kind === "Continuous"
-    ? props.cap.sync_led_count != null
-    : props.cap.supported_modes.includes(sync.effect.mode);
-});
+const syncActive = computed(() => quickSyncControls(props.cap, config.ensureRgb()));
 
 watch(
   [devConfig, () => props.cap.zones.length],
@@ -78,9 +67,7 @@ watch(
 );
 
 const mbSync = computed({
-  get: () => props.cap.hardware_group_effects
-    ? config.ensureRgb().devices.some((dev) => dev.mb_rgb_sync && dev.device_id.replace(/:group\d+$/, "") === props.cap.device_id.replace(/:group\d+$/, ""))
-    : devConfig.value.mb_rgb_sync,
+  get: () => motherboardSyncEnabled(props.cap, config.ensureRgb()),
   set: (v: boolean) => {
     // MB sync is controller-wide — propagate to all sibling ports.
     const baseId = props.cap.device_id.replace(/:(?:port|group)\d+$/, "");
@@ -164,32 +151,38 @@ const summary = computed(() =>
 
 <template>
   <div class="card rgb-device">
-    <div class="head" @click="expanded = !expanded">
-      <component :is="expanded ? ChevronDown : ChevronRight" :size="16" />
-      <div class="head-info">
-        <span class="name">{{ cap.device_name }}</span>
-        <span class="muted">{{ summary }}</span>
+    <div class="head">
+      <div class="title-wrap">
+        <span class="title">{{ cap.device_name }}</span>
+        <span class="device-label">{{ summary }}</span>
       </div>
-      <button class="ping-btn" title="Identify device" @click.stop="ping">
+      <button class="ping-btn" title="Identify device" @click="ping">
         <Locate :size="14" />
       </button>
     </div>
 
-    <div v-if="expanded" class="body">
-      <p v-if="syncActive" class="sync-notice">Quick Sync controls lighting effects.<template v-if="cap.fan_led_count_control"> LED count is still editable.</template></p>
-      <div class="device-controls">
-      <div v-if="cap.supports_mb_rgb_sync" class="row" :class="{ 'sync-locked': syncActive }" :inert="syncActive || undefined">
-        <n-checkbox v-model:checked="mbSync">Motherboard ARGB Sync</n-checkbox>
-      </div>
+    <p v-if="cap.deferred_reason" class="notice warning">{{ cap.deferred_reason }}</p>
+    <p v-if="syncActive" class="notice">Quick Sync controls lighting effects.<template v-if="cap.fan_led_count_control"> LED count is still editable.</template></p>
 
-      <!-- When MB sync is active, hide zone config — the motherboard controls RGB -->
-      <template v-if="!mbSync">
-        <p v-if="cap.hardware_group_effects" class="muted">Mode, speed, brightness and direction apply to the whole group or ring. Static and Breathing support a separate color for each fan.</p>
-        <p v-if="cap.hardware_group_effects && !devConfig.regions" class="muted">Fan settings stay saved. Conflicting effects use the last fan's group settings. Compatible Static and Breathing colors combine. Use group effects below to set each group and ring.</p>
-        <div v-if="regional || portGroups" class="control-tabs" :inert="syncActive || undefined">
+    <div class="device-controls">
+      <div v-if="cap.supports_mb_rgb_sync || (!mbSync && (regional || portGroups))" class="toolbar">
+        <div v-if="!mbSync && (regional || portGroups)" class="control-tabs" :inert="syncActive || undefined">
           <n-button size="small" :type="controlTab === 'regions' ? 'primary' : 'default'" @click="controlTab = 'regions'">Group effects</n-button>
           <n-button v-if="cap.supports_direct || portGroups" size="small" :type="controlTab === 'direct' ? 'primary' : 'default'" @click="controlTab = 'direct'">Direct / zones</n-button>
         </div>
+        <n-checkbox
+          v-if="cap.supports_mb_rgb_sync"
+          v-model:checked="mbSync"
+          class="mb-sync"
+          :class="{ 'sync-locked': syncActive }"
+          :inert="syncActive || undefined"
+        >Motherboard ARGB Sync</n-checkbox>
+      </div>
+
+      <p v-if="mbSync" class="hint">The motherboard controls this device's lighting.</p>
+      <template v-else>
+        <p v-if="cap.hardware_group_effects" class="hint">Mode, speed, brightness and direction apply to the whole group or ring. Static and Breathing support a separate color for each fan.</p>
+        <p v-if="cap.hardware_group_effects && !devConfig.regions" class="hint">Fan settings stay saved. Conflicting effects use the last fan's group settings. Compatible Static and Breathing colors combine. Use group effects below to set each group and ring.</p>
         <RgbRegionEditor v-if="regional && controlTab === 'regions'" :device-id="cap.device_id" :cap="cap" :inert="syncActive || undefined" :class="{ 'sync-locked': syncActive }" />
         <RgbZoneEditor v-else-if="portGroups && controlTab === 'regions' && visibleZones[0]" :device-id="cap.device_id" :cap="cap" :zone-index="0" :zone="visibleZones[0]" :lighting-locked="syncActive" group-effects />
         <div v-if="(!regional && !portGroups) || controlTab === 'direct'" class="zones">
@@ -206,12 +199,9 @@ const summary = computed(() =>
           />
         </div>
 
-        <div v-if="!regional && !portGroups" class="actions" :class="{ 'sync-locked': syncActive }" :inert="syncActive || undefined">
-          <n-button size="small" @click="applyToAllZones">Apply to All Zones</n-button>
-        </div>
-
-        <!-- Preset bar -->
         <div class="preset-bar" :class="{ 'sync-locked': syncActive }" :inert="syncActive || undefined">
+          <n-button v-if="!regional && !portGroups" size="small" @click="applyToAllZones">Apply to All Zones</n-button>
+          <span class="preset-label muted">Preset</span>
           <n-select
             :value="activePreset"
             size="small"
@@ -220,32 +210,31 @@ const summary = computed(() =>
             @update:value="applyPreset"
             style="width: 180px"
           />
-          <n-input v-model:value="presetName" size="small" placeholder="Preset name" style="width: 140px" />
-          <n-button size="small" @click="savePreset">
-            <template #icon><Save :size="14" /></template>
-            Save As
+          <n-button
+            v-if="activePreset"
+            size="small"
+            @click="activePreset && applyPreset(activePreset)"
+          >
+            Apply
           </n-button>
           <n-button
             size="small"
             quaternary
             type="error"
+            title="Delete preset"
             :disabled="!activePreset"
             @click="activePreset && deletePreset(activePreset)"
           >
             <template #icon><Trash2 :size="14" /></template>
-        </n-button>
-        <n-button
-          v-if="activePreset"
-          size="small"
-          @click="activePreset && applyPreset(activePreset)"
-        >
-          Apply
-        </n-button>
-      </div>
+          </n-button>
+          <n-input v-model:value="presetName" size="small" placeholder="Preset name" style="width: 140px" />
+          <n-button size="small" @click="savePreset">
+            <template #icon><Save :size="14" /></template>
+            Save As
+          </n-button>
+        </div>
       </template>
-      </div>
     </div>
-    <p v-if="cap.deferred_reason" class="hint">{{ cap.deferred_reason }}</p>
   </div>
 </template>
 
@@ -258,18 +247,28 @@ const summary = computed(() =>
 .head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-2);
-  cursor: pointer;
 }
-.head-info {
+.title-wrap {
   display: flex;
-  flex-direction: column;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
 }
-.name {
+.title {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.device-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 .ping-btn {
-  margin-left: auto;
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -283,13 +282,19 @@ const summary = computed(() =>
   transition: background 0.15s, color 0.15s;
 }
 .ping-btn:hover {
-  background: var(--bg-elevated);
+  background: var(--bg-hover);
   color: var(--text-primary);
 }
-.body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
+.notice {
+  margin: 0;
+  color: var(--accent);
+  font-size: var(--font-size-sm);
+}
+.notice.warning {
+  color: var(--warning);
+}
+.hint {
+  margin: 0;
 }
 .device-controls {
   display: flex;
@@ -300,31 +305,23 @@ const summary = computed(() =>
   opacity: 0.5;
   pointer-events: none;
 }
-.sync-notice {
-  margin: 0;
-  color: var(--primary-color);
-  font-size: var(--font-size-sm);
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
 }
 .control-tabs {
   display: flex;
   gap: var(--space-2);
 }
-.row {
-  display: flex;
-}
-.card-inset {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: var(--space-3);
+.mb-sync {
+  margin-left: auto;
 }
 .zones {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-}
-.actions {
-  display: flex;
 }
 .preset-bar {
   display: flex;
@@ -333,5 +330,11 @@ const summary = computed(() =>
   flex-wrap: wrap;
   border-top: 1px solid var(--border);
   padding-top: var(--space-3);
+}
+.preset-label {
+  font-size: var(--font-size-sm);
+}
+.preset-bar > .n-button:first-child {
+  margin-right: auto;
 }
 </style>

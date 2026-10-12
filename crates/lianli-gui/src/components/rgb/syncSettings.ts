@@ -1,10 +1,29 @@
 import type {
   MergeLightingConfig,
+  RgbAppConfig,
   RgbDeviceCapabilities,
   RgbEffectParameters,
 } from "@/types";
 
 export const MATCHED_MODES = ["Rainbow", "RainbowMorph", "Static", "Breathing", "Meteor", "Runway"];
+
+export function motherboardSyncEnabled(cap: RgbDeviceCapabilities, rgb: RgbAppConfig): boolean {
+  if (!cap.hardware_group_effects) {
+    return rgb.devices.find((device) => device.device_id === cap.device_id)?.mb_rgb_sync ?? false;
+  }
+  const base = cap.device_id.replace(/:group\d+$/, "");
+  return rgb.devices.some((device) => device.mb_rgb_sync && device.device_id.replace(/:group\d+$/, "") === base);
+}
+
+export function quickSyncControls(cap: RgbDeviceCapabilities, rgb: RgbAppConfig): boolean {
+  const sync = rgb.merge_lighting;
+  if (rgb.devices.find((device) => device.device_id === cap.device_id)?.mb_rgb_sync) return false;
+  if (!sync?.enabled || !sync.device_order.includes(cap.device_id)) return false;
+  if (sync.disabled_devices.includes(cap.device_id)) return false;
+  return sync.kind === "Continuous"
+    ? cap.sync_led_count != null
+    : cap.supported_modes.includes(sync.effect.mode);
+}
 
 export function createDefaultSync(caps: RgbDeviceCapabilities[]): MergeLightingConfig {
   const deviceOrder = caps.filter((cap) => cap.sync_led_count != null).map((cap) => cap.device_id);
