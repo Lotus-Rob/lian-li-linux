@@ -132,13 +132,17 @@ impl WirelessRgbUpload {
         {
             hash = (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193);
         }
+        // A device that latches an RGB frame's leftover bytes as an address
+        // reads the first index byte as its rx slot; the high bit keeps it invalid.
+        let mut effect_index = hash.to_be_bytes();
+        effect_index[0] |= 0x80;
         Ok(Self {
             compressed,
             led_count: led_count as u8,
             frame_count,
             interval_ticks,
             interval_fraction,
-            effect_index: hash.max(1).to_be_bytes(),
+            effect_index,
             timing,
             sync_layout: false,
         })
@@ -419,6 +423,23 @@ mod tests {
         )
         .unwrap();
         assert_ne!(upload.effect_index(), changed.effect_index());
+    }
+
+    #[test]
+    fn leaked_effect_index_never_forms_a_valid_rx_slot() {
+        for red in 0..=255 {
+            let frames = [vec![[red, 0, 0]; 9]];
+            let upload = WirelessRgbUpload::new(&frames, 50, None).unwrap();
+            let index = upload.effect_index();
+            assert!(index[0] >= 0x80, "red={red} index={index:02x?}");
+            assert!(!crate::wireless::discovery::is_valid_rx(index[0]));
+            assert_eq!(
+                WirelessRgbUpload::new(&frames, 50, None)
+                    .unwrap()
+                    .effect_index(),
+                index
+            );
+        }
     }
 
     #[test]
