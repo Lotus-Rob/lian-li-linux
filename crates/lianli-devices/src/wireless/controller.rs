@@ -447,6 +447,10 @@ impl WirelessController {
             }
             thread::sleep(Duration::from_millis(50));
         }
+        anyhow::ensure!(
+            !cancel.load(Ordering::Acquire),
+            "wireless polling start cancelled"
+        );
 
         if let Some(queue) = self.pending_commands.clone() {
             let conv_stop = self.poll_stop.clone();

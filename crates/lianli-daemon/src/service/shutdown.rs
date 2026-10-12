@@ -71,6 +71,11 @@ impl ServiceManager {
 
         self.wireless_recovery.shutdown();
         self.wireless.stop();
+        if let Some((_, job)) = self.wireless_rebind_job.take() {
+            if job.join().is_err() {
+                tracing::warn!("Wireless rebind thread panicked during shutdown");
+            }
+        }
         mark("wireless", t0);
         self.openrgb.shutdown();
         mark("openrgb", t0);

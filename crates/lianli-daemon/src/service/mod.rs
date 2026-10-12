@@ -257,7 +257,7 @@ pub struct ServiceManager {
     wireless_pending_count: Option<usize>,
     wireless_pending_streak: u32,
     wireless_topology_mismatch_streak: u32,
-    wireless_rebind_job: Option<([u8; 6], thread::JoinHandle<bool>)>,
+    wireless_rebind_job: Option<wireless_rebind::RebindJob>,
     wireless_rebind: wireless_rebind::RebindSchedule,
     wireless_channel_streak: Option<(u8, u32)>,
     wireless_channel_in_flight: Arc<AtomicBool>,
@@ -528,7 +528,13 @@ impl ServiceManager {
             .take_if(|(_, job)| job.is_finished())
         {
             let now = Instant::now();
-            if job.join().unwrap_or(false) {
+            let (transmitted, error) = job
+                .join()
+                .unwrap_or_else(|_| (false, Some("rebind thread panicked".into())));
+            if transmitted {
+                if let Some(error) = &error {
+                    warn!("Auto-rebind failed for {:02x?}: {error}", mac);
+                }
                 let attempt = self.wireless_rebind.record_attempt(mac, now);
                 if attempt == wireless_rebind::MAX_ATTEMPTS {
                     warn!(
@@ -537,7 +543,12 @@ impl ServiceManager {
                     );
                 }
             } else {
-                self.wireless_rebind.defer(mac, now);
+                let error = error.unwrap_or_default();
+                if self.wireless_rebind.defer(mac, now, &error) {
+                    warn!("Auto-rebind for {:02x?} deferred: {error}", mac);
+                } else {
+                    debug!("Auto-rebind for {:02x?} deferred again: {error}", mac);
+                }
             }
         }
         if self.wireless_rebind_job.is_some() || !self.wireless.is_connected() {
@@ -561,19 +572,23 @@ impl ServiceManager {
             return;
         };
 
-        info!(
-            "Auto-rebinding configured wireless device {:02x?} ({}/{})",
-            mac,
-            self.wireless_rebind.attempts(&mac) + 1,
-            wireless_rebind::MAX_ATTEMPTS
-        );
+        let attempt = self.wireless_rebind.attempts(&mac) + 1;
+        if self.wireless_rebind.deferred(&mac) {
+            debug!("Retrying deferred auto-rebind for {:02x?}", mac);
+        } else {
+            info!(
+                "Auto-rebinding configured wireless device {:02x?} ({attempt}/{})",
+                mac,
+                wireless_rebind::MAX_ATTEMPTS
+            );
+        }
         let wireless = self.wireless.clone();
         let job = thread::spawn(move || {
             let result = wireless.bind_device(&mac);
-            if let Err(e) = &result {
-                warn!("Auto-rebind failed for {:02x?}: {e:#}", mac);
-            }
-            lianli_devices::wireless::bind_transmitted(&result)
+            (
+                lianli_devices::wireless::bind_transmitted(&result),
+                result.err().map(|error| format!("{error:#}")),
+            )
         });
         self.wireless_rebind_job = Some((mac, job));
     }

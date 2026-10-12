@@ -5,9 +5,13 @@ const FIRST_RETRY: Duration = Duration::from_secs(30);
 const MAX_RETRY: Duration = Duration::from_secs(600);
 pub(super) const MAX_ATTEMPTS: u32 = 8;
 
+/// The bind thread reports whether it transmitted and why it failed.
+pub(super) type RebindJob = ([u8; 6], std::thread::JoinHandle<(bool, Option<String>)>);
+
 struct RebindBackoff {
     attempts: u32,
     next_at: Instant,
+    deferred: Option<String>,
 }
 
 /// Paces automatic rebinds per device. A device that keeps corrupting its
@@ -29,7 +33,9 @@ impl RebindSchedule {
         let entry = self.devices.entry(mac).or_insert(RebindBackoff {
             attempts: 0,
             next_at: now,
+            deferred: None,
         });
+        entry.deferred = None;
         let wait = FIRST_RETRY
             .saturating_mul(1 << entry.attempts.min(5))
             .min(MAX_RETRY);
@@ -43,12 +49,25 @@ impl RebindSchedule {
     }
 
     /// A bind that never reached the radio waits without spending an attempt.
-    pub(super) fn defer(&mut self, mac: [u8; 6], now: Instant) {
+    /// Returns whether the reason differs from the previous deferral.
+    pub(super) fn defer(&mut self, mac: [u8; 6], now: Instant, reason: &str) -> bool {
         let entry = self.devices.entry(mac).or_insert(RebindBackoff {
             attempts: 0,
             next_at: now,
+            deferred: None,
         });
         entry.next_at = entry.next_at.max(now + FIRST_RETRY);
+        if entry.deferred.as_deref() == Some(reason) {
+            return false;
+        }
+        entry.deferred = Some(reason.to_owned());
+        true
+    }
+
+    pub(super) fn deferred(&self, mac: &[u8; 6]) -> bool {
+        self.devices
+            .get(mac)
+            .is_some_and(|entry| entry.deferred.is_some())
     }
 
     pub(super) fn retain(&mut self, mut pending: impl FnMut(&[u8; 6]) -> bool) {
@@ -82,10 +101,13 @@ mod tests {
         let mac = [1; 6];
         let now = Instant::now();
         let mut schedule = RebindSchedule::default();
+        assert!(schedule.defer(mac, now, "slot limit"));
         for _ in 0..20 {
-            schedule.defer(mac, now);
+            assert!(!schedule.defer(mac, now, "slot limit"));
         }
+        assert!(schedule.defer(mac, now, "TX unavailable"));
         assert_eq!(schedule.attempts(&mac), 0);
+        assert!(schedule.deferred(&mac));
         assert!(!schedule.due(&mac, now + FIRST_RETRY - Duration::from_secs(1)));
         assert!(schedule.due(&mac, now + FIRST_RETRY));
     }
