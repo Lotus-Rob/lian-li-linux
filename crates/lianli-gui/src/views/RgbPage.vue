@@ -194,7 +194,6 @@ function capSummary(cap: RgbDeviceCapabilities): string {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  max-width: 1100px;
 }
 .openrgb {
   display: flex;

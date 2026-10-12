@@ -254,7 +254,6 @@ function addLcd(deviceId: string) {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  max-width: 1100px;
 }
 .wireless-row {
   display: flex;

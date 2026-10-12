@@ -46,7 +46,6 @@ async function refresh() {
 <style scoped>
 .page {
   width: 100%;
-  max-width: 1100px;
 }
 .page-head {
   display: flex;
