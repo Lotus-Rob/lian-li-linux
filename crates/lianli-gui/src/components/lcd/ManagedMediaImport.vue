@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { onUnmounted, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useDaemonStore } from "@/stores/daemon";
 import { useConfigStore } from "@/stores/config";
+import { useDevicesStore } from "@/stores/devices";
+import { useLcdScreensStore } from "@/stores/lcdScreens";
+import { lcdDeviceLabels, lcdEntryKey, resolveLcdDevice } from "@/utils/lcdSelection";
 import type { LcdConfig, LcdTemplate } from "@/types";
 
 const props = defineProps<{ lcds: LcdConfig[]; templates: LcdTemplate[] }>();
@@ -11,6 +14,31 @@ interface Result { import_id: string; lcds: LcdConfig[]; templates: LcdTemplate[
 interface Status { id: string; active: boolean; result: Result | null; error: string | null }
 const daemon = useDaemonStore();
 const config = useConfigStore();
+const devices = useDevicesStore();
+const screens = useLcdScreensStore();
+
+function screenName(entry: LcdConfig): string {
+  const device = resolveLcdDevice(entry, devices.lcdDevices);
+  const label = device ? lcdDeviceLabels(devices.lcdDevices).get(device.device_id) ?? device.name : null;
+  return screens.names[lcdEntryKey(entry)] || label || "Screen offline";
+}
+
+const incomplete = computed(() =>
+  props.lcds.flatMap((entry) => {
+    if (["image", "gif", "video"].includes(entry.type) && !entry.path) return [`${screenName(entry)}: choose a file`];
+    if (entry.type === "custom" && !entry.template_id) return [`${screenName(entry)}: choose a template`];
+    return [];
+  }),
+);
+
+function readableError(message: string): string {
+  return message.replace(/LCD\[(serial|index):([^\]]+)\]/g, (match, kind: string, id: string) => {
+    const key = kind === "serial" ? `serial:${id.replace(/^hid:/, "")}` : `index:${id}`;
+    const entry = props.lcds.find((candidate) => lcdEntryKey(candidate) === key);
+    return entry ? screenName(entry) : match;
+  });
+}
+
 const status = ref<Status | null>(null);
 const busy = ref(false);
 const error = ref("");
@@ -63,7 +91,7 @@ async function check() {
     status.value = value;
     pending.value = "";
     pendingChecks = 0;
-    error.value = value?.error ?? "";
+    error.value = value?.error ? `Import failed: ${value.error}` : "";
     notice.value = value?.active ? "Copying and checking media. You can close this page while it finishes."
       : value?.result ? "Copies are ready. Review and stage them below, then Save to apply."
         : value ? "Import did not complete. Inspect the reported error before retrying." : "No import is recorded for this desktop session.";
@@ -76,7 +104,7 @@ async function check() {
 }
 
 async function start() {
-  if (busy.value || status.value?.active || pending.value || !daemon.info || config.imported) return;
+  if (busy.value || status.value?.active || pending.value || !daemon.info || config.imported || incomplete.value.length) return;
   const current = ++revision;
   clearTimeout(timer);
   busy.value = true;
@@ -121,14 +149,17 @@ async function stage() {
   <n-card title="Managed media copies" size="small">
     <p>Copy selected media and template assets into daemon-managed storage. Originals stay unchanged. Native imports require authorization. Distrobox supports either daemon mode under the same account and inside the same box.</p>
     <n-space>
-      <n-button :disabled="busy || !daemon.connected || !lcds.length || !!config.imported || !!status?.active || !!pending" @click="start">Copy into managed storage</n-button>
+      <n-button :disabled="busy || !daemon.connected || !lcds.length || !!incomplete.length || !!config.imported || !!status?.active || !!pending" @click="start">Copy into managed storage</n-button>
       <n-button :disabled="busy" @click="check">Check import progress</n-button>
     </n-space>
     <p v-if="notice" role="status">{{ notice }}</p>
-    <n-alert v-if="error" type="error">{{ error }}</n-alert>
+    <n-alert v-if="incomplete.length" type="warning" title="Finish these screens before copying">
+      <ul class="incomplete"><li v-for="item in incomplete" :key="item">{{ item }}</li></ul>
+    </n-alert>
+    <n-alert v-if="error" type="error">{{ readableError(error) }}</n-alert>
     <template v-if="status?.result">
       <p>{{ status.result.lcds.length }} LCD selections · {{ status.result.templates.length }} templates copied</p>
-      <ul><li v-for="(lcd, index) in status.result.lcds" :key="index">LCD {{ index + 1 }}: {{ lcd.path ?? lcd.template_id ?? lcd.type }}</li></ul>
+      <ul><li v-for="(lcd, index) in status.result.lcds" :key="index">{{ screenName(lcd) }}: {{ lcd.path ?? lcd.template_id ?? lcd.type }}</li></ul>
       <n-checkbox v-model:checked="confirmed" :disabled="busy || !!config.imported">Replace my current LCD drafts and matching templates with this copied selection.</n-checkbox>
       <n-button :disabled="busy || !confirmed || !!config.imported || !daemon.connected" @click="stage">Stage copied paths</n-button>
     </template>
@@ -138,4 +169,5 @@ async function stage() {
 <style scoped>
 p { margin: var(--space-2) 0; }
 li { overflow-wrap: anywhere; }
+.incomplete { margin: 0; padding-left: var(--space-4); }
 </style>
