@@ -290,6 +290,10 @@ impl WirelessController {
     }
 
     pub fn start_polling(&mut self) -> Result<()> {
+        self.start_polling_with_cancel(&AtomicBool::new(false))
+    }
+
+    pub(super) fn start_polling_with_cancel(&mut self, cancel: &AtomicBool) -> Result<()> {
         anyhow::ensure!(
             self.poll_thread.is_none() && self.convergence_thread.is_none(),
             "wireless workers already started"
@@ -299,7 +303,7 @@ impl WirelessController {
             !self.poll_stop.load(Ordering::Acquire),
             "wireless connection stopped; reconnect before polling"
         );
-        match self.start_workers() {
+        match self.start_workers(cancel) {
             Ok(()) => {
                 self.runtime_claim = Some(claim);
                 Ok(())
@@ -312,7 +316,7 @@ impl WirelessController {
         }
     }
 
-    fn start_workers(&mut self) -> Result<()> {
+    fn start_workers(&mut self, cancel: &AtomicBool) -> Result<()> {
         let tx = self
             .tx
             .as_ref()
@@ -324,7 +328,11 @@ impl WirelessController {
             .cloned()
             .context("RX device must be connected for device discovery")?;
 
-        thread::sleep(Duration::from_millis(500));
+        wait_for_poll(cancel, Duration::from_millis(500));
+        anyhow::ensure!(
+            !cancel.load(Ordering::Acquire),
+            "wireless polling start cancelled"
+        );
 
         self.video_mode_active.store(false, Ordering::Release);
 
@@ -432,6 +440,9 @@ impl WirelessController {
             }
             if std::time::Instant::now() >= deadline {
                 warn!("Wireless discovery timed out (5s) — will retry in background");
+                break;
+            }
+            if cancel.load(Ordering::Acquire) {
                 break;
             }
             thread::sleep(Duration::from_millis(50));
@@ -578,6 +589,7 @@ impl WirelessController {
         let result = with_transport_recovery(tx, &TX_IDS, "TX", &self.poll_stop, op);
         match &result {
             Ok(_) => self.tx_failures.store(0, Ordering::Relaxed),
+            Err(_) if self.poll_stop.load(Ordering::Acquire) => {}
             Err(_) => {
                 let n = self.tx_failures.fetch_add(1, Ordering::Relaxed) + 1;
                 if n == TX_FAILURE_THRESHOLD {

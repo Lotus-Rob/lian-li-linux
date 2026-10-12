@@ -18,6 +18,7 @@ mod transport;
 mod v2_hid;
 
 pub use aio::pump_rpm_to_timer;
+pub use bind::bind_transmitted;
 pub use clock_sync::{build_payload, SensorSnapshot};
 pub use controller::WirelessController;
 pub use discovery::DiscoveredDevice;

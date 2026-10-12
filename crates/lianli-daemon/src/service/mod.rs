@@ -257,7 +257,7 @@ pub struct ServiceManager {
     wireless_pending_count: Option<usize>,
     wireless_pending_streak: u32,
     wireless_topology_mismatch_streak: u32,
-    wireless_rebind_in_flight: Arc<AtomicBool>,
+    wireless_rebind_job: Option<([u8; 6], thread::JoinHandle<bool>)>,
     wireless_rebind: wireless_rebind::RebindSchedule,
     wireless_channel_streak: Option<(u8, u32)>,
     wireless_channel_in_flight: Arc<AtomicBool>,
@@ -330,7 +330,7 @@ impl ServiceManager {
             wireless_pending_count: None,
             wireless_pending_streak: 0,
             wireless_topology_mismatch_streak: 0,
-            wireless_rebind_in_flight: Arc::new(AtomicBool::new(false)),
+            wireless_rebind_job: None,
             wireless_rebind: Default::default(),
             wireless_channel_streak: None,
             wireless_channel_in_flight: Arc::new(AtomicBool::new(false)),
@@ -523,7 +523,24 @@ impl ServiceManager {
     }
 
     fn run_wireless_rebind_supervisor(&mut self) {
-        if self.wireless_rebind_in_flight.load(Ordering::Relaxed) {
+        if let Some((mac, job)) = self
+            .wireless_rebind_job
+            .take_if(|(_, job)| job.is_finished())
+        {
+            let now = Instant::now();
+            if job.join().unwrap_or(false) {
+                let attempt = self.wireless_rebind.record_attempt(mac, now);
+                if attempt == wireless_rebind::MAX_ATTEMPTS {
+                    warn!(
+                        "Auto-rebind attempts exhausted for {:02x?}; rebind it manually if it stays unreachable",
+                        mac
+                    );
+                }
+            } else {
+                self.wireless_rebind.defer(mac, now);
+            }
+        }
+        if self.wireless_rebind_job.is_some() || !self.wireless.is_connected() {
             return;
         }
         let wireless = &self.wireless;
@@ -544,31 +561,21 @@ impl ServiceManager {
             return;
         };
 
-        let attempt = self.wireless_rebind.record_attempt(mac, now);
-        if attempt == wireless_rebind::MAX_ATTEMPTS {
-            warn!(
-                "Auto-rebinding configured wireless device {:02x?} for the last time \
-                 ({attempt}/{}); rebind it manually if it stays unreachable",
-                mac,
-                wireless_rebind::MAX_ATTEMPTS
-            );
-        } else {
-            info!(
-                "Auto-rebinding configured wireless device {:02x?} ({attempt}/{})",
-                mac,
-                wireless_rebind::MAX_ATTEMPTS
-            );
-        }
-        self.wireless_rebind_in_flight
-            .store(true, Ordering::Relaxed);
+        info!(
+            "Auto-rebinding configured wireless device {:02x?} ({}/{})",
+            mac,
+            self.wireless_rebind.attempts(&mac) + 1,
+            wireless_rebind::MAX_ATTEMPTS
+        );
         let wireless = self.wireless.clone();
-        let in_flight = Arc::clone(&self.wireless_rebind_in_flight);
-        thread::spawn(move || {
-            if let Err(e) = wireless.bind_device(&mac) {
+        let job = thread::spawn(move || {
+            let result = wireless.bind_device(&mac);
+            if let Err(e) = &result {
                 warn!("Auto-rebind failed for {:02x?}: {e:#}", mac);
             }
-            in_flight.store(false, Ordering::Relaxed);
+            lianli_devices::wireless::bind_transmitted(&result)
         });
+        self.wireless_rebind_job = Some((mac, job));
     }
 
     /// Move our dongle off a channel shared with another master. The

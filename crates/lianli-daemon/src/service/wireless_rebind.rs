@@ -38,6 +38,19 @@ impl RebindSchedule {
         entry.attempts
     }
 
+    pub(super) fn attempts(&self, mac: &[u8; 6]) -> u32 {
+        self.devices.get(mac).map_or(0, |entry| entry.attempts)
+    }
+
+    /// A bind that never reached the radio waits without spending an attempt.
+    pub(super) fn defer(&mut self, mac: [u8; 6], now: Instant) {
+        let entry = self.devices.entry(mac).or_insert(RebindBackoff {
+            attempts: 0,
+            next_at: now,
+        });
+        entry.next_at = entry.next_at.max(now + FIRST_RETRY);
+    }
+
     pub(super) fn retain(&mut self, mut pending: impl FnMut(&[u8; 6]) -> bool) {
         self.devices.retain(|mac, _| pending(mac));
     }
@@ -62,6 +75,19 @@ mod tests {
         assert_eq!(schedule.record_attempt(mac, now), MAX_ATTEMPTS);
         assert!(!schedule.due(&mac, now + Duration::from_secs(3600)));
         assert!(schedule.due(&[2; 6], now));
+    }
+
+    #[test]
+    fn untransmitted_binds_wait_without_spending_attempts() {
+        let mac = [1; 6];
+        let now = Instant::now();
+        let mut schedule = RebindSchedule::default();
+        for _ in 0..20 {
+            schedule.defer(mac, now);
+        }
+        assert_eq!(schedule.attempts(&mac), 0);
+        assert!(!schedule.due(&mac, now + FIRST_RETRY - Duration::from_secs(1)));
+        assert!(schedule.due(&mac, now + FIRST_RETRY));
     }
 
     #[test]

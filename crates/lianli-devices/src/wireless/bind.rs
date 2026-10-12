@@ -176,12 +176,13 @@ impl WirelessController {
                 return Ok(());
             }
             if Instant::now() >= deadline {
-                bail!(
+                return Err(BindNotConverged(format!(
                     "bind convergence for {:02x?} timed out after {attempts} attempt(s); observed={:?} ch={}",
                     mac,
                     observed.map(|o| (o.0, o.1)),
                     observed.map(|o| o.2).unwrap_or(0)
-                );
+                ))
+                .into());
             }
         }
     }
@@ -315,6 +316,26 @@ fn build_bind_packet(
     data
 }
 
+#[derive(Debug)]
+struct BindNotConverged(String);
+
+impl std::fmt::Display for BindNotConverged {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for BindNotConverged {}
+
+/// Whether a bind attempt reached the radio: it either converged or the
+/// device ignored the transmitted frames.
+pub fn bind_transmitted(result: &Result<()>) -> bool {
+    result
+        .as_ref()
+        .err()
+        .is_none_or(|error| error.downcast_ref::<BindNotConverged>().is_some())
+}
+
 struct BindingGuard(std::sync::Arc<parking_lot::Mutex<Option<[u8; 6]>>>);
 
 impl Drop for BindingGuard {
@@ -388,6 +409,19 @@ mod tests {
         assert!(data[21..].iter().all(|byte| *byte == 0));
         let unbind = build_bind_packet(&device, &[0; 6], 0, 8, 0);
         assert_eq!(&unbind[8..17], &[0, 0, 0, 0, 0, 0, 0, 8, 0]);
+    }
+
+    #[test]
+    fn only_converged_or_ignored_binds_count_as_transmitted() {
+        let c = controller_with([9; 6], false);
+        let mac = [1, 2, 3, 4, 5, 6];
+        seed_device(&c, &mac, [9; 6], true);
+        let never_sent = c.bind_device(&mac);
+        assert!(never_sent.is_err());
+        assert!(!bind_transmitted(&never_sent));
+        assert!(bind_transmitted(&Ok(())));
+        let ignored: Result<()> = Err(BindNotConverged("timed out".into()).into());
+        assert!(bind_transmitted(&ignored));
     }
 
     #[test]

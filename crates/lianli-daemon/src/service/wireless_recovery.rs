@@ -182,8 +182,8 @@ impl ServiceManager {
         if self.controllers.fan.is_some() || self.controllers.aio.is_some() {
             self.start_fan_control();
             self.start_aio_control();
-            self.rebuild_rgb_controller();
         }
+        self.rebuild_rgb_controller();
     }
 
     fn wireless_configured(&self) -> bool {

@@ -15,6 +15,7 @@ const RESET_BACKOFF: [Duration; 3] = [
     Duration::from_secs(120),
 ];
 const SLOW_RETRY: Duration = Duration::from_secs(300);
+const HEALTHY_LINK: Duration = Duration::from_secs(300);
 const REENUMERATION_WAIT: Duration = Duration::from_secs(5);
 const REENUMERATION_POLL: Duration = Duration::from_millis(250);
 
@@ -122,36 +123,51 @@ pub struct RecoveryAttempt {
 }
 
 /// Paces reconnects: three fast companion resets, then one every five minutes.
-/// Hotplug only advances the next attempt, since a reset re-enumerates the
-/// dongle and must not refill its own budget.
+/// Hotplug and short-lived links only advance the next attempt; the reset
+/// budget refills only after the link has stayed up, since a reset
+/// re-enumerates the dongle and a flapping link must not refill its own budget.
 #[derive(Debug, Default)]
 pub struct RecoveryLadder {
     resets: usize,
     last_reset: Option<Instant>,
     due: Option<Instant>,
+    connected_at: Option<Instant>,
 }
 
 impl RecoveryLadder {
     pub fn next_attempt(&self, now: Instant) -> Option<RecoveryPlan> {
+        if self.settled(now) {
+            return Some(RecoveryPlan { allow_reset: true });
+        }
         if self.due.is_some_and(|due| now < due) {
             return None;
         }
-        let allow_reset = self.resets < RESET_BACKOFF.len()
-            || self
-                .last_reset
-                .is_none_or(|last| now.duration_since(last) >= SLOW_RETRY);
+        let spacing = match self.resets {
+            0 => Duration::ZERO,
+            1 => RESET_BACKOFF[0],
+            2 => RESET_BACKOFF[1],
+            _ => SLOW_RETRY,
+        };
+        let allow_reset = self
+            .last_reset
+            .is_none_or(|last| now.duration_since(last) >= spacing);
         Some(RecoveryPlan { allow_reset })
     }
 
     pub fn record(&mut self, attempt: &RecoveryAttempt, now: Instant) {
-        if attempt.result.is_ok() {
+        if self.settled(now) {
             *self = Self::default();
-            return;
         }
         if attempt.reset.is_some() {
             self.resets += 1;
             self.last_reset = Some(now);
         }
+        if attempt.result.is_ok() {
+            self.connected_at = Some(now);
+            self.due = None;
+            return;
+        }
+        self.connected_at = None;
         let wait = match self.resets.checked_sub(1) {
             None => RESET_BACKOFF[0],
             Some(index) => RESET_BACKOFF.get(index).copied().unwrap_or(SLOW_RETRY),
@@ -167,6 +183,11 @@ impl RecoveryLadder {
 
     pub fn hotplug(&mut self, now: Instant) {
         self.due = Some(now);
+    }
+
+    fn settled(&self, now: Instant) -> bool {
+        self.connected_at
+            .is_some_and(|since| now.duration_since(since) >= HEALTHY_LINK)
     }
 
     pub fn resets(&self) -> usize {
@@ -283,7 +304,7 @@ impl WirelessController {
     fn connect_and_poll(&mut self, cancel: &AtomicBool) -> Result<()> {
         self.connect_with_cancel(cancel)?;
         anyhow::ensure!(!cancelled(cancel), "wireless recovery cancelled");
-        self.start_polling()
+        self.start_polling_with_cancel(cancel)
     }
 }
 
@@ -364,25 +385,56 @@ mod tests {
         assert_eq!(ladder.resets(), 3);
     }
 
+    fn connected() -> RecoveryAttempt {
+        RecoveryAttempt {
+            reset: None,
+            result: Ok(()),
+        }
+    }
+
     #[test]
-    fn success_restores_the_full_ladder() {
+    fn link_that_stays_up_restores_the_full_ladder() {
         let now = Instant::now();
         let mut ladder = RecoveryLadder::default();
         for _ in 0..4 {
             ladder.record(&failed(Some(Dongle::Rx)), now);
         }
-        ladder.record(
-            &RecoveryAttempt {
-                reset: None,
-                result: Ok(()),
-            },
-            now,
-        );
-        assert_eq!(ladder.resets(), 0);
+        ladder.record(&connected(), now);
+        let lost = now + HEALTHY_LINK;
         assert_eq!(
-            ladder.next_attempt(now),
+            ladder.next_attempt(lost),
             Some(RecoveryPlan { allow_reset: true })
         );
+        ladder.record(&failed(Some(Dongle::Rx)), lost);
+        assert_eq!(ladder.resets(), 1);
+    }
+
+    #[test]
+    fn flapping_link_keeps_the_reset_budget_and_spacing() {
+        let mut now = Instant::now();
+        let mut ladder = RecoveryLadder::default();
+        let mut resets = Vec::new();
+        for _ in 0..80 {
+            let plan = ladder
+                .next_attempt(now)
+                .expect("a lost link retries at once");
+            if plan.allow_reset {
+                resets.push(now);
+            }
+            ladder.record(
+                &RecoveryAttempt {
+                    reset: plan.allow_reset.then_some(Dongle::Tx),
+                    result: Ok(()),
+                },
+                now,
+            );
+            now += Duration::from_secs(5);
+        }
+        let gaps: Vec<u64> = resets
+            .windows(2)
+            .map(|pair| pair[1].duration_since(pair[0]).as_secs())
+            .collect();
+        assert_eq!(gaps, [10, 30, 300]);
     }
 
     #[test]
