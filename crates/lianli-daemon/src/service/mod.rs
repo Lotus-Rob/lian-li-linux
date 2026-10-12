@@ -1003,10 +1003,10 @@ impl ServiceManager {
                         }
                     };
                     if let Some(mut target) = removed {
-                        self.lcd_transfer_recovery.insert(
-                            target.device_identity.clone(),
-                            target.take_transfer_recovery(),
-                        );
+                        if let Some(recovery) = target.take_transfer_recovery() {
+                            self.lcd_transfer_recovery
+                                .insert(target.device_identity.clone(), recovery);
+                        }
                         self.record_playback_failure(target_index, &key, error);
                         drop(target);
                     }

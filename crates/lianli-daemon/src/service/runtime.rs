@@ -1814,19 +1814,33 @@ impl ActiveTarget {
         self.removal_event(error)
     }
 
-    pub(super) fn take_transfer_recovery(&mut self) -> TransferRecovery {
-        std::mem::take(&mut self.transfer_recovery).for_replacement()
+    /// The budget a replacement must continue, if any recreation has been spent.
+    pub(super) fn take_transfer_recovery(&mut self) -> Option<TransferRecovery> {
+        let recovery = std::mem::take(&mut self.transfer_recovery).for_replacement();
+        (recovery.attempts > 0).then_some(recovery)
     }
 
     pub(super) fn restore_transfer_recovery(&mut self, recovery: TransferRecovery) {
         self.transfer_recovery = recovery;
     }
 
-    pub(super) fn retry_failed_source(&mut self) {
+    /// Explicit user retry: recreate an interrupted LCD now with a fresh budget.
+    pub(super) fn retry_interrupted_transfer(&mut self) {
         if !self.is_initialized() || self.removal.is_some() {
             return;
         }
         if self.transfer_recovery.retry_now(Instant::now()) {
+            info!(
+                "[devices] LCD[{}] retrying after an interrupted transfer",
+                self.index
+            );
+        }
+    }
+
+    /// A wedged LCD is left to its recreation backoff; restarting media in
+    /// place cannot reach it.
+    pub(super) fn retry_failed_source(&mut self) {
+        if !self.is_initialized() || self.removal.is_some() || self.transfer_recovery.pending {
             return;
         }
         if self.source_failed || self.media_stage == lianli_shared::ipc::MediaRuntimeStage::Failed {
@@ -2750,17 +2764,27 @@ mod tests {
             true,
             None,
         );
-        replacement.retry_failed_source();
+        replacement.retry_interrupted_transfer();
         assert!(replacement.due_transfer_recovery(Instant::now()).is_none());
-        replacement.restore_transfer_recovery(target.take_transfer_recovery());
+        assert!(replacement.take_transfer_recovery().is_none());
+        replacement.restore_transfer_recovery(target.take_transfer_recovery().unwrap());
         assert!(matches!(
             fail_stream(&mut replacement),
             Err(SendError::Interrupted(_))
         ));
+
+        replacement.retry_failed_source();
+        assert_eq!(
+            replacement.media_status().stage,
+            lianli_shared::ipc::MediaRuntimeStage::Failed
+        );
         assert!(replacement
             .due_transfer_recovery(Instant::now() + Duration::from_millis(1500))
             .is_none());
-        replacement.retry_failed_source();
+        assert_eq!(replacement.transfer_recovery.attempts, 2);
+
+        replacement.retry_interrupted_transfer();
+        assert_eq!(replacement.transfer_recovery.attempts, 0);
         assert!(matches!(
             replacement.due_transfer_recovery(Instant::now()),
             Some(DaemonEvent::RemoveFailedLcd { .. })

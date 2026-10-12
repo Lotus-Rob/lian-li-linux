@@ -168,6 +168,9 @@ impl ServiceManager {
             self.ipc.state.lock().media_retry_pending && !self.media_preparation.is_busy();
         if retry_ready {
             self.media_reload_pending = true;
+            for target in self.targets.lock().values_mut() {
+                target.retry_interrupted_transfer();
+            }
         }
         if self.media_reload_pending
             && self.pixel_clean_sessions.is_empty()
@@ -335,12 +338,13 @@ impl ServiceManager {
             });
         }
 
-        self.ipc.state.lock().state_health.retain_lcds(
-            &candidates
-                .iter()
-                .map(|candidate| candidate.device_id.clone())
-                .collect(),
-        );
+        let present: HashSet<String> = candidates
+            .iter()
+            .map(|candidate| candidate.device_id.clone())
+            .collect();
+        self.lcd_transfer_recovery
+            .retain(|device_id, _| present.contains(device_id));
+        self.ipc.state.lock().state_health.retain_lcds(&present);
         let mut new_targets = HashMap::new();
         let mut new_media_targets = HashMap::new();
         let mut canonicalize: Vec<(String, String)> = Vec::new();

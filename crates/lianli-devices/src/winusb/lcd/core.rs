@@ -269,25 +269,23 @@ impl LcdLink {
     /// caller already holds. No USB port reset is involved: that would take
     /// down composite siblings like the LED MCU, and on the HydroShift II
     /// locks the header until a power cycle.
-    fn reopen_locked(&self, bulk: &mut RusbBulk, name: &str) -> Result<()> {
-        self.reopen_locked_until(bulk, name, Instant::now() + Duration::from_secs(10))
-    }
-
     fn reopen_locked_until(
         &self,
         bulk: &mut RusbBulk,
         name: &str,
         deadline: Instant,
+        cancelled: &dyn Fn() -> bool,
     ) -> Result<()> {
         let raw = self
             .raw_device
             .as_ref()
             .context("no raw device handle to reopen from")?;
+        anyhow::ensure!(!cancelled(), "LCD reopen cancelled");
         // Release the old claims before opening a replacement, avoiding EBUSY.
         bulk.release();
         std::thread::sleep(remaining_timeout(deadline, REOPEN_DELAY)?);
         let mut t = RusbBulk::open_device(raw.clone()).context("reopening device")?;
-        t.detach_and_configure_with_cancel(name, || Instant::now() >= deadline)
+        t.detach_and_configure_with_cancel(name, || Instant::now() >= deadline || cancelled())
             .context("configuring reopened device")?;
         *bulk = t;
         self.h264_chunk_size.clear();
@@ -296,9 +294,14 @@ impl LcdLink {
 
     /// Reopen the handle from the raw device. Used by the LCD driver's
     /// write-error recovery.
-    pub(crate) fn reopen(&self, name: &str) -> Result<()> {
+    pub(crate) fn reopen(&self, name: &str, cancelled: &dyn Fn() -> bool) -> Result<()> {
         let mut bulk = self.bulk.lock();
-        self.reopen_locked(&mut bulk, name)
+        self.reopen_locked_until(
+            &mut bulk,
+            name,
+            Instant::now() + Duration::from_secs(10),
+            cancelled,
+        )
     }
 
     /// Write PushRgbData (or any command the panel goes quiet after) and
@@ -381,7 +384,7 @@ impl LcdLink {
         let recovered = lianli_transport::usb::with_teardown_io(
             deadline.saturating_duration_since(Instant::now()),
             || -> Result<()> {
-                self.reopen_locked_until(&mut bulk, name, deadline)?;
+                self.reopen_locked_until(&mut bulk, name, deadline, &|| false)?;
                 bulk.read_flush();
                 let mut builder = PacketBuilder::new();
                 loop {
@@ -531,6 +534,9 @@ const PANEL_POLL_READ: Duration = Duration::from_millis(500);
 const HOLD_MIN_INTERVAL: Duration = Duration::from_secs(3);
 /// Chunk writes slower than this are logged: the panel NAKed bulk OUT.
 const SLOW_CHUNK_WRITE: Duration = Duration::from_millis(100);
+/// A panel that stalls again this soon after a resend escalates to the
+/// daemon's bounded recreation instead of looping on reopen and resend.
+const CHUNK_RESEND_COOLDOWN: Duration = Duration::from_secs(60);
 const WAIT_BUFFER_POLL: Duration = Duration::from_millis(50);
 const WAIT_BUFFER_NO_STOP_CAP: u32 = 600;
 
@@ -569,6 +575,7 @@ pub(crate) struct WinUsbLcdCore {
     playback: PlaybackState,
     stop_play_supported: bool,
     resend_stalled_chunk: bool,
+    last_chunk_resend: Option<Instant>,
 }
 
 /// Read the serial the kernel cached at enumeration, matching on bus/device
@@ -655,6 +662,7 @@ impl WinUsbLcdCore {
             playback: PlaybackState::default(),
             stop_play_supported,
             resend_stalled_chunk: true,
+            last_chunk_resend: None,
         })
     }
 
@@ -682,6 +690,7 @@ impl WinUsbLcdCore {
             playback: PlaybackState::default(),
             stop_play_supported,
             resend_stalled_chunk: true,
+            last_chunk_resend: None,
         }
     }
 
@@ -786,9 +795,13 @@ impl WinUsbLcdCore {
     /// session without a USB port reset (which would take down composite
     /// siblings like the LED MCU). Falls back to clear_halt when no raw device
     /// is available (shared-transport path).
-    fn try_recover(&mut self) -> Result<()> {
-        if lianli_transport::usb::shutting_down() {
-            bail!("shutting down; skipping recovery");
+    fn try_recover(&mut self, stop: Option<&AtomicBool>) -> Result<()> {
+        let cancelled = || {
+            lianli_transport::usb::shutting_down()
+                || stop.is_some_and(|stop| stop.load(Ordering::Acquire))
+        };
+        if cancelled() {
+            bail!("LCD stopping; skipping recovery");
         }
         if self.device_gone {
             bail!("device handle is stale; re-discovery required");
@@ -796,11 +809,18 @@ impl WinUsbLcdCore {
         self.consecutive_failures += 1;
 
         if self.transport.can_reopen() {
-            match self.transport.reopen(&self.name) {
+            match self.transport.reopen(&self.name, &cancelled) {
                 Ok(()) => {
                     self.consecutive_failures = 0;
                     debug!("recovered via close+reopen");
                     return Ok(());
+                }
+                Err(e) if cancelled() => {
+                    return Err(e.context("LCD stopping; recovery abandoned"));
+                }
+                Err(e) if device_unplugged(&e) => {
+                    self.device_gone = true;
+                    return Err(e);
                 }
                 Err(e) => warn!("reopen failed: {e}"),
             }
@@ -843,7 +863,7 @@ impl WinUsbLcdCore {
             Ok(_) => self.note_write_success(),
             Err(e) => {
                 warn!("{label} write failed: {e}");
-                if let Err(rec_err) = self.try_recover() {
+                if let Err(rec_err) = self.try_recover(None) {
                     warn!("{label} recovery skipped: {rec_err}");
                     return;
                 }
@@ -1048,7 +1068,7 @@ impl WinUsbLcdCore {
             Ok(_) => self.note_write_success(),
             Err(e) => {
                 warn!("Frame write failed: {e}");
-                self.try_recover()
+                self.try_recover(None)
                     .with_context(|| format!("recovering from frame write error: {e}"))?;
                 self.tx_write_full(&packet)
                     .context("writing LCD frame after recovery")?;
@@ -1305,19 +1325,37 @@ impl WinUsbLcdCore {
             Ok(result?)
         };
         if let Err(error) = self.playback.write(write_packet) {
-            if error.is::<LcdTransferInterrupted>() {
+            if error.is::<LcdTransferInterrupted>() || !wedges_the_lcd(&error) {
                 return Err(error);
             }
-            if !self.resend_stalled_chunk || !resendable_write_error(&error) {
+            if !self.resend_stalled_chunk
+                || !resendable_write_error(&error)
+                || stop.load(Ordering::Acquire)
+            {
                 return Err(error.context(LcdTransferInterrupted));
             }
+            let now = Instant::now();
+            if !chunk_resend_allowed(self.last_chunk_resend, now) {
+                warn!(
+                    "{}: H.264 packet write failed again within {}s of a resend ({error}); not resending",
+                    self.name,
+                    CHUNK_RESEND_COOLDOWN.as_secs()
+                );
+                return Err(error.context(LcdTransferInterrupted));
+            }
+            self.last_chunk_resend = Some(now);
             warn!(
                 "{}: H.264 packet write failed ({error}); reopening the LCD and resending it once",
                 self.name
             );
-            self.try_recover()
-                .and_then(|()| self.playback.resend(write_packet))
-                .map_err(|error| error.context(LcdTransferInterrupted))?;
+            self.try_recover(Some(stop)).map_err(tag_interrupted)?;
+            anyhow::ensure!(
+                !stop.load(Ordering::Acquire),
+                "H.264 stream stopped during LCD recovery"
+            );
+            self.playback
+                .resend(write_packet)
+                .map_err(tag_interrupted)?;
             info!("{}: H.264 packet resent after reopening the LCD", self.name);
         }
         self.note_write_success();
@@ -1523,6 +1561,30 @@ impl WinUsbLcdCore {
     }
 }
 
+fn device_unplugged(error: &anyhow::Error) -> bool {
+    matches!(
+        error.downcast_ref::<lianli_transport::TransportError>(),
+        Some(lianli_transport::TransportError::Usb(rusb::Error::NoDevice))
+    )
+}
+
+/// An unplugged device takes the detach path, and shutdown recreates nothing.
+fn wedges_the_lcd(error: &anyhow::Error) -> bool {
+    !lianli_transport::usb::shutting_down() && !device_unplugged(error)
+}
+
+fn tag_interrupted(error: anyhow::Error) -> anyhow::Error {
+    if wedges_the_lcd(&error) {
+        error.context(LcdTransferInterrupted)
+    } else {
+        error
+    }
+}
+
+fn chunk_resend_allowed(last_resend: Option<Instant>, now: Instant) -> bool {
+    last_resend.is_none_or(|at| now.saturating_duration_since(at) >= CHUNK_RESEND_COOLDOWN)
+}
+
 fn resendable_write_error(error: &anyhow::Error) -> bool {
     use lianli_transport::TransportError;
     !lianli_transport::usb::shutting_down()
@@ -1687,6 +1749,33 @@ mod file_stream_tests {
         assert!(!resendable(TransportError::Usb(rusb::Error::Interrupted)));
         assert!(!resendable(TransportError::Write("zero-length".into())));
         assert!(!resendable_write_error(&LcdTransferInterrupted.into()));
+    }
+
+    #[test]
+    fn unplugged_device_is_not_reported_as_an_interrupted_transfer() {
+        use lianli_transport::TransportError;
+        let tagged = |error: TransportError| {
+            tag_interrupted(anyhow::Error::from(error).context("reopening device"))
+                .is::<LcdTransferInterrupted>()
+        };
+        assert!(!tagged(TransportError::Usb(rusb::Error::NoDevice)));
+        assert!(tagged(TransportError::Usb(rusb::Error::Timeout)));
+        assert!(tagged(TransportError::Usb(rusb::Error::Pipe)));
+    }
+
+    #[test]
+    fn a_second_stall_within_the_cooldown_is_not_resent() {
+        let resent = Instant::now();
+        assert!(chunk_resend_allowed(None, resent));
+        assert!(!chunk_resend_allowed(Some(resent), resent));
+        assert!(!chunk_resend_allowed(
+            Some(resent),
+            resent + CHUNK_RESEND_COOLDOWN - Duration::from_millis(1)
+        ));
+        assert!(chunk_resend_allowed(
+            Some(resent),
+            resent + CHUNK_RESEND_COOLDOWN
+        ));
     }
 
     #[test]
