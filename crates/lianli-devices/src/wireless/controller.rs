@@ -700,6 +700,7 @@ impl WirelessController {
                 && h.raw_master == local
                 && h.raw_seen.elapsed() <= ACK_FRESHNESS
                 && is_valid_address(h.raw_channel, h.raw_rx)
+                && h.confirmed_invalid_address != Some((h.raw_channel, h.raw_rx))
         })
     }
 

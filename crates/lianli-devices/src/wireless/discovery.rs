@@ -636,6 +636,7 @@ fn merge_sightings(
     let mut health = health_map.lock();
 
     for rec in found {
+        let rx_taken_by = rx_holder(&health, rec, &local);
         let h = health
             .entry(rec.mac)
             .or_insert_with(|| DeviceHealth::new(rec.clone()));
@@ -651,8 +652,11 @@ fn merge_sightings(
         h.raw_seen = now;
         h.raw_master = rec.master_mac;
         h.raw_rx = rec.rx_type;
-        if is_valid_address(rec.channel, rec.rx_type) {
+        if is_valid_address(rec.channel, rec.rx_type) && rx_taken_by.is_none() {
             h.confirmed_invalid_address = None;
+        }
+        if rx_taken_by.is_some() && h.published.rx_type == rec.rx_type {
+            h.published.rx_type = 0;
         }
         h.raw_channel = rec.channel;
 
@@ -692,7 +696,18 @@ fn merge_sightings(
             if is_valid_channel(ch) {
                 h.published.channel = ch;
             }
-            if is_valid_address(ch, rx) {
+            if let Some(holder) = rx_taken_by {
+                if h.confirmed_invalid_address.is_none() {
+                    warn!(
+                        "{} reported rx={rx} already used by {:02x?}; keeping ch={} rx={} pending recovery",
+                        rec.mac_str(),
+                        holder,
+                        h.published.channel,
+                        h.published.rx_type
+                    );
+                }
+                h.confirmed_invalid_address = Some((ch, rx));
+            } else if is_valid_address(ch, rx) {
                 h.published.rx_type = rx;
             } else {
                 if h.confirmed_invalid_address.is_none() && (rx != 0 || intent) {
@@ -718,6 +733,28 @@ fn merge_sightings(
     }
 
     rebuild_published_vec(&health, discovered_devices, &local);
+}
+
+/// The vendor treats two devices under its own master reporting the same rx
+/// as a conflict. The device already published on that rx keeps it.
+fn rx_holder(
+    health: &BTreeMap<[u8; 6], DeviceHealth>,
+    rec: &DiscoveredDevice,
+    local: &[u8; 6],
+) -> Option<[u8; 6]> {
+    if *local == [0; 6] || rec.master_mac != *local || !is_valid_rx(rec.rx_type) {
+        return None;
+    }
+    health
+        .iter()
+        .find(|(mac, h)| {
+            **mac != rec.mac
+                && h.bind_intent
+                && !h.dead
+                && h.raw_master == *local
+                && h.published.rx_type == rec.rx_type
+        })
+        .map(|(mac, _)| *mac)
 }
 
 fn sweep(
@@ -1057,6 +1094,148 @@ mod tests {
             .expect("device must stay live");
         assert_eq!((device.channel, device.rx_type), (8, 1));
         assert_eq!(controller.rebind_candidates(), vec![mac]);
+    }
+
+    fn merge_into(
+        controller: &super::super::controller::WirelessController,
+        sightings: &[DiscoveredDevice],
+        times: u32,
+    ) {
+        for _ in 0..times {
+            merge_sightings(
+                sightings,
+                &controller.device_health,
+                &controller.discovered_devices,
+                &controller.master_mac,
+            );
+        }
+    }
+
+    fn controller_with_master(local: [u8; 6]) -> super::super::controller::WirelessController {
+        let controller = super::super::controller::WirelessController::new();
+        *controller.master_mac.lock() = local;
+        controller
+    }
+
+    #[test]
+    fn device_reporting_another_masters_mac_is_never_a_rebind_candidate() {
+        let local = [9; 6];
+        let foreign = [7; 6];
+        let mac = [1; 6];
+        for claimed_earlier in [false, true] {
+            for foreign_online in [false, true] {
+                for (channel, rx) in [(8, 1), (8, 0xA7), (0, 82), (131, 1), (8, 2)] {
+                    let controller = controller_with_master(local);
+                    let mut holder = rec([2; 6], local);
+                    holder.rx_type = 2;
+                    merge_into(&controller, &[holder.clone()], DEBOUNCE_SIGHTINGS);
+                    if claimed_earlier {
+                        merge_into(&controller, &[rec(mac, local)], DEBOUNCE_SIGHTINGS);
+                    }
+                    if foreign_online {
+                        merge_master_sightings(&[(foreign, 8)], &local, &controller.master_entries);
+                    }
+                    let mut sighting = rec(mac, foreign);
+                    sighting.channel = channel;
+                    sighting.rx_type = rx;
+                    merge_into(
+                        &controller,
+                        &[holder.clone(), sighting],
+                        DEBOUNCE_SIGHTINGS * 2,
+                    );
+                    if let Some(h) = controller.device_health.lock().get_mut(&mac) {
+                        h.foreign_since = h.foreign_since.map(|_| {
+                            Instant::now() - REBIND_FOREIGN_AFTER - Duration::from_secs(1)
+                        });
+                    }
+                    assert!(
+                        controller.rebind_candidates().is_empty(),
+                        "claimed={claimed_earlier} online={foreign_online} ch={channel} rx={rx}"
+                    );
+                    assert_eq!(controller.device_by_mac(&[2; 6]).unwrap().rx_type, 2);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn leaked_effect_byte_as_rx_under_our_master_is_a_rebind_candidate() {
+        let local = [9; 6];
+        let mac = [1; 6];
+        let controller = controller_with_master(local);
+        merge_into(&controller, &[rec(mac, local)], DEBOUNCE_SIGHTINGS);
+        assert!(controller.rebind_candidates().is_empty());
+
+        let mut leaked = rec(mac, local);
+        leaked.rx_type = 0xA7;
+        merge_into(&controller, &[leaked], DEBOUNCE_SIGHTINGS);
+        assert_eq!(controller.rebind_candidates(), vec![mac]);
+        assert_eq!(controller.device_by_mac(&mac).unwrap().rx_type, 1);
+        assert!(!controller.reports_valid_address(&mac));
+    }
+
+    #[test]
+    fn duplicate_rx_under_our_master_rebinds_only_the_newcomer() {
+        let local = [9; 6];
+        let holder = [1; 6];
+        let newcomer = [2; 6];
+        let controller = controller_with_master(local);
+        let mut moved = rec(newcomer, local);
+        moved.rx_type = 2;
+        merge_into(
+            &controller,
+            &[rec(holder, local), moved.clone()],
+            DEBOUNCE_SIGHTINGS,
+        );
+        assert!(controller.rebind_candidates().is_empty());
+
+        moved.rx_type = 1;
+        merge_into(
+            &controller,
+            &[rec(holder, local), moved.clone()],
+            DEBOUNCE_SIGHTINGS * 2,
+        );
+        assert_eq!(controller.rebind_candidates(), vec![newcomer]);
+        assert_eq!(controller.device_by_mac(&holder).unwrap().rx_type, 1);
+        assert_eq!(controller.device_by_mac(&newcomer).unwrap().rx_type, 2);
+        assert!(controller.reports_valid_address(&holder));
+        assert!(!controller.reports_valid_address(&newcomer));
+
+        moved.rx_type = 3;
+        merge_into(&controller, &[rec(holder, local), moved], 1);
+        controller.confirm_binding(&newcomer, true);
+        assert!(controller.rebind_candidates().is_empty());
+        assert_eq!(controller.device_by_mac(&newcomer).unwrap().rx_type, 3);
+        assert_eq!(controller.device_by_mac(&holder).unwrap().rx_type, 1);
+    }
+
+    #[test]
+    fn duplicate_rx_seen_at_startup_rebinds_exactly_one_device() {
+        let local = [9; 6];
+        let controller = controller_with_master(local);
+        merge_into(
+            &controller,
+            &[rec([1; 6], local), rec([2; 6], local)],
+            DEBOUNCE_SIGHTINGS * 2,
+        );
+        assert_eq!(controller.rebind_candidates(), vec![[2; 6]]);
+        assert_eq!(controller.device_by_mac(&[1; 6]).unwrap().rx_type, 1);
+        assert_eq!(controller.device_by_mac(&[2; 6]).unwrap().rx_type, 0);
+    }
+
+    #[test]
+    fn duplicate_rx_under_a_foreign_master_is_ignored() {
+        let local = [9; 6];
+        let controller = controller_with_master(local);
+        merge_into(
+            &controller,
+            &[rec([1; 6], local), rec([2; 6], [7; 6])],
+            DEBOUNCE_SIGHTINGS * 2,
+        );
+        assert!(controller.rebind_candidates().is_empty());
+        assert_eq!(controller.device_by_mac(&[1; 6]).unwrap().rx_type, 1);
+        assert_eq!(controller.device_by_mac(&[2; 6]).unwrap().rx_type, 1);
+        assert!(controller.reports_valid_address(&[1; 6]));
     }
 
     #[test]
