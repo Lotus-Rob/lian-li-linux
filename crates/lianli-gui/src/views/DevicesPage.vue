@@ -55,7 +55,10 @@ async function refresh() {
 }
 .device-list {
   container-type: inline-size;
-  padding: var(--space-1) 0;
+  display: grid;
+  grid-template-columns: 36px minmax(180px, 1.4fr) 130px minmax(0, 1.6fr) auto;
+  column-gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
 }
 .empty-state {
   display: flex;

@@ -314,11 +314,11 @@ async function ping() {
 
 <style scoped>
 .device-row {
+  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 36px minmax(180px, 1.4fr) 130px minmax(0, 1.6fr) auto;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-2) 0;
 }
 .device-row + .device-row {
   border-top: 1px solid var(--border);
@@ -454,6 +454,7 @@ async function ping() {
 @container (max-width: 760px) {
   .device-row {
     grid-template-columns: 36px minmax(0, 1fr) auto;
+    gap: var(--space-3);
   }
   .readings {
     grid-column: 2 / -1;
