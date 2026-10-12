@@ -1323,6 +1323,7 @@ mod tests {
         );
         age_foreign_flags(&controller);
         assert!(controller.rebind_candidates().is_empty());
+        assert!(!controller.needs_rebind(&mac));
         assert!(controller.unbound_devices().iter().any(|d| d.mac == mac));
     }
 

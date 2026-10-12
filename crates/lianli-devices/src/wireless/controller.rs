@@ -1,8 +1,8 @@
 use super::convergence::{PendingQueue, TargetSeqMap};
 use super::discovery::{
-    is_smeared_local_master, is_valid_address, poll_and_discover, traffic_channel, DeviceHealthMap,
-    DiscoveredDevice, MasterEntryMap, ReceiverState, ACK_FRESHNESS, REBIND_DUPLICATE_AFTER,
-    REBIND_FOREIGN_AFTER,
+    is_smeared_local_master, is_valid_address, poll_and_discover, traffic_channel, DeviceHealth,
+    DeviceHealthMap, DiscoveredDevice, MasterEntryMap, ReceiverState, ACK_FRESHNESS,
+    REBIND_DUPLICATE_AFTER, REBIND_FOREIGN_AFTER,
 };
 use super::mb_sync::MbRgbTargetMap;
 use super::recovery::{write_companion_reset, Dongle, DongleFailure};
@@ -673,36 +673,32 @@ impl WirelessController {
         if local == [0; 6] {
             return Vec::new();
         }
-        let online_masters: Vec<[u8; 6]> = self.master_entries.lock().keys().copied().collect();
+        let online_masters = self.online_master_macs();
         self.device_health
             .lock()
             .iter()
-            .filter(|(_, h)| {
-                if h.dead || h.man_unbind || h.raw_seen.elapsed() > ACK_FRESHNESS {
-                    return false;
-                }
-                if h.observed_master == local && h.raw_master == local {
-                    return h.bind_intent
-                        && h.confirmed_invalid_address == Some((h.raw_channel, h.raw_rx))
-                        && h.duplicate_since
-                            .is_none_or(|t| t.elapsed() >= REBIND_DUPLICATE_AFTER);
-                }
-                if h.observed_master == h.raw_master
-                    && is_smeared_local_master(&h.raw_master, &local, h.raw_channel, h.raw_rx)
-                {
-                    return h.bind_intent
-                        && !online_masters.contains(&h.raw_master)
-                        && h.foreign_since
-                            .is_some_and(|t| t.elapsed() >= REBIND_FOREIGN_AFTER);
-                }
-                h.observed_master == [0; 6]
-                    && h.raw_master == [0; 6]
-                    && (!h.bind_intent
-                        || h.foreign_since
-                            .is_some_and(|t| t.elapsed() >= REBIND_FOREIGN_AFTER))
-            })
+            .filter(|(_, h)| wants_auto_rebind(h, &local, &online_masters))
             .map(|(mac, _)| *mac)
             .collect()
+    }
+
+    /// A device bound here that stopped following this dongle and that a
+    /// manual bind can reach.
+    pub fn needs_rebind(&self, mac: &[u8; 6]) -> bool {
+        let local = *self.master_mac.lock();
+        if local == [0; 6] {
+            return false;
+        }
+        let online_masters = self.online_master_macs();
+        self.device_health.lock().get(mac).is_some_and(|h| {
+            h.bind_intent
+                && (wants_auto_rebind(h, &local, &online_masters)
+                    || lost_to_offline_master(h, &local, &online_masters))
+        })
+    }
+
+    fn online_master_macs(&self) -> Vec<[u8; 6]> {
+        self.master_entries.lock().keys().copied().collect()
     }
 
     pub fn reports_valid_address(&self, mac: &[u8; 6]) -> bool {
@@ -1010,6 +1006,45 @@ impl WirelessController {
         });
         observed && !self.has_pending_mb_rgb_transition(mac)
     }
+}
+
+fn reachable(h: &DeviceHealth) -> bool {
+    !h.dead && !h.man_unbind && h.raw_seen.elapsed() <= ACK_FRESHNESS
+}
+
+fn wants_auto_rebind(h: &DeviceHealth, local: &[u8; 6], online_masters: &[[u8; 6]]) -> bool {
+    if !reachable(h) {
+        return false;
+    }
+    if h.observed_master == *local && h.raw_master == *local {
+        return h.bind_intent
+            && h.confirmed_invalid_address == Some((h.raw_channel, h.raw_rx))
+            && h.duplicate_since
+                .is_none_or(|t| t.elapsed() >= REBIND_DUPLICATE_AFTER);
+    }
+    if h.observed_master == h.raw_master
+        && is_smeared_local_master(&h.raw_master, local, h.raw_channel, h.raw_rx)
+    {
+        return h.bind_intent
+            && !online_masters.contains(&h.raw_master)
+            && h.foreign_since
+                .is_some_and(|t| t.elapsed() >= REBIND_FOREIGN_AFTER);
+    }
+    h.observed_master == [0; 6]
+        && h.raw_master == [0; 6]
+        && (!h.bind_intent
+            || h.foreign_since
+                .is_some_and(|t| t.elapsed() >= REBIND_FOREIGN_AFTER))
+}
+
+fn lost_to_offline_master(h: &DeviceHealth, local: &[u8; 6], online_masters: &[[u8; 6]]) -> bool {
+    reachable(h)
+        && h.observed_master == h.raw_master
+        && h.raw_master != *local
+        && h.raw_master != [0; 6]
+        && !online_masters.contains(&h.raw_master)
+        && h.foreign_since
+            .is_some_and(|t| t.elapsed() >= REBIND_FOREIGN_AFTER)
 }
 
 fn valid_master_response(response: &[u8]) -> bool {
@@ -1441,6 +1476,61 @@ mod tests {
             ([4, 2, 3, 4, 5, 6], healthy),
         ]);
         assert!(c.rebind_candidates().is_empty());
+    }
+
+    #[test]
+    fn needs_rebind_flags_bound_devices_that_lost_this_dongle() {
+        let aged = || Some(Instant::now() - REBIND_FOREIGN_AFTER - Duration::from_secs(1));
+        let bound = |master: [u8; 6]| {
+            let mut h = entry(master);
+            h.bind_intent = true;
+            h
+        };
+
+        let mut invalid = bound([9; 6]);
+        (invalid.raw_channel, invalid.raw_rx) = (78, 78);
+        invalid.confirmed_invalid_address = Some((78, 78));
+        let mut offline = bound([7; 6]);
+        offline.foreign_since = aged();
+        let mut settling = bound([7; 6]);
+        settling.foreign_since = Some(Instant::now());
+        let mut online = bound([6; 6]);
+        online.foreign_since = aged();
+        let mut unbound = bound([7; 6]);
+        unbound.man_unbind = true;
+        unbound.foreign_since = aged();
+        let mut never_ours = entry([7; 6]);
+        never_ours.foreign_since = aged();
+        let healthy = bound([9; 6]);
+
+        let expected = [
+            ([1; 6], true),
+            ([2; 6], true),
+            ([3; 6], false),
+            ([4; 6], false),
+            ([5; 6], false),
+            ([6; 6], false),
+            ([8; 6], false),
+        ];
+        let c = controller_with_health(vec![
+            ([1; 6], invalid),
+            ([2; 6], offline),
+            ([3; 6], settling),
+            ([4; 6], online),
+            ([5; 6], unbound),
+            ([6; 6], never_ours),
+            ([8; 6], healthy),
+        ]);
+        c.master_entries.lock().insert(
+            [6; 6],
+            crate::wireless::discovery::MasterEntry {
+                channel: 8,
+                last_seen: Instant::now(),
+            },
+        );
+        for (mac, expected) in expected {
+            assert_eq!(c.needs_rebind(&mac), expected, "{mac:02x?}");
+        }
     }
 
     #[test]

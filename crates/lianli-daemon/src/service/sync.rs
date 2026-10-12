@@ -338,7 +338,11 @@ impl ServiceManager {
                 screen_width: None,
                 screen_height: None,
                 is_unbound_wireless: false,
-                wireless_bind_status: Some("bind_link".to_string()),
+                wireless_bind_status: Some(if self.wireless.needs_rebind(&dev.mac) {
+                    "needs_rebind".to_string()
+                } else {
+                    "bind_link".to_string()
+                }),
                 foreign_master_online: false,
                 pump_rpm_range: dev.fan_type.pump_rpm_range(),
                 fan_quantity: None,

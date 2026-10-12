@@ -103,6 +103,7 @@ async function onSwitchDisplay() {
 const isUnboundWireless = computed(() => d.value.is_unbound_wireless);
 const isBoundWireless = computed(() => d.value.device_id.startsWith("wireless:"));
 const isBindOther = computed(() => d.value.wireless_bind_status === "bind_other");
+const needsRebind = computed(() => d.value.wireless_bind_status === "needs_rebind");
 const foreignOnline = computed(() => d.value.foreign_master_online === true);
 const bindLabel = computed(() => {
   if (pending.value === "bind") return "Binding...";
@@ -110,9 +111,7 @@ const bindLabel = computed(() => {
 });
 
 async function onBind() {
-  const mac = d.value.device_id.startsWith("wireless-unbound:")
-    ? d.value.device_id.slice("wireless-unbound:".length)
-    : d.value.device_id;
+  const mac = d.value.device_id.replace(/^wireless(-unbound)?:/, "");
   if (isBindOther.value) {
     const ok = await new Promise<boolean>((resolve) => {
       dialog.warning({
@@ -202,6 +201,7 @@ const status = computed<{ label: string; tone: StatusTone; busy?: boolean }>(() 
       ? { label: foreignOnline.value ? "Other PC (online)" : "Other PC (offline)", tone: "muted" }
       : { label: "Not bound", tone: "muted" };
   }
+  if (needsRebind.value) return { label: "Needs rebind", tone: "warning" };
   if (d.value.telemetry?.error) return { label: "Telemetry error", tone: "danger" };
   if (isDesktop.value) return { label: "Desktop mode", tone: "info" };
   return { label: "Online", tone: "success" };
@@ -248,6 +248,7 @@ async function ping() {
       <div class="subtitle">{{ subtitle }}</div>
       <p v-if="d.telemetry?.error" class="error-text">{{ d.telemetry.error }}</p>
       <p v-if="isUnboundWireless && isBindOther" class="subtitle">Owned by another controller</p>
+      <p v-if="isBoundWireless && needsRebind" class="subtitle">Not following this dongle. Rebind to restore control.</p>
     </div>
 
     <span class="status" :class="`tone-${status.tone}`">
@@ -299,10 +300,18 @@ async function ping() {
         @click="onBind"
       >{{ bindLabel }}</n-button>
       <n-button
+        v-if="isBoundWireless && needsRebind"
+        size="tiny"
+        type="warning"
+        :loading="pending === 'bind'"
+        :disabled="pending === 'bind' || pending === 'unbind'"
+        @click="onBind"
+      >{{ pending === "bind" ? "Rebinding…" : "Rebind" }}</n-button>
+      <n-button
         v-if="isBoundWireless"
         size="tiny"
         :loading="pending === 'unbind'"
-        :disabled="pending === 'unbind'"
+        :disabled="pending === 'unbind' || pending === 'bind'"
         @click="onUnbind"
       >{{ pending === "unbind" ? "Unbinding…" : "Unbind" }}</n-button>
       <button v-if="caps.rgb" class="ping-btn" title="Identify device" @click="ping">
