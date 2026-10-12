@@ -167,16 +167,24 @@ pub(super) fn release_transport<T>(transport: &Mutex<TransportState<T>>) {
 
 /// Try to open a USB device matching any of the given VID:PID pairs.
 pub(super) fn open_any(ids: &[(u16, u16)]) -> Result<RusbBulk> {
-    let mut last_err = None;
+    let mut failure = None;
     for &(vid, pid) in ids {
         match RusbBulk::open(vid, pid) {
             Ok(transport) => return Ok(transport),
-            Err(e) => last_err = Some(e),
+            Err(lianli_transport::TransportError::DeviceNotFound { .. }) => {}
+            Err(e) => {
+                failure.get_or_insert(e);
+            }
         }
     }
-    Err(last_err
-        .map(|e| anyhow::anyhow!(e))
-        .unwrap_or_else(|| anyhow::anyhow!("no VID:PID pairs to try")))
+    if let Some(e) = failure {
+        return Err(e.into());
+    }
+    let labels: Vec<String> = ids
+        .iter()
+        .map(|(vid, pid)| format!("{vid:04x}:{pid:04x}"))
+        .collect();
+    anyhow::bail!("no device matching {}", labels.join(" or "))
 }
 
 /// Run a USB op on a dongle transport with one-shot reopen + retry on failure.
