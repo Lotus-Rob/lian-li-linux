@@ -1,4 +1,8 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
+
+#[derive(Debug, thiserror::Error)]
+#[error("LCD packet transfer was interrupted")]
+pub struct LcdTransferInterrupted;
 
 #[derive(Default)]
 pub(super) enum PlaybackState {
@@ -12,13 +16,19 @@ pub(super) enum PlaybackState {
 impl PlaybackState {
     pub(super) fn ensure_ready(&self) -> Result<()> {
         if matches!(self, Self::Interrupted) {
-            bail!("LCD packet transfer was interrupted; reconnect the LCD before retrying media");
+            return Err(LcdTransferInterrupted.into());
         }
         Ok(())
     }
 
     pub(super) fn write(&mut self, write: impl FnOnce() -> Result<()>) -> Result<()> {
         self.ensure_ready()?;
+        self.resend(write)
+    }
+
+    /// Bypasses the interrupted latch. Only for replaying a whole packet after
+    /// the handle was closed and reopened, as the vendor SendAndRead does.
+    pub(super) fn resend(&mut self, write: impl FnOnce() -> Result<()>) -> Result<()> {
         // A failed transfer may have delivered a header or part of its payload.
         *self = Self::Interrupted;
         write()?;
@@ -39,6 +49,7 @@ impl PlaybackState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::bail;
 
     #[test]
     fn attaching_and_replacing_playback_stop_each_session_once() {
@@ -90,6 +101,37 @@ mod tests {
             })
             .is_err());
         assert_eq!(delivered, b"header and partial payload");
+    }
+
+    #[test]
+    fn successful_resend_after_reopen_resumes_streaming_and_teardown() {
+        let mut state = PlaybackState::default();
+        assert!(state.write(|| bail!("USB transfer timed out")).is_err());
+        assert!(state.resend(|| bail!("still stalled")).is_err());
+        assert!(state
+            .write(|| Ok(()))
+            .unwrap_err()
+            .is::<LcdTransferInterrupted>());
+        let mut delivered = vec![];
+        state
+            .resend(|| {
+                delivered.push("whole packet");
+                Ok(())
+            })
+            .unwrap();
+        state
+            .write(|| {
+                delivered.push("next packet");
+                Ok(())
+            })
+            .unwrap();
+        state
+            .stop(|| {
+                delivered.push("stop");
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(delivered, ["whole packet", "next packet", "stop"]);
     }
 
     #[test]

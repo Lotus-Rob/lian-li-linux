@@ -1,4 +1,4 @@
-use super::playback::PlaybackState;
+use super::playback::{LcdTransferInterrupted, PlaybackState};
 use super::ring::RingDelivery;
 use crate::crypto::PacketBuilder;
 use anyhow::{bail, Context, Result};
@@ -568,6 +568,7 @@ pub(crate) struct WinUsbLcdCore {
     stream_fps: Option<f32>,
     playback: PlaybackState,
     stop_play_supported: bool,
+    resend_stalled_chunk: bool,
 }
 
 /// Read the serial the kernel cached at enumeration, matching on bus/device
@@ -653,6 +654,7 @@ impl WinUsbLcdCore {
             stream_fps: None,
             playback: PlaybackState::default(),
             stop_play_supported,
+            resend_stalled_chunk: true,
         })
     }
 
@@ -679,7 +681,15 @@ impl WinUsbLcdCore {
             stream_fps: None,
             playback: PlaybackState::default(),
             stop_play_supported,
+            resend_stalled_chunk: true,
         }
+    }
+
+    /// The vendor HydroShift II reopen reruns SetFrameRate and restarts its
+    /// AIO message queue before replaying, so a bare resend is not equivalent.
+    pub(crate) fn without_stalled_chunk_resend(mut self) -> Self {
+        self.resend_stalled_chunk = false;
+        self
     }
 
     pub(crate) fn screen(&self) -> &ScreenInfo {
@@ -1276,15 +1286,14 @@ impl WinUsbLcdCore {
         if lianli_transport::usb::shutting_down() {
             return Ok(());
         }
-        let transport = &self.transport;
+        let transport = Arc::clone(&self.transport);
         let timeout = self.write_timeout;
-        self.playback.write(|| {
+        let write_packet = || -> Result<()> {
             let bulk = transport.lock();
             let started = Instant::now();
             // Finish an accepted packet even if shutdown starts between short writes.
             let result = lianli_transport::usb::with_teardown_io(timeout, || {
                 bulk.write_full(&packet, timeout)
-                    .context("H264 packet interrupted; reconnect the LCD before retrying media")
             });
             if started.elapsed() > SLOW_CHUNK_WRITE {
                 warn!(
@@ -1293,8 +1302,24 @@ impl WinUsbLcdCore {
                     packet.len()
                 );
             }
-            result
-        })?;
+            Ok(result?)
+        };
+        if let Err(error) = self.playback.write(write_packet) {
+            if error.is::<LcdTransferInterrupted>() {
+                return Err(error);
+            }
+            if !self.resend_stalled_chunk || !resendable_write_error(&error) {
+                return Err(error.context(LcdTransferInterrupted));
+            }
+            warn!(
+                "{}: H.264 packet write failed ({error}); reopening the LCD and resending it once",
+                self.name
+            );
+            self.try_recover()
+                .and_then(|()| self.playback.resend(write_packet))
+                .map_err(|error| error.context(LcdTransferInterrupted))?;
+            info!("{}: H.264 packet resent after reopening the LCD", self.name);
+        }
         self.note_write_success();
 
         let resp = self.read_response("h264 chunk");
@@ -1498,6 +1523,20 @@ impl WinUsbLcdCore {
     }
 }
 
+fn resendable_write_error(error: &anyhow::Error) -> bool {
+    use lianli_transport::TransportError;
+    !lianli_transport::usb::shutting_down()
+        && matches!(
+            error.downcast_ref::<TransportError>(),
+            Some(
+                TransportError::Timeout
+                    | TransportError::Usb(
+                        rusb::Error::Timeout | rusb::Error::Io | rusb::Error::Pipe
+                    )
+            )
+        )
+}
+
 fn chunk_interval(fps: f32) -> Duration {
     let target = Duration::from_secs_f32(1.0 / fps.max(1.0));
     target.max(Duration::from_millis(30))
@@ -1635,6 +1674,19 @@ mod file_stream_tests {
             read_stream_chunk(&mut source, &mut buffer, false, 3).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn only_stalled_transfers_are_resent_after_reopen() {
+        use lianli_transport::TransportError;
+        let resendable = |error: TransportError| resendable_write_error(&error.into());
+        assert!(resendable(TransportError::Usb(rusb::Error::Timeout)));
+        assert!(resendable(TransportError::Usb(rusb::Error::Io)));
+        assert!(resendable(TransportError::Usb(rusb::Error::Pipe)));
+        assert!(!resendable(TransportError::Usb(rusb::Error::NoDevice)));
+        assert!(!resendable(TransportError::Usb(rusb::Error::Interrupted)));
+        assert!(!resendable(TransportError::Write("zero-length".into())));
+        assert!(!resendable_write_error(&LcdTransferInterrupted.into()));
     }
 
     #[test]

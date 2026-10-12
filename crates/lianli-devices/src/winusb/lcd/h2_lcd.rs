@@ -17,7 +17,8 @@ impl H2WinUsbLcd {
         screen: ScreenInfo,
         name: &str,
     ) -> Result<Self> {
-        let core = WinUsbLcdCore::open(device, screen, name, WRITE_TIMEOUT, READ_TIMEOUT, true)?;
+        let core = WinUsbLcdCore::open(device, screen, name, WRITE_TIMEOUT, READ_TIMEOUT, true)?
+            .without_stalled_chunk_resend();
         Ok(Self { core })
     }
 
@@ -34,7 +35,8 @@ impl H2WinUsbLcd {
                 WRITE_TIMEOUT,
                 READ_TIMEOUT,
                 true,
-            ),
+            )
+            .without_stalled_chunk_resend(),
         }
     }
 

@@ -270,6 +270,7 @@ pub struct ServiceManager {
     desktop_displays: crate::desktop_display::DesktopDisplayRegistry,
     tx: Option<Sender<DaemonEvent>>,
     mode_switch_suppression: HashMap<String, Instant>,
+    lcd_transfer_recovery: HashMap<String, runtime::TransferRecovery>,
     post_switch_refresh: display_mode::PostSwitchRefresh,
     display_switch: Option<display_mode::DisplaySwitch>,
     serial_rewrite_backoff: Option<Instant>,
@@ -339,6 +340,7 @@ impl ServiceManager {
             desktop_displays: crate::desktop_display::DesktopDisplayRegistry::new(),
             tx: None,
             mode_switch_suppression: HashMap::new(),
+            lcd_transfer_recovery: HashMap::new(),
             post_switch_refresh: display_mode::PostSwitchRefresh::default(),
             display_switch: None,
             serial_rewrite_backoff: None,
@@ -685,9 +687,14 @@ impl ServiceManager {
                             }
                         }
                     }
+                    let now = Instant::now();
                     for (&id, target) in targets.iter_mut() {
                         if stop.load(Ordering::Acquire) {
                             break;
+                        }
+                        if let Some(event) = target.due_transfer_recovery(now) {
+                            to_recreate.push(event);
+                            continue;
                         }
                         if !source_preparation.is_busy() && source_request.is_none() {
                             source_request = target.source_request();
@@ -697,7 +704,10 @@ impl ServiceManager {
                                 target.consecutive_errors = 0;
                             }
                             Ok(false) => {}
-                            Err(runtime::SendError::Stopped(error)) => {
+                            Err(
+                                runtime::SendError::Stopped(error)
+                                | runtime::SendError::Interrupted(error),
+                            ) => {
                                 if let Some(key) = target.playback_failure_key() {
                                     stopped.push((id, key, error));
                                 }
@@ -983,7 +993,11 @@ impl ServiceManager {
                             None
                         }
                     };
-                    if let Some(target) = removed {
+                    if let Some(mut target) = removed {
+                        self.lcd_transfer_recovery.insert(
+                            target.device_identity.clone(),
+                            target.take_transfer_recovery(),
+                        );
                         self.record_playback_failure(target_index, &key, error);
                         drop(target);
                     }

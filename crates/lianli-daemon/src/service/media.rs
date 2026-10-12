@@ -644,6 +644,11 @@ impl ServiceManager {
                             applied_cfg.custom_h264(),
                             self.tx.clone(),
                         );
+                        if let Some(recovery) =
+                            self.lcd_transfer_recovery.remove(&candidate.device_id)
+                        {
+                            target.restore_transfer_recovery(recovery);
+                        }
                         if init_pending {
                             target.wait_for_initialization();
                         }

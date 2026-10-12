@@ -41,7 +41,15 @@ struct EncoderSettings<'a> {
     hardware_video: bool,
 }
 
-fn encoder_restart_backoff(restart_count: &mut u32, uptime: Duration) -> Option<Duration> {
+fn encoder_restart_backoff(
+    restart_count: &mut u32,
+    uptime: Duration,
+    transfer_interrupted: bool,
+) -> Option<Duration> {
+    if transfer_interrupted {
+        info!("h264 encoder not restarted: the LCD transfer was interrupted and the LCD will be recreated");
+        return None;
+    }
     if uptime > HEALTHY_RESET {
         *restart_count = 0;
     }
@@ -79,10 +87,14 @@ fn try_restart_encoder(
     if stop.load(Ordering::Relaxed) {
         return false;
     }
-    let Some(backoff) = encoder_restart_backoff(restart_count, started_at.elapsed()) else {
+    let Some(backoff) = encoder_restart_backoff(
+        restart_count,
+        started_at.elapsed(),
+        restarter.transfer_interrupted(),
+    ) else {
         return false;
     };
-    if wait_until_stopped(stop, Instant::now() + backoff) {
+    if wait_until_stopped(stop, Instant::now() + backoff) || restarter.transfer_interrupted() {
         return false;
     }
 
@@ -932,9 +944,12 @@ mod pacing_tests {
     #[test]
     fn healthy_encoder_restores_an_exhausted_restart_budget() {
         let mut attempts = MAX_RESTARTS;
-        assert_eq!(encoder_restart_backoff(&mut attempts, HEALTHY_RESET), None);
         assert_eq!(
-            encoder_restart_backoff(&mut attempts, HEALTHY_RESET + Duration::from_secs(1)),
+            encoder_restart_backoff(&mut attempts, HEALTHY_RESET, false),
+            None
+        );
+        assert_eq!(
+            encoder_restart_backoff(&mut attempts, HEALTHY_RESET + Duration::from_secs(1), false),
             Some(Duration::from_secs(1))
         );
         assert_eq!(attempts, 1);
@@ -943,19 +958,36 @@ mod pacing_tests {
     #[test]
     fn repeated_encoder_failures_keep_bounded_backoff() {
         let mut attempts = 0;
-        assert_eq!(encoder_restart_backoff(&mut attempts, Duration::ZERO), None);
+        assert_eq!(
+            encoder_restart_backoff(&mut attempts, Duration::ZERO, false),
+            None
+        );
         assert_eq!(attempts, 0);
         for seconds in [1, 2, 4] {
             assert_eq!(
-                encoder_restart_backoff(&mut attempts, MIN_HEALTHY_UPTIME),
+                encoder_restart_backoff(&mut attempts, MIN_HEALTHY_UPTIME, false),
                 Some(Duration::from_secs(seconds))
             );
         }
         assert_eq!(
-            encoder_restart_backoff(&mut attempts, MIN_HEALTHY_UPTIME),
+            encoder_restart_backoff(&mut attempts, MIN_HEALTHY_UPTIME, false),
             None
         );
         assert_eq!(attempts, MAX_RESTARTS);
+    }
+
+    #[test]
+    fn interrupted_lcd_transfer_neither_restarts_nor_spends_the_budget() {
+        let mut attempts = 0;
+        assert_eq!(
+            encoder_restart_backoff(&mut attempts, HEALTHY_RESET, true),
+            None
+        );
+        assert_eq!(attempts, 0);
+        assert_eq!(
+            encoder_restart_backoff(&mut attempts, MIN_HEALTHY_UPTIME, false),
+            Some(Duration::from_secs(1))
+        );
     }
 
     #[test]

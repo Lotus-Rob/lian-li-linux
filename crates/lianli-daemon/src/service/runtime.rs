@@ -527,6 +527,14 @@ impl StreamRestarter {
             Self::WinUsb(..) => None,
         }
     }
+
+    pub(super) fn transfer_interrupted(&self) -> bool {
+        match self {
+            Self::HidLcd(..) => false,
+            Self::WinUsb(_, control, _) => control.transfer_interrupted(),
+        }
+    }
+
     /// Called before feeding the encoder so a deferred reader cannot fill its pipe.
     pub(super) fn try_start_pending(&self) -> anyhow::Result<bool> {
         match self {
@@ -603,10 +611,41 @@ pub(super) enum LcdThreadMsg {
     Stop,
 }
 
+fn is_transfer_interrupted(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<lianli_devices::winusb::lcd::LcdTransferInterrupted>()
+        .is_some()
+}
+
+#[derive(Clone)]
+pub(super) struct StreamFailure {
+    message: String,
+    interrupted: bool,
+}
+
+impl StreamFailure {
+    fn new(message: &str, interrupted: bool) -> Self {
+        Self {
+            message: message.chars().take(2048).collect(),
+            interrupted,
+        }
+    }
+
+    fn from_error(message: &str, error: &anyhow::Error) -> Self {
+        Self::new(message, is_transfer_interrupted(error))
+    }
+}
+
+impl From<&str> for StreamFailure {
+    fn from(message: &str) -> Self {
+        Self::new(message, false)
+    }
+}
+
 #[derive(Default)]
 pub(super) struct StreamControl {
     current: Mutex<Arc<AtomicBool>>,
-    failure: Mutex<Option<String>>,
+    failure: Mutex<Option<StreamFailure>>,
     transferred: Mutex<Option<Arc<AtomicBool>>>,
 }
 
@@ -628,9 +667,18 @@ impl StreamControl {
         enqueue(replacement.clone())?;
         current.store(true, Ordering::Release);
         *current = replacement.clone();
-        *self.failure.lock() = None;
+        // An interrupted device stays wedged until it is recreated, so a
+        // restarted stream must not hide that from the service loop.
+        self.failure.lock().take_if(|failure| !failure.interrupted);
         *self.transferred.lock() = Some(Arc::new(AtomicBool::new(false)));
         Ok(replacement)
+    }
+
+    fn transfer_interrupted(&self) -> bool {
+        self.failure
+            .lock()
+            .as_ref()
+            .is_some_and(|failure| failure.interrupted)
     }
 
     #[cfg(test)]
@@ -669,14 +717,14 @@ impl StreamControl {
             .map(|flag| flag.load(Ordering::Acquire))
     }
 
-    fn failed(&self, expected: &Arc<AtomicBool>, error: &str) {
+    fn failed(&self, expected: &Arc<AtomicBool>, failure: StreamFailure) {
         let current = self.current.lock();
         if Arc::ptr_eq(&current, expected) && !expected.load(Ordering::Acquire) {
-            *self.failure.lock() = Some(error.chars().take(2048).collect());
+            *self.failure.lock() = Some(failure);
         }
     }
 
-    fn take_failure(&self) -> Option<String> {
+    fn take_failure(&self) -> Option<StreamFailure> {
         let current = self.current.lock();
         let failure = self.failure.lock().take();
         if failure.is_some() {
@@ -689,7 +737,7 @@ impl StreamControl {
 #[derive(Default)]
 pub(super) struct FrameDelivery {
     retired: AtomicBool,
-    failure: Mutex<Option<String>>,
+    failure: Mutex<Option<StreamFailure>>,
 }
 
 impl FrameDelivery {
@@ -698,7 +746,7 @@ impl FrameDelivery {
             return;
         }
         if let Err(error) = send() {
-            *self.failure.lock() = Some(error.to_string().chars().take(2048).collect());
+            *self.failure.lock() = Some(StreamFailure::from_error(&error.to_string(), &error));
         }
     }
 }
@@ -778,8 +826,13 @@ impl ThreadedWinUsbSender {
                         };
                         device.observe_h264_transfer(observer);
                         if let Err(e) = device.stream_h264(&path, looping, &stop, fps) {
-                            worker_control
-                                .failed(&stop, &format!("H.264 file transfer failed: {e:#}"));
+                            worker_control.failed(
+                                &stop,
+                                StreamFailure::from_error(
+                                    &format!("H.264 file transfer failed: {e:#}"),
+                                    &e,
+                                ),
+                            );
                             if lianli_transport::usb::shutting_down() {
                                 debug!("LCD[{index}] h264 stream ended by shutdown: {e:#}");
                             } else {
@@ -796,8 +849,13 @@ impl ThreadedWinUsbSender {
                         };
                         device.observe_h264_transfer(observer);
                         if let Err(e) = device.stream_h264_reader(&mut stdout, &stop, fps) {
-                            worker_control
-                                .failed(&stop, &format!("Live H.264 transfer failed: {e:#}"));
+                            worker_control.failed(
+                                &stop,
+                                StreamFailure::from_error(
+                                    &format!("Live H.264 transfer failed: {e:#}"),
+                                    &e,
+                                ),
+                            );
                             if lianli_transport::usb::shutting_down() {
                                 debug!("LCD[{index}] h264 live stream ended by shutdown: {e:#}");
                             } else {
@@ -1044,12 +1102,75 @@ pub(crate) struct ActiveTarget {
     brightness_status: Option<lianli_shared::ipc::LcdBrightnessStatus>,
     brightness_retries: u8,
     next_brightness_attempt: Option<Instant>,
+    transfer_recovery: TransferRecovery,
 }
 
 enum LcdInitialization {
     Pending,
     Ready,
     Failed(String),
+}
+
+const TRANSFER_RECOVERY_ATTEMPTS: u32 = 5;
+const TRANSFER_RECOVERY_HEALTHY_RESET: Duration = Duration::from_secs(300);
+
+/// Recreation budget for a WinUSB LCD whose packet transfer was interrupted.
+/// It outlives the target it belongs to, so the replacement continues the backoff.
+#[derive(Default)]
+pub(super) struct TransferRecovery {
+    attempts: u32,
+    last_failure: Option<Instant>,
+    due: Option<Instant>,
+    pending: bool,
+}
+
+impl TransferRecovery {
+    /// Returns the attempt number and delay, or `None` once the budget is spent.
+    fn schedule(&mut self, now: Instant) -> Option<(u32, Duration)> {
+        self.pending = true;
+        if let Some(due) = self.due {
+            return Some((self.attempts, due.saturating_duration_since(now)));
+        }
+        if self
+            .last_failure
+            .is_some_and(|at| now.saturating_duration_since(at) > TRANSFER_RECOVERY_HEALTHY_RESET)
+        {
+            self.attempts = 0;
+        }
+        self.last_failure = Some(now);
+        if self.attempts >= TRANSFER_RECOVERY_ATTEMPTS {
+            return None;
+        }
+        self.attempts += 1;
+        let delay = Duration::from_secs(1 << (self.attempts - 1));
+        self.due = Some(now + delay);
+        Some((self.attempts, delay))
+    }
+
+    fn take_due(&mut self, now: Instant) -> bool {
+        if self.due.is_some_and(|due| now >= due) {
+            self.due = None;
+            return true;
+        }
+        false
+    }
+
+    fn retry_now(&mut self, now: Instant) -> bool {
+        if !self.pending {
+            return false;
+        }
+        self.attempts = 0;
+        self.due = Some(now);
+        true
+    }
+
+    fn for_replacement(self) -> Self {
+        Self {
+            due: None,
+            pending: false,
+            ..self
+        }
+    }
 }
 
 fn spawn_recovery_thread(
@@ -1140,6 +1261,7 @@ impl ActiveTarget {
             brightness_status: None,
             brightness_retries: 0,
             next_brightness_attempt: None,
+            transfer_recovery: TransferRecovery::default(),
         }
     }
 
@@ -1534,21 +1656,33 @@ impl ActiveTarget {
             LcdBackend::WinUsb(sender) => sender.frame_delivery.failure.lock().clone(),
             _ => None,
         };
-        if let Some(error) = frame_failure {
-            warn!("LCD[{}] JPEG transfer failed: {error}", self.index);
+        if let Some(failure) = frame_failure {
+            warn!(
+                "LCD[{}] JPEG transfer failed: {}",
+                self.index, failure.message
+            );
+            let error = format!("JPEG transfer failed: {}", failure.message);
+            if failure.interrupted {
+                return Err(self.interrupt_transfer(error));
+            }
             self.media_stage = lianli_shared::ipc::MediaRuntimeStage::Failed;
             self.pause_source();
-            return Err(SendError::Stopped(format!("JPEG transfer failed: {error}")));
+            return Err(SendError::Stopped(error));
         }
         // H.264 / autonomous sources: kick off streaming on the first call,
         // then short-circuit (their threads push frames directly to the LCD).
         if self.media.is_autonomous() {
-            if let LcdBackend::WinUsb(sender) = &self.lcd {
-                if let Some(error) = sender.stream_control.take_failure() {
-                    self.media_stage = lianli_shared::ipc::MediaRuntimeStage::Failed;
-                    self.pause_source();
-                    return Err(SendError::Stopped(error));
+            let stream_failure = match &self.lcd {
+                LcdBackend::WinUsb(sender) => sender.stream_control.take_failure(),
+                _ => None,
+            };
+            if let Some(failure) = stream_failure {
+                if failure.interrupted {
+                    return Err(self.interrupt_transfer(failure.message));
                 }
+                self.media_stage = lianli_shared::ipc::MediaRuntimeStage::Failed;
+                self.pause_source();
+                return Err(SendError::Stopped(failure.message));
             }
             if self.media.has_exited() {
                 self.media_stage = lianli_shared::ipc::MediaRuntimeStage::Failed;
@@ -1594,6 +1728,9 @@ impl ActiveTarget {
                 debug!("[devices] LCD[{}] busy, deferring frame send", self.index);
                 return Ok(false);
             }
+            Err(err) if is_transfer_interrupted(&err) => {
+                return Err(self.interrupt_transfer(format!("LCD frame transfer failed: {err:#}")));
+            }
             Err(err) => {
                 let send_err = match err.downcast::<lianli_transport::TransportError>() {
                     Ok(usb) => SendError::Usb(usb),
@@ -1635,8 +1772,61 @@ impl ActiveTarget {
         }
     }
 
+    fn interrupt_transfer(&mut self, error: String) -> SendError {
+        self.media_stage = lianli_shared::ipc::MediaRuntimeStage::Failed;
+        self.pause_source();
+        let error = match self.transfer_recovery.schedule(Instant::now()) {
+            Some((attempt, delay)) => {
+                warn!(
+                    "LCD[{}] transfer interrupted; recreating the LCD in {}s (attempt {attempt}/{TRANSFER_RECOVERY_ATTEMPTS})",
+                    self.index,
+                    delay.as_secs()
+                );
+                error
+            }
+            None => {
+                warn!(
+                    "LCD[{}] transfer interrupted; automatic recovery gave up after {TRANSFER_RECOVERY_ATTEMPTS} attempts",
+                    self.index
+                );
+                format!(
+                    "Automatic LCD recovery gave up after {TRANSFER_RECOVERY_ATTEMPTS} attempts. Use Retry failed media in Installation Health. {error}"
+                )
+            }
+        };
+        let error: String = error.chars().take(2048).collect();
+        self.media_fallback = Some(error.clone());
+        SendError::Interrupted(error)
+    }
+
+    pub(super) fn due_transfer_recovery(&mut self, now: Instant) -> Option<DaemonEvent> {
+        if self.removal.is_some() || !self.transfer_recovery.take_due(now) {
+            return None;
+        }
+        info!(
+            "[devices] LCD[{}] recreating the LCD after an interrupted transfer",
+            self.index
+        );
+        let error = self
+            .media_fallback
+            .clone()
+            .unwrap_or_else(|| "LCD packet transfer was interrupted".into());
+        self.removal_event(error)
+    }
+
+    pub(super) fn take_transfer_recovery(&mut self) -> TransferRecovery {
+        std::mem::take(&mut self.transfer_recovery).for_replacement()
+    }
+
+    pub(super) fn restore_transfer_recovery(&mut self, recovery: TransferRecovery) {
+        self.transfer_recovery = recovery;
+    }
+
     pub(super) fn retry_failed_source(&mut self) {
         if !self.is_initialized() || self.removal.is_some() {
+            return;
+        }
+        if self.transfer_recovery.retry_now(Instant::now()) {
             return;
         }
         if self.source_failed || self.media_stage == lianli_shared::ipc::MediaRuntimeStage::Failed {
@@ -2381,6 +2571,8 @@ fn stream_h264_file_to_hid(
 
 pub(super) enum SendError {
     Stopped(String),
+    /// The device stays wedged until the target recreates it.
+    Interrupted(String),
     Usb(lianli_transport::TransportError),
     Other(anyhow::Error),
 }
@@ -2394,21 +2586,185 @@ mod tests {
     fn stream_failure_belongs_only_to_its_uncancelled_generation() {
         let control = StreamControl::default();
         let old = control.next();
-        control.failed(&old, "old transfer failure");
+        control.failed(&old, "old transfer failure".into());
         assert_eq!(
-            control.take_failure().as_deref(),
+            control
+                .take_failure()
+                .map(|failure| failure.message)
+                .as_deref(),
             Some("old transfer failure")
         );
         assert!(control.restart(&old).is_none());
         let current = control.next();
         assert!(control.take_failure().is_none());
-        control.failed(&old, "late old failure");
+        control.failed(&old, "late old failure".into());
         assert!(control.take_failure().is_none());
-        control.failed(&current, &"界".repeat(3000));
-        assert_eq!(control.take_failure().unwrap().chars().count(), 2048);
+        control.failed(&current, "界".repeat(3000).as_str().into());
+        assert_eq!(
+            control.take_failure().unwrap().message.chars().count(),
+            2048
+        );
         control.cancel();
-        control.failed(&current, "cancelled transfer");
+        control.failed(&current, "cancelled transfer".into());
         assert!(control.take_failure().is_none());
+    }
+
+    fn interrupted_transfer() -> StreamFailure {
+        let error =
+            anyhow::Error::from(lianli_transport::TransportError::Usb(rusb::Error::Timeout))
+                .context(lianli_devices::winusb::lcd::LcdTransferInterrupted)
+                .context("streaming H.264");
+        StreamFailure::from_error(&format!("Live H.264 transfer failed: {error:#}"), &error)
+    }
+
+    #[test]
+    fn interrupted_transfer_survives_stream_restarts_and_blocks_encoder_restart() {
+        let (tx, _rx) = std::sync::mpsc::sync_channel(1);
+        let control = Arc::new(StreamControl::default());
+        let owner = control.next();
+        let restarter = StreamRestarter::WinUsb(tx, control.clone(), Mutex::new(owner.clone()));
+        control.failed(&owner, "encoder pipe closed".into());
+        assert!(!restarter.transfer_interrupted());
+        let owner = control.restart(&owner).unwrap();
+        assert!(control.take_failure().is_none());
+
+        control.failed(&owner, interrupted_transfer());
+        assert!(restarter.transfer_interrupted());
+        control.restart(&owner).unwrap();
+        control.next();
+        assert!(restarter.transfer_interrupted());
+        let failure = control.take_failure().unwrap();
+        assert!(failure.interrupted);
+        assert!(failure.message.contains("USB error"));
+        assert!(!restarter.transfer_interrupted());
+    }
+
+    #[test]
+    fn transfer_recovery_backoff_is_bounded_and_resets_after_a_healthy_period() {
+        let start = Instant::now();
+        let mut recovery = TransferRecovery::default();
+        assert!(!recovery.retry_now(start));
+        let mut now = start;
+        for (attempt, seconds) in (1..).zip([1, 2, 4, 8, 16]) {
+            let delay = Duration::from_secs(seconds);
+            assert_eq!(recovery.schedule(now), Some((attempt, delay)));
+            assert_eq!(recovery.schedule(now), Some((attempt, delay)));
+            assert!(!recovery.take_due(now + delay - Duration::from_millis(1)));
+            assert!(recovery.take_due(now + delay));
+            assert!(!recovery.take_due(now + delay));
+            recovery = std::mem::take(&mut recovery).for_replacement();
+            now += delay + Duration::from_secs(1);
+        }
+        assert_eq!(recovery.schedule(now), None);
+        assert!(!recovery.take_due(now + Duration::from_secs(3600)));
+
+        let mut replacement = std::mem::take(&mut recovery).for_replacement();
+        assert_eq!(replacement.schedule(now + Duration::from_secs(1)), None);
+        let healthy = now + TRANSFER_RECOVERY_HEALTHY_RESET + Duration::from_secs(2);
+        assert_eq!(
+            replacement.schedule(healthy),
+            Some((1, Duration::from_secs(1)))
+        );
+    }
+
+    #[test]
+    fn interrupted_stream_recreates_the_lcd_after_backoff_or_on_manual_retry() {
+        let (tx, _rx) = std::sync::mpsc::sync_channel(1);
+        let asset = Arc::new(MediaAsset {
+            kind: MediaAssetKind::Static {
+                frame: lianli_media::Retained::frame(vec![1]).unwrap(),
+            },
+            config_key: "interrupted".into(),
+            stream_fps: 30.0,
+            hardware_video: false,
+        });
+        let mut target = ActiveTarget::new(
+            0,
+            "us88".into(),
+            LcdBackend::WinUsb(ThreadedWinUsbSender {
+                shares_cooling: false,
+                transport: None,
+                tx,
+                stream_control: Arc::new(StreamControl::default()),
+                frame_delivery: Arc::new(FrameDelivery::default()),
+                closing: Arc::new(AtomicBool::new(false)),
+                thread: None,
+            }),
+            asset,
+            ScreenInfo::TLLCD,
+            true,
+            None,
+        );
+        struct LiveStream;
+        impl FrameSource for LiveStream {
+            fn is_autonomous(&self) -> bool {
+                true
+            }
+        }
+        let fail_stream = |target: &mut ActiveTarget| {
+            target.media = Box::new(LiveStream);
+            target.media_pending = false;
+            target.media_stage = lianli_shared::ipc::MediaRuntimeStage::AutonomousSourceConfigured;
+            let LcdBackend::WinUsb(sender) = &target.lcd else {
+                unreachable!()
+            };
+            let owner = sender.stream_control.next();
+            sender.stream_control.failed(&owner, interrupted_transfer());
+            target.send_frame(None, &mut PacketBuilder::new())
+        };
+
+        let failed_at = Instant::now();
+        assert!(matches!(
+            fail_stream(&mut target),
+            Err(SendError::Interrupted(_))
+        ));
+        assert_eq!(
+            target.media_status().stage,
+            lianli_shared::ipc::MediaRuntimeStage::Failed
+        );
+        assert!(target.due_transfer_recovery(failed_at).is_none());
+        let Some(DaemonEvent::RemoveFailedLcd { removal, .. }) =
+            target.due_transfer_recovery(Instant::now() + Duration::from_secs(1))
+        else {
+            panic!("interrupted transfer must recreate the LCD")
+        };
+        assert!(target.matches_removal(&removal));
+        assert!(target
+            .due_transfer_recovery(Instant::now() + Duration::from_secs(60))
+            .is_none());
+
+        let mut replacement = ActiveTarget::new(
+            0,
+            "us88".into(),
+            LcdBackend::WinUsb(ThreadedWinUsbSender {
+                shares_cooling: false,
+                transport: None,
+                tx: std::sync::mpsc::sync_channel(1).0,
+                stream_control: Arc::new(StreamControl::default()),
+                frame_delivery: Arc::new(FrameDelivery::default()),
+                closing: Arc::new(AtomicBool::new(false)),
+                thread: None,
+            }),
+            target.asset.clone(),
+            ScreenInfo::TLLCD,
+            true,
+            None,
+        );
+        replacement.retry_failed_source();
+        assert!(replacement.due_transfer_recovery(Instant::now()).is_none());
+        replacement.restore_transfer_recovery(target.take_transfer_recovery());
+        assert!(matches!(
+            fail_stream(&mut replacement),
+            Err(SendError::Interrupted(_))
+        ));
+        assert!(replacement
+            .due_transfer_recovery(Instant::now() + Duration::from_millis(1500))
+            .is_none());
+        replacement.retry_failed_source();
+        assert!(matches!(
+            replacement.due_transfer_recovery(Instant::now()),
+            Some(DaemonEvent::RemoveFailedLcd { .. })
+        ));
     }
 
     #[test]
@@ -2601,7 +2957,13 @@ mod tests {
         sender.reset_frame_delivery();
         finish_tx.send(()).unwrap();
         worker.join().unwrap();
-        assert_eq!(old.failure.lock().as_deref(), Some("late failure"));
+        assert_eq!(
+            old.failure
+                .lock()
+                .as_ref()
+                .map(|failure| failure.message.as_str()),
+            Some("late failure")
+        );
         assert!(sender.frame_delivery.failure.lock().is_none());
         old.submit(|| panic!("retired JPEG must not touch the device"));
         sender.frame_delivery.submit(|| Ok(()));
@@ -2610,7 +2972,14 @@ mod tests {
             .frame_delivery
             .submit(|| Err(anyhow::anyhow!("x".repeat(4096))));
         assert_eq!(
-            sender.frame_delivery.failure.lock().as_ref().unwrap().len(),
+            sender
+                .frame_delivery
+                .failure
+                .lock()
+                .as_ref()
+                .unwrap()
+                .message
+                .len(),
             2048
         );
     }
@@ -2631,12 +3000,19 @@ mod tests {
         let current = sender.stream_control.current.lock().clone();
         let observer = sender.stream_control.transfer_observer(&current).unwrap();
         observer.store(true, Ordering::Release);
-        sender.stream_control.failed(&current, "existing failure");
+        sender
+            .stream_control
+            .failed(&current, "existing failure".into());
         assert!(sender.stream_h264("rejected".into(), true, 20.0).is_err());
         assert!(!current.load(Ordering::Acquire));
         assert_eq!(sender.stream_control.transferred(), Some(true));
         assert_eq!(
-            sender.stream_control.failure.lock().as_deref(),
+            sender
+                .stream_control
+                .failure
+                .lock()
+                .as_ref()
+                .map(|failure| failure.message.as_str()),
             Some("existing failure")
         );
         assert!(sender
@@ -2950,7 +3326,9 @@ mod tests {
         assert_eq!(brightness_drops.load(Ordering::Relaxed), 1);
         if let LcdBackend::WinUsb(sender) = &target.lcd {
             let owner = sender.stream_control.next();
-            sender.stream_control.failed(&owner, "transfer stopped");
+            sender
+                .stream_control
+                .failed(&owner, "transfer stopped".into());
         }
         assert!(matches!(
             target.send_frame(None, &mut PacketBuilder::new()),
