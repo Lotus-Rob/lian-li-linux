@@ -3,6 +3,46 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v1.2.0 — 2026-10-12
+
+### Features
+- **gui**: Compact LCD, devices, fans and health layouts  ([#242](https://github.com/sgtaziz/lian-li-linux/pull/242))
+- **lcd**: Live preview with fit, zoom and pan  ([#243](https://github.com/sgtaziz/lian-li-linux/pull/243))
+- **gui**: Reorder and rename LCD screens  ([#244](https://github.com/sgtaziz/lian-li-linux/pull/244))
+- **gui**: Compact RGB layout  (`bd8b5ac`)
+- **gui**: Rename any device  ([#239](https://github.com/sgtaziz/lian-li-linux/pull/239))
+
+### Fixes
+- **packaging**: Require Rust 1.98 and honor the pinned toolchain  (`99bc755`)
+- **lcd**: Recover H.264 streams after a stalled transfer  (`f0527f3`)
+- **wireless**: Release dongle handles and recover a wedged transmitter  (`b10cbe2`)
+- **wireless**: Keep invalid channels out of traffic and back off rebinds  (`73e614a`)
+- **lcd**: Bound H.264 transfer recovery and honor stream stop  (`83c9bbf`)
+- **lcd**: Keep transfer recovery budgets across brief disconnects  (`fccc071`)
+- **wireless**: Bound recovery resets and count only sent rebinds  (`66dc34b`)
+- **wireless**: Fail cancelled starts and join rebinds at shutdown  (`a50d9a7`)
+- **usb**: Rescan USB devices when libusb misses hotplug events  (`b36cc19`)
+- **evdi**: Report a missing EVDI library in the daemon environment  (`d763adc`)
+- **gui**: Open external links on the host from Distrobox  (`5bada84`)
+- **gui**: Drop the shell plugin and verify the host-spawn bridge for links  (`a7f3499`)
+- **gui**: Number identical devices the same on every page  (`40edcd1`)
+- **gui**: Stop the fans page crashing on curve users  (`24c00b3`)
+- **gui**: Let pages fill wide windows  (`67bc2e8`)
+- **lcd**: Pause the video preview until played and keep its size stable  (`19ba734`)
+- **gui**: Align device row columns across the list  (`9be1a91`)
+- **wireless**: Space frames sent to different devices  (`5207e34`)
+- **rgb**: Keep leaked effect bytes out of valid addresses  (`f6586fe`)
+- **wireless**: Reject duplicate rx among our own devices  (`08f3ed2`)
+- **wireless**: Log reported master changes  (`2eccab3`)
+- **wireless**: Keep flagged duplicates controlled until rebound  (`a6272bf`)
+- **wireless**: Debounce duplicate rx before rebinding  (`4a1227a`)
+- **wireless**: Rebind devices whose stored master repeats one of our bytes  (`01175a4`)
+- **wireless**: Name the dongle IDs when none is found  (`b458690`)
+- **wireless**: Offer a rebind for bound devices that stopped following this dongle  (`c2e1c75`)
+
+### Other changes
+- [TEMPLATE] add RX-78 ICE community dashboard  ([#248](https://github.com/sgtaziz/lian-li-linux/pull/248))
+
 ## v1.1.6 — 2026-10-06
 
 ### CI
