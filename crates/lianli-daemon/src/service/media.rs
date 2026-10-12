@@ -342,8 +342,9 @@ impl ServiceManager {
             .iter()
             .map(|candidate| candidate.device_id.clone())
             .collect();
+        let now = Instant::now();
         self.lcd_transfer_recovery
-            .retain(|device_id, _| present.contains(device_id));
+            .retain(|device_id, recovery| present.contains(device_id) || !recovery.expired(now));
         self.ipc.state.lock().state_health.retain_lcds(&present);
         let mut new_targets = HashMap::new();
         let mut new_media_targets = HashMap::new();

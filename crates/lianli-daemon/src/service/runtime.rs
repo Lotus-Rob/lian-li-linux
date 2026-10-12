@@ -1147,6 +1147,11 @@ impl TransferRecovery {
         Some((self.attempts, delay))
     }
 
+    pub(super) fn expired(&self, now: Instant) -> bool {
+        self.last_failure
+            .is_none_or(|at| now.saturating_duration_since(at) > TRANSFER_RECOVERY_HEALTHY_RESET)
+    }
+
     fn take_due(&mut self, now: Instant) -> bool {
         if self.due.is_some_and(|due| now >= due) {
             self.due = None;
@@ -2679,6 +2684,16 @@ mod tests {
             replacement.schedule(healthy),
             Some((1, Duration::from_secs(1)))
         );
+    }
+
+    #[test]
+    fn transfer_recovery_outlives_a_brief_disappearance_but_not_a_healthy_period() {
+        let now = Instant::now();
+        let mut recovery = TransferRecovery::default();
+        assert!(recovery.expired(now));
+        recovery.schedule(now);
+        assert!(!recovery.expired(now + Duration::from_secs(5)));
+        assert!(recovery.expired(now + TRANSFER_RECOVERY_HEALTHY_RESET + Duration::from_secs(1)));
     }
 
     #[test]
