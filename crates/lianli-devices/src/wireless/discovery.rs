@@ -277,6 +277,27 @@ pub(super) fn is_valid_address(channel: u8, rx: u8) -> bool {
     is_valid_channel(channel) && is_valid_rx(rx)
 }
 
+/// Receivers can store a bind record where one byte of our master MAC repeats
+/// through the rest of the master, the channel and rx. Requiring the exact
+/// smear keeps another controller's devices from ever matching.
+pub(super) fn is_smeared_local_master(
+    reported: &[u8; 6],
+    local: &[u8; 6],
+    channel: u8,
+    rx: u8,
+) -> bool {
+    if reported == local || *local == [0; 6] {
+        return false;
+    }
+    (2..=4).any(|k| {
+        let byte = local[k];
+        reported[..=k] == local[..=k]
+            && reported[k + 1..].iter().all(|&b| b == byte)
+            && channel == byte
+            && rx == byte
+    })
+}
+
 pub(super) const ACK_FRESHNESS: Duration = Duration::from_secs(3);
 pub(super) const REBIND_FOREIGN_AFTER: Duration = Duration::from_secs(10);
 /// Devices that swap slots briefly look like duplicates until both commit.
@@ -1225,6 +1246,84 @@ mod tests {
                 }
             }
         }
+    }
+
+    const REPORTER_MASTER: [u8; 6] = [0xda, 0x82, 0x10, 0x7a, 0x4e, 0xe0];
+
+    #[test]
+    fn smeared_local_master_matches_only_the_exact_smear() {
+        let local = REPORTER_MASTER;
+        let cases = [
+            ([0xda, 0x82, 0x10, 0x7a, 0x7a, 0x7a], 0x7a, 0x7a, true),
+            ([0xda, 0x82, 0x10, 0x10, 0x10, 0x10], 0x10, 0x10, true),
+            ([0xda, 0x82, 0x10, 0x7a, 0x4e, 0x4e], 0x4e, 0x4e, true),
+            ([0xda, 0x82, 0x82, 0x82, 0x82, 0x82], 0x82, 0x82, false),
+            ([0xda, 0x82, 0x10, 0x7a, 0x7a, 0x7a], 0x7a, 8, false),
+            ([0xda, 0x82, 0x10, 0x7a, 0x7a, 0x7a], 8, 0x7a, false),
+            ([0xda, 0x82, 0x10, 0x7a, 0x7a, 0x7b], 0x7a, 0x7a, false),
+            ([0xda, 0x82, 0x10, 0x7a, 0x4e, 0xe1], 0x4e, 0x4e, false),
+            ([0x11, 0x22, 0x33, 0x44, 0x55, 0x66], 0x44, 0x44, false),
+            (local, 0x4e, 0x4e, false),
+        ];
+        for (reported, channel, rx, expected) in cases {
+            assert_eq!(
+                is_smeared_local_master(&reported, &local, channel, rx),
+                expected,
+                "{reported:02x?} ch={channel} rx={rx}"
+            );
+        }
+        assert!(!is_smeared_local_master(&[0; 6], &[0; 6], 0, 0));
+    }
+
+    fn smeared_sighting(mac: [u8; 6]) -> DiscoveredDevice {
+        let mut sighting = rec(mac, [0xda, 0x82, 0x10, 0x7a, 0x7a, 0x7a]);
+        sighting.channel = 0x7a;
+        sighting.rx_type = 0x7a;
+        sighting
+    }
+
+    fn age_foreign_flags(controller: &super::super::controller::WirelessController) {
+        for h in controller.device_health.lock().values_mut() {
+            h.foreign_since = h.foreign_since.map(|since| since - REBIND_FOREIGN_AFTER);
+        }
+    }
+
+    #[test]
+    fn our_device_with_a_smeared_master_becomes_a_rebind_candidate() {
+        let local = REPORTER_MASTER;
+        let mac = [1; 6];
+        let smear = smeared_sighting(mac).master_mac;
+        for case in ["aged", "fresh", "smear online", "manually unbound"] {
+            let controller = controller_with_master(local);
+            merge_into(&controller, &[rec(mac, local)], DEBOUNCE_SIGHTINGS);
+            if case == "smear online" {
+                merge_master_sightings(&[(smear, 8)], &local, &controller.master_entries);
+            }
+            if case == "manually unbound" {
+                controller.confirm_binding(&mac, false);
+            }
+            merge_into(&controller, &[smeared_sighting(mac)], DEBOUNCE_SIGHTINGS);
+            if case != "fresh" {
+                age_foreign_flags(&controller);
+            }
+            let expected = if case == "aged" { vec![mac] } else { vec![] };
+            assert_eq!(controller.rebind_candidates(), expected, "{case}");
+        }
+    }
+
+    #[test]
+    fn device_never_ours_with_a_lookalike_master_is_never_a_rebind_candidate() {
+        let local = REPORTER_MASTER;
+        let mac = [1; 6];
+        let controller = controller_with_master(local);
+        merge_into(
+            &controller,
+            &[smeared_sighting(mac)],
+            DEBOUNCE_SIGHTINGS * 2,
+        );
+        age_foreign_flags(&controller);
+        assert!(controller.rebind_candidates().is_empty());
+        assert!(controller.unbound_devices().iter().any(|d| d.mac == mac));
     }
 
     #[test]

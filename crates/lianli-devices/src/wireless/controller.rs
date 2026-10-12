@@ -1,7 +1,8 @@
 use super::convergence::{PendingQueue, TargetSeqMap};
 use super::discovery::{
-    is_valid_address, poll_and_discover, traffic_channel, DeviceHealthMap, DiscoveredDevice,
-    MasterEntryMap, ReceiverState, ACK_FRESHNESS, REBIND_DUPLICATE_AFTER, REBIND_FOREIGN_AFTER,
+    is_smeared_local_master, is_valid_address, poll_and_discover, traffic_channel, DeviceHealthMap,
+    DiscoveredDevice, MasterEntryMap, ReceiverState, ACK_FRESHNESS, REBIND_DUPLICATE_AFTER,
+    REBIND_FOREIGN_AFTER,
 };
 use super::mb_sync::MbRgbTargetMap;
 use super::recovery::{write_companion_reset, Dongle, DongleFailure};
@@ -672,6 +673,7 @@ impl WirelessController {
         if local == [0; 6] {
             return Vec::new();
         }
+        let online_masters: Vec<[u8; 6]> = self.master_entries.lock().keys().copied().collect();
         self.device_health
             .lock()
             .iter()
@@ -684,6 +686,14 @@ impl WirelessController {
                         && h.confirmed_invalid_address == Some((h.raw_channel, h.raw_rx))
                         && h.duplicate_since
                             .is_none_or(|t| t.elapsed() >= REBIND_DUPLICATE_AFTER);
+                }
+                if h.observed_master == h.raw_master
+                    && is_smeared_local_master(&h.raw_master, &local, h.raw_channel, h.raw_rx)
+                {
+                    return h.bind_intent
+                        && !online_masters.contains(&h.raw_master)
+                        && h.foreign_since
+                            .is_some_and(|t| t.elapsed() >= REBIND_FOREIGN_AFTER);
                 }
                 h.observed_master == [0; 6]
                     && h.raw_master == [0; 6]
