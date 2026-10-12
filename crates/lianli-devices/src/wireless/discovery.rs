@@ -599,9 +599,11 @@ pub(super) fn poll_and_discover(
                 offset += 42;
             }
 
-            merge_sightings(&found, health_map, discovered_devices, master_mac);
+            let master_changes =
+                merge_sightings(&found, health_map, discovered_devices, master_mac);
             let local = *master_mac.lock();
             merge_master_sightings(&found_masters, &local, master_entries);
+            log_master_changes(&master_changes, &local, master_entries);
         }
     }
 
@@ -625,15 +627,45 @@ fn validate_discovery_response(response: &[u8], pages: u8) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct MasterChange {
+    device: [u8; 6],
+    from: [u8; 6],
+    to: [u8; 6],
+}
+
+fn log_master_changes(changes: &[MasterChange], local: &[u8; 6], masters: &MasterEntryMap) {
+    if changes.is_empty() {
+        return;
+    }
+    let masters = masters.lock();
+    for change in changes {
+        let owner = if change.to == *local {
+            "this dongle"
+        } else if change.to == [0; 6] {
+            "no master"
+        } else if masters.contains_key(&change.to) {
+            "another online master"
+        } else {
+            "a master not heard by this dongle"
+        };
+        info!(
+            "{:02x?} now reports master {:02x?} ({owner}), previously {:02x?}",
+            change.device, change.to, change.from
+        );
+    }
+}
+
 fn merge_sightings(
     found: &[DiscoveredDevice],
     health_map: &DeviceHealthMap,
     discovered_devices: &Arc<Mutex<Vec<DiscoveredDevice>>>,
     master_mac: &Arc<Mutex<[u8; 6]>>,
-) {
+) -> Vec<MasterChange> {
     let now = Instant::now();
     let local = *master_mac.lock();
     let mut health = health_map.lock();
+    let mut master_changes = Vec::new();
 
     for rec in found {
         let rx_taken_by = rx_holder(&health, rec, &local);
@@ -676,6 +708,13 @@ fn merge_sightings(
         p.bind_intent = intent;
 
         if let Some(m) = commit_streak(&mut h.master_cand, rec.master_mac) {
+            if m != h.observed_master {
+                master_changes.push(MasterChange {
+                    device: rec.mac,
+                    from: h.observed_master,
+                    to: m,
+                });
+            }
             h.observed_master = m;
             let steal_back = intent && h.published.master_mac == local && m != local;
             if !steal_back {
@@ -733,6 +772,7 @@ fn merge_sightings(
     }
 
     rebuild_published_vec(&health, discovered_devices, &local);
+    master_changes
 }
 
 /// The vendor treats two devices under its own master reporting the same rx
@@ -1377,6 +1417,30 @@ mod tests {
             foreign_b
         );
         assert_eq!(devices.lock().len(), 1);
+    }
+
+    #[test]
+    fn committed_master_changes_are_reported_once_per_transition() {
+        let (health, devices, master) = setup();
+        let mac = [1, 2, 3, 4, 5, 6];
+        let local = *master.lock();
+        let foreign = [7u8; 6];
+        let sightings = |owners: &[[u8; 6]]| -> Vec<MasterChange> {
+            owners
+                .iter()
+                .flat_map(|owner| merge_sightings(&[rec(mac, *owner)], &health, &devices, &master))
+                .collect()
+        };
+        let change = |from, to| MasterChange {
+            device: mac,
+            from,
+            to,
+        };
+
+        assert!(sightings(&[local; 6]).is_empty());
+        assert!(sightings(&[foreign, local, foreign, local]).is_empty());
+        assert_eq!(sightings(&[foreign; 9]), vec![change(local, foreign)]);
+        assert_eq!(sightings(&[[0; 6]; 3]), vec![change(foreign, [0; 6])]);
     }
 
     #[test]
