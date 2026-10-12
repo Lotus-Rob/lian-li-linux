@@ -73,8 +73,8 @@ const curveUsers = computed(() => {
     const count = slots.filter((speed) => speed === name).length;
     if (!count) return [];
     if (!device) return [`${group.device_id ?? "Unknown device"} (offline)`];
-    const name = names.label(device.device_id, fanLabels.value.get(device.device_id) ?? device.name);
-    return [`${name} (${count} fan${count === 1 ? "" : "s"})`];
+    const label = names.label(device.device_id, fanLabels.value.get(device.device_id) ?? device.name);
+    return [`${label} (${count} fan${count === 1 ? "" : "s"})`];
   });
 });
 
