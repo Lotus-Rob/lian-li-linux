@@ -48,6 +48,17 @@ fails in a container. Do not enable the DisplayLink COPR inside the box. Kernel 
 belong on the host and require a method supported by that host, including its kernel updates.
 Installing a module inside the box does not add it to an immutable host.
 
+EVDI desktop mode also needs the EVDI userspace library inside the box. The package
+only suggests it, so install it explicitly, then restart the daemon service:
+
+```sh
+sudo dnf install --setopt=install_weak_deps=False lian-li-linux-evdi
+```
+
+This installs only the library. The EVDI kernel module still belongs on the host.
+Installation Health warns when the host has loaded EVDI but the daemon cannot load
+the library.
+
 ## Desktop modules on an immutable host
 
 Hyprland's native headless backend needs neither Hermes-KMS nor EVDI. For other
@@ -68,8 +79,8 @@ Installing the package inside Distrobox cannot fix the host deployment.
 
 After reboot, `modinfo -k "$(uname -r)" evdi` in a host terminal checks whether a
 module is installed for the running kernel. It does not prove that the module
-loads or that capture works. The box also needs the EVDI userspace library and
-access to the host's DRM nodes.
+loads or that capture works. The box also needs the
+[EVDI userspace library](#install-inside-the-box) and access to the host's DRM nodes.
 
 For Hermes-KMS or another immutable distribution, use a host-maintained package
 or image that supplies the module for each kernel update. This project does not

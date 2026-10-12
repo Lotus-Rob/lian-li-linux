@@ -168,6 +168,11 @@ pub fn inspect(hid_backend: Option<HidBackend>) -> Result<Report> {
     let mut findings = findings(&context, uid, &groups, configured, access);
     if let Some(backend) = hid_backend {
         findings.push(crate::usb_permissions::inspect(&context, backend));
+        findings.extend(evdi_library(
+            &context,
+            Path::new("/sys/module/evdi").is_dir(),
+            lianli_evdi::probe_runtime,
+        ));
     } else if let Some(finding) = hermes_access(uid) {
         findings.push(finding);
     }
@@ -178,6 +183,54 @@ pub fn inspect(hid_backend: Option<HidBackend>) -> Result<Report> {
         groups_fingerprint: group_fingerprint(&groups),
         hid_backend,
         findings,
+    })
+}
+
+fn evdi_library(
+    context: &InstallationContext,
+    module_loaded: bool,
+    probe: impl FnOnce() -> Result<(i32, i32, i32)>,
+) -> Option<InstallationFinding> {
+    if !module_loaded {
+        return None;
+    }
+    let (state, severity, evidence, remediation) = match probe() {
+        Ok((major, minor, patch)) => (
+            CheckState::Passed,
+            FindingSeverity::Info,
+            format!("The daemon environment loads libevdi {major}.{minor}.{patch}."),
+            String::new(),
+        ),
+        Err(error) => (
+            CheckState::Failed,
+            FindingSeverity::Warning,
+            format!("The host has loaded the evdi module, but the daemon environment cannot load its userspace library: {error:#}"),
+            match context {
+                InstallationContext::Distrobox { name } => format!("Install the library inside the box with distrobox-enter --name {name} -- sudo dnf install --setopt=install_weak_deps=False lian-li-linux-evdi, or libevdi0 on a Debian or Ubuntu box, then restart the daemon service. The host library is not visible inside the box."),
+                _ => "Install libevdi 1.14 or 1.15 where the daemon runs: lian-li-linux-evdi on Fedora, libevdi0 on Debian or Ubuntu, or evdi-dkms on Arch. Then restart the daemon service.".into(),
+            },
+        ),
+    };
+    let (label, guide) = match context {
+        InstallationContext::Native => ("Native daemon".into(), InstallationGuide::Troubleshooting),
+        InstallationContext::Distrobox { name } => {
+            (format!("Distrobox {name}"), InstallationGuide::Distrobox)
+        }
+        InstallationContext::UnsupportedContainer => (
+            "Unsupported container".into(),
+            InstallationGuide::Troubleshooting,
+        ),
+    };
+    Some(InstallationFinding {
+        code: "runtime.evdi_library".into(),
+        state,
+        severity,
+        feature: "EVDI desktop mode".into(),
+        context: label,
+        title: "EVDI userspace library".into(),
+        evidence,
+        remediation,
+        guide,
     })
 }
 
@@ -407,6 +460,39 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert!(run_check(|| Ok(()), Duration::from_secs(1)).is_ok());
+    }
+
+    #[test]
+    fn evdi_library_is_checked_only_when_the_host_loaded_evdi() {
+        let boxed = InstallationContext::Distrobox {
+            name: "lianli".into(),
+        };
+        assert!(evdi_library(&boxed, false, || panic!("Do not probe")).is_none());
+
+        let missing = evdi_library(&boxed, true, || {
+            Err(anyhow::anyhow!("libevdi.so.1: cannot open shared object"))
+        })
+        .unwrap();
+        assert_eq!(missing.state, CheckState::Failed);
+        assert_eq!(missing.severity, FindingSeverity::Warning);
+        assert_eq!(missing.guide, InstallationGuide::Distrobox);
+        assert!(missing.evidence.contains("libevdi.so.1"));
+        assert!(missing.remediation.contains(
+            "--name lianli -- sudo dnf install --setopt=install_weak_deps=False lian-li-linux-evdi"
+        ));
+
+        let native = evdi_library(&InstallationContext::Native, true, || {
+            Err(anyhow::anyhow!("missing"))
+        })
+        .unwrap();
+        assert_eq!(native.guide, InstallationGuide::Troubleshooting);
+        assert!(!native.remediation.contains("distrobox"));
+
+        let loaded = evdi_library(&boxed, true, || Ok((1, 14, 11))).unwrap();
+        assert_eq!(loaded.state, CheckState::Passed);
+        assert_eq!(loaded.severity, FindingSeverity::Info);
+        assert!(loaded.evidence.contains("1.14.11"));
+        assert!(loaded.remediation.is_empty());
     }
 
     #[test]

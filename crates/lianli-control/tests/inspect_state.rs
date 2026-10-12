@@ -22,7 +22,11 @@ fn runtime_diagnostics_preserve_the_calling_account_and_reject_hidden_host_acces
         report.hid_backend,
         Some(lianli_shared::config::HidBackend::Hidraw)
     );
-    assert_eq!(report.findings.len(), 2);
+    let evdi_loaded = std::path::Path::new("/sys/module/evdi").is_dir();
+    assert_eq!(report.findings.len(), 2 + usize::from(evdi_loaded));
+    if evdi_loaded {
+        assert_eq!(report.findings[2].code, "runtime.evdi_library");
+    }
     assert_eq!(report.findings[1].code, "usb.node_access");
     assert_eq!(
         report.findings[1].state,
