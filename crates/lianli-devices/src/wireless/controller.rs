@@ -6,14 +6,15 @@ use super::discovery::{
 use super::mb_sync::MbRgbTargetMap;
 use super::recovery::{write_companion_reset, Dongle, DongleFailure};
 use super::transport::{
-    open_any, release_transport, with_transport_recovery, SharedTransport, TransportState,
+    open_any, release_transport, with_transport_recovery, DongleLink, SharedTransport,
+    TransportState,
 };
 use super::{
     CMD_RX_LCD_MODE, CMD_RX_QUERY_34, CMD_RX_QUERY_37, CMD_VIDEO_START, RF_CHUNKS, RF_CHUNK_SIZE,
     RF_DATA_SIZE, RF_SELECT, RX_IDS, TX_IDS, USB_CMD_GET_MAC, USB_CMD_SEND_RF,
 };
 use anyhow::{bail, Context, Result};
-use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
+use lianli_transport::usb::USB_TIMEOUT;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
@@ -482,18 +483,20 @@ impl WirelessController {
                     .write(&CMD_VIDEO_START, USB_TIMEOUT)
                     .context("sending TX video start")?;
                 thread::sleep(Duration::from_millis(2));
-                for device_idx in 0..device_count {
-                    let mut cmd = vec![0u8; 64];
-                    cmd[0] = USB_CMD_SEND_RF;
-                    cmd[1] = device_idx as u8;
-                    cmd[2] = master_ch;
-                    cmd[3] = 0xFF;
-                    handle
-                        .write(&cmd, USB_TIMEOUT)
-                        .context("sending TX prep command")?;
-                    thread::sleep(Duration::from_millis(1));
-                }
-                Ok(())
+                handle.paced_frame(&[0; RF_CHUNK_SIZE], || {
+                    for device_idx in 0..device_count {
+                        let mut cmd = vec![0u8; 64];
+                        cmd[0] = USB_CMD_SEND_RF;
+                        cmd[1] = device_idx as u8;
+                        cmd[2] = master_ch;
+                        cmd[3] = 0xFF;
+                        handle
+                            .write(&cmd, USB_TIMEOUT)
+                            .context("sending TX prep command")?;
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Ok(())
+                })
             })?;
             self.video_mode_active.store(true, Ordering::Release);
             info!("Video mode activated with {device_count} device(s)");
@@ -512,23 +515,25 @@ impl WirelessController {
         let rf_data = master_clock_rf_data(&master_mac, payload);
 
         self.tx_recover(|handle| {
-            for chunk_idx in 0..RF_CHUNKS as u8 {
-                let mut packet = vec![0u8; 64];
-                packet[0] = USB_CMD_SEND_RF;
-                packet[1] = chunk_idx;
-                packet[2] = master_ch;
-                packet[3] = 0xFF;
+            handle.paced_frame(&rf_data, || {
+                for chunk_idx in 0..RF_CHUNKS as u8 {
+                    let mut packet = vec![0u8; 64];
+                    packet[0] = USB_CMD_SEND_RF;
+                    packet[1] = chunk_idx;
+                    packet[2] = master_ch;
+                    packet[3] = 0xFF;
 
-                let start = chunk_idx as usize * RF_CHUNK_SIZE;
-                let end = start + RF_CHUNK_SIZE;
-                packet[4..64].copy_from_slice(&rf_data[start..end]);
+                    let start = chunk_idx as usize * RF_CHUNK_SIZE;
+                    let end = start + RF_CHUNK_SIZE;
+                    packet[4..64].copy_from_slice(&rf_data[start..end]);
 
-                handle
-                    .write(&packet, USB_TIMEOUT)
-                    .context("sending master clock packet")?;
-                thread::sleep(Duration::from_millis(1));
-            }
-            Ok(())
+                    handle
+                        .write(&packet, USB_TIMEOUT)
+                        .context("sending master clock packet")?;
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Ok(())
+            })
         })?;
         Ok(())
     }
@@ -587,7 +592,7 @@ impl WirelessController {
 
     pub(super) fn tx_recover<F, R>(&self, op: F) -> Result<R>
     where
-        F: FnMut(&RusbBulk) -> Result<R>,
+        F: FnMut(DongleLink<'_>) -> Result<R>,
     {
         let tx = self.tx.as_ref().context("TX device not connected")?;
         let result = with_transport_recovery(tx, &TX_IDS, "TX", &self.poll_stop, op);
@@ -863,7 +868,7 @@ impl WirelessController {
     /// Send a 240-byte RF packet as 4× 64-byte USB chunks.
     pub(super) fn send_rf_packet(
         &self,
-        handle: &RusbBulk,
+        handle: DongleLink<'_>,
         device: &DiscoveredDevice,
         rf_data: &[u8],
     ) -> Result<()> {
@@ -881,7 +886,7 @@ impl WirelessController {
     /// addressed from the published value reaches nothing at all.
     pub(super) fn send_rf_packet_addressed(
         &self,
-        handle: &RusbBulk,
+        handle: DongleLink<'_>,
         channel: u8,
         rx_target: u8,
         rf_data: &[u8],
@@ -890,27 +895,29 @@ impl WirelessController {
             rf_data.len() == RF_DATA_SIZE,
             "invalid RGB RF packet length"
         );
-        for chunk_idx in 0..RF_CHUNKS as u8 {
-            let mut packet = [0u8; 64];
-            packet[0] = USB_CMD_SEND_RF;
-            packet[1] = chunk_idx;
-            packet[2] = channel;
-            packet[3] = rx_target;
+        handle.paced_frame(rf_data, || {
+            for chunk_idx in 0..RF_CHUNKS as u8 {
+                let mut packet = [0u8; 64];
+                packet[0] = USB_CMD_SEND_RF;
+                packet[1] = chunk_idx;
+                packet[2] = channel;
+                packet[3] = rx_target;
 
-            let start = chunk_idx as usize * RF_CHUNK_SIZE;
-            let end = start + RF_CHUNK_SIZE;
-            packet[4..64].copy_from_slice(&rf_data[start..end]);
+                let start = chunk_idx as usize * RF_CHUNK_SIZE;
+                let end = start + RF_CHUNK_SIZE;
+                packet[4..64].copy_from_slice(&rf_data[start..end]);
 
-            let written = handle
-                .write(&packet, USB_TIMEOUT)
-                .context("sending RGB RF packet")?;
-            anyhow::ensure!(
-                written == packet.len(),
-                "short RGB RF packet write: {written}/64 bytes"
-            );
-            thread::sleep(Duration::from_millis(1));
-        }
-        Ok(())
+                let written = handle
+                    .write(&packet, USB_TIMEOUT)
+                    .context("sending RGB RF packet")?;
+                anyhow::ensure!(
+                    written == packet.len(),
+                    "short RGB RF packet write: {written}/64 bytes"
+                );
+                thread::sleep(Duration::from_millis(1));
+            }
+            Ok(())
+        })
     }
 
     pub(super) fn next_slot_index(&self, device: &DiscoveredDevice) -> u8 {

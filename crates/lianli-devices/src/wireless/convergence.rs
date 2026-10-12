@@ -1,11 +1,11 @@
 use super::controller::WirelessController;
 use super::discovery::{DeviceHealthMap, DiscoveredDevice, ACK_FRESHNESS};
 use super::transport::{
-    with_ready_transport, with_transport_recovery, RecoveryBackoff, SharedTransport,
+    with_ready_transport, with_transport_recovery, DongleLink, RecoveryBackoff, SharedTransport,
 };
 use super::{RF_CHUNKS, RF_CHUNK_SIZE, RF_DATA_SIZE, USB_CMD_SEND_RF};
 use anyhow::{ensure, Context, Result};
-use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
+use lianli_transport::usb::USB_TIMEOUT;
 use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -366,30 +366,32 @@ fn superseded_command(pending: &VecDeque<PendingCommand>, command: &PendingComma
         .any(|new| same_target_slot(new, command) && new.queued_at > command.queued_at)
 }
 
-fn send_rf_frame(handle: &RusbBulk, channel: &u8, rx_type: &u8, rf_data: &[u8]) -> Result<()> {
+fn send_rf_frame(handle: DongleLink<'_>, channel: &u8, rx_type: &u8, rf_data: &[u8]) -> Result<()> {
     ensure!(
         rf_data.len() == RF_DATA_SIZE,
         "invalid wireless command length"
     );
-    for chunk_idx in 0..RF_CHUNKS as u8 {
-        let mut packet = [0u8; 64];
-        packet[0] = USB_CMD_SEND_RF;
-        packet[1] = chunk_idx;
-        packet[2] = *channel;
-        packet[3] = *rx_type;
-        let start = chunk_idx as usize * RF_CHUNK_SIZE;
-        let end = start + RF_CHUNK_SIZE;
-        packet[4..64].copy_from_slice(&rf_data[start..end]);
-        let written = handle
-            .write(&packet, USB_TIMEOUT)
-            .context("sending RF packet chunk")?;
-        ensure!(
-            written == packet.len(),
-            "short wireless command write: {written}/64 bytes"
-        );
-        thread::sleep(Duration::from_millis(1));
-    }
-    Ok(())
+    handle.paced_frame(rf_data, || {
+        for chunk_idx in 0..RF_CHUNKS as u8 {
+            let mut packet = [0u8; 64];
+            packet[0] = USB_CMD_SEND_RF;
+            packet[1] = chunk_idx;
+            packet[2] = *channel;
+            packet[3] = *rx_type;
+            let start = chunk_idx as usize * RF_CHUNK_SIZE;
+            let end = start + RF_CHUNK_SIZE;
+            packet[4..64].copy_from_slice(&rf_data[start..end]);
+            let written = handle
+                .write(&packet, USB_TIMEOUT)
+                .context("sending RF packet chunk")?;
+            ensure!(
+                written == packet.len(),
+                "short wireless command write: {written}/64 bytes"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+        Ok(())
+    })
 }
 
 /// Check whether the device's reported PWM values match the target. Allows a

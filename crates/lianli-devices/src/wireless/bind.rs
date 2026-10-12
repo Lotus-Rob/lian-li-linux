@@ -277,19 +277,22 @@ impl WirelessController {
 
         self.tx_recover(|handle| {
             for _ in 0..3 {
-                for chunk_idx in 0..RF_CHUNKS as u8 {
-                    let mut packet = vec![0u8; 64];
-                    packet[0] = USB_CMD_SEND_RF;
-                    packet[1] = chunk_idx;
-                    packet[2] = master_ch;
-                    packet[3] = 0xFF;
-                    let start = chunk_idx as usize * RF_CHUNK_SIZE;
-                    packet[4..64].copy_from_slice(&rf_data[start..start + RF_CHUNK_SIZE]);
-                    handle
-                        .write(&packet, USB_TIMEOUT)
-                        .context("sending SaveConfig")?;
-                    thread::sleep(Duration::from_millis(1));
-                }
+                handle.paced_frame(&rf_data, || {
+                    for chunk_idx in 0..RF_CHUNKS as u8 {
+                        let mut packet = vec![0u8; 64];
+                        packet[0] = USB_CMD_SEND_RF;
+                        packet[1] = chunk_idx;
+                        packet[2] = master_ch;
+                        packet[3] = 0xFF;
+                        let start = chunk_idx as usize * RF_CHUNK_SIZE;
+                        packet[4..64].copy_from_slice(&rf_data[start..start + RF_CHUNK_SIZE]);
+                        handle
+                            .write(&packet, USB_TIMEOUT)
+                            .context("sending SaveConfig")?;
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Ok(())
+                })?;
                 thread::sleep(Duration::from_millis(200));
             }
             Ok(())

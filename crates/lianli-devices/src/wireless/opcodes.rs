@@ -286,12 +286,14 @@ impl WirelessController {
                     !self.poll_stop.load(Ordering::Acquire),
                     "wireless controller is stopping"
                 );
-                for packet in packets {
-                    let written = handle.write(&packet, USB_TIMEOUT)?;
-                    anyhow::ensure!(written == packet.len(), "short picture packet write");
-                    std::thread::sleep(Duration::from_millis(2));
-                }
-                Ok(())
+                handle.paced_frame(&packets[0][4..], || {
+                    for packet in &packets {
+                        let written = handle.write(packet, USB_TIMEOUT)?;
+                        anyhow::ensure!(written == packet.len(), "short picture packet write");
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                    Ok(())
+                })
             },
         )?;
         Ok((next_seq, sent_at))
