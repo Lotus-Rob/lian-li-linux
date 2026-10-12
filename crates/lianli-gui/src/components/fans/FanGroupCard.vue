@@ -6,7 +6,6 @@ import { MB_SYNC_KEY, MB_SYNC_PREFIX } from "@/types";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
 import { useDeviceNamesStore } from "@/stores/deviceNames";
-import { deviceLabels } from "@/utils/deviceNames";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
 import { FAMILY_DISPLAY } from "@/constants";
 
@@ -25,7 +24,7 @@ const devices = useDevicesStore();
 const names = useDeviceNamesStore();
 
 const title = computed(() =>
-  names.label(props.device.device_id, deviceLabels(devices.fanDevices).get(props.device.device_id) ?? props.device.name),
+  names.label(props.device.device_id, devices.labels.get(props.device.device_id) ?? props.device.name),
 );
 const family = computed(() => {
   const fam = FAMILY_DISPLAY[props.device.family] ?? props.device.family;

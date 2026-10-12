@@ -10,7 +10,6 @@ import { useAioStore } from "@/stores/aio";
 import { useConfigStore } from "@/stores/config";
 import { useDaemonStore } from "@/stores/daemon";
 import { useDeviceNamesStore } from "@/stores/deviceNames";
-import { deviceLabels } from "@/utils/deviceNames";
 import { useIpc } from "@/composables/useIpc";
 import EditableName from "@/components/common/EditableName.vue";
 import { fanQuantityKey, fanQuantityPort, stageFanQuantity } from "@/utils/fanQuantity";
@@ -170,7 +169,7 @@ const primaryIcon = computed(() => {
 });
 
 const defaultLabel = computed(() =>
-  deviceLabels(caps.value.lcd ? devices.lcdDevices : devices.displayCards).get(d.value.device_id) ?? d.value.name,
+  devices.labels.get(d.value.device_id) ?? d.value.name,
 );
 const customName = computed(() => names.nameOf(d.value.device_id));
 const role = computed(() => {

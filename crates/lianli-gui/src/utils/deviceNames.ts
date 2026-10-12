@@ -24,6 +24,11 @@ export function deviceLabels(devices: NamedDevice[]): Map<string, string> {
   return labels;
 }
 
-export function rgbDeviceLabels(caps: RgbDeviceCapabilities[]): Map<string, string> {
-  return deviceLabels(caps.map((cap) => ({ device_id: cap.device_id, name: cap.device_name })));
+export function rgbDeviceLabels(
+  caps: RgbDeviceCapabilities[],
+  deviceWide: Map<string, string>,
+): Map<string, string> {
+  const local = deviceLabels(caps.map((cap) => ({ device_id: cap.device_id, name: cap.device_name })));
+  const wide = (id: string) => deviceWide.get(id) ?? deviceWide.get(id.replace(/:group(\d+)$/, ":port$1"));
+  return new Map(caps.map((cap) => [cap.device_id, wide(cap.device_id) ?? local.get(cap.device_id) ?? cap.device_name]));
 }

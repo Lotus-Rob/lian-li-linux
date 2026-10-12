@@ -5,6 +5,7 @@ import type { RgbDeviceCapabilities } from "@/types";
 import { useDaemonStore } from "@/stores/daemon";
 import { useConfigStore } from "@/stores/config";
 import { useDeviceNamesStore } from "@/stores/deviceNames";
+import { useDevicesStore } from "@/stores/devices";
 import { rgbDeviceLabels } from "@/utils/deviceNames";
 import RgbDeviceCard from "@/components/rgb/RgbDeviceCard.vue";
 import RgbSyncEditor from "@/components/rgb/RgbSyncEditor.vue";
@@ -17,8 +18,9 @@ const QUICK_SYNC = "quick-sync";
 const daemon = useDaemonStore();
 const config = useConfigStore();
 const names = useDeviceNamesStore();
+const devices = useDevicesStore();
 
-const rgb =computed(() => config.ensureRgb());
+const rgb = computed(() => config.ensureRgb());
 
 const openrgbEnabled = computed({
   get: () => rgb.value.openrgb_server,
@@ -44,7 +46,7 @@ const statusText = computed(() => {
 });
 
 const rgbCaps = computed(() => config.rgbCaps.filter((c) => !c.rf_owned));
-const labels = computed(() => rgbDeviceLabels(rgbCaps.value));
+const labels = computed(() => rgbDeviceLabels(rgbCaps.value, devices.labels));
 function defaultLabel(cap: RgbDeviceCapabilities): string {
   return labels.value.get(cap.device_id) ?? cap.device_name;
 }

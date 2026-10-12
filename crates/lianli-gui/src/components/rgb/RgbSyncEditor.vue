@@ -10,6 +10,7 @@ import type {
 } from "@/types";
 import { useConfigStore } from "@/stores/config";
 import { useDeviceNamesStore } from "@/stores/deviceNames";
+import { useDevicesStore } from "@/stores/devices";
 import { rgbDeviceLabels } from "@/utils/deviceNames";
 import RgbEffectControls from "@/components/rgb/RgbEffectControls.vue";
 import { copyEffect, recallSyncEffect, rememberSyncEffect } from "@/components/rgb/effectMemory";
@@ -21,7 +22,8 @@ const rgb = computed(() => config.ensureRgb());
 const storedSync = computed(() => rgb.value.merge_lighting ?? null);
 const visibleCaps = computed(() => config.rgbCaps.filter((cap) => !cap.rf_owned));
 const names = useDeviceNamesStore();
-const labels = computed(() => rgbDeviceLabels(visibleCaps.value));
+const devices = useDevicesStore();
+const labels = computed(() => rgbDeviceLabels(visibleCaps.value, devices.labels));
 
 function motherboardSynced(cap: RgbDeviceCapabilities): boolean {
   return rgb.value.devices.find((device) => device.device_id === cap.device_id)?.mb_rgb_sync ?? false;

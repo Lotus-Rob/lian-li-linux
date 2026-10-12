@@ -6,7 +6,6 @@ import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
 import { useLcdScreensStore } from "@/stores/lcdScreens";
 import { useDeviceNamesStore } from "@/stores/deviceNames";
-import { deviceLabels } from "@/utils/deviceNames";
 import { lcdEntryKey, orderedLcdIndices, resolveLcdDevice } from "@/utils/lcdSelection";
 import LcdConfigCard from "@/components/lcd/LcdConfigCard.vue";
 import MediaAccessNotice from "@/components/lcd/MediaAccessNotice.vue";
@@ -54,7 +53,7 @@ function mediaMeta(entry: LcdConfig) {
   return MEDIA_META[entry.type] ?? { label: entry.type, icon: Image };
 }
 
-const labels = computed(() => deviceLabels(devices.lcdDevices));
+const labels = computed(() => devices.labels);
 function deviceLabel(entry: LcdConfig): string | null {
   const device = resolveLcdDevice(entry, devices.lcdDevices);
   if (!device) return null;

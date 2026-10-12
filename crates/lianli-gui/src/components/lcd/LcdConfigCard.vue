@@ -12,7 +12,6 @@ import { useDaemonStore } from "@/stores/daemon";
 import { useIpc } from "@/composables/useIpc";
 import { useDebounce } from "@/composables/useDebounce";
 import { hasSavedLcdDevice, lcdEntryKey, resolveLcdDevice } from "@/utils/lcdSelection";
-import { deviceLabels } from "@/utils/deviceNames";
 import { useLcdScreensStore } from "@/stores/lcdScreens";
 import { useDeviceNamesStore } from "@/stores/deviceNames";
 import EditableName from "@/components/common/EditableName.vue";
@@ -44,7 +43,7 @@ const lcdDevices = computed(() => devices.lcdDevices);
 
 const screens = useLcdScreensStore();
 const names = useDeviceNamesStore();
-const labels = computed(() => deviceLabels(lcdDevices.value));
+const labels = computed(() => devices.labels);
 const entryKey = computed(() => lcdEntryKey(props.entry));
 const customName = computed(() => names.lcdEntryName(props.entry));
 const deviceLabel = computed(() => {
@@ -59,7 +58,10 @@ const sharesDevice = computed(() => {
 });
 const needsDeviceChoice = computed(() => !deviceForEntry() || sharesDevice.value);
 const deviceOptions = computed(() =>
-  [...labels.value].map(([value, label]) => ({ label: names.label(value, label), value })),
+  [...lcdDevices.value].sort((a, b) => a.device_id.localeCompare(b.device_id)).map((device) => ({
+    label: names.label(device.device_id, labels.value.get(device.device_id) ?? device.name),
+    value: device.device_id,
+  })),
 );
 
 function deviceForEntry(): DeviceInfo | undefined {

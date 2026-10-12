@@ -5,7 +5,6 @@ import { Plus, X } from "lucide-vue-next";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
 import { useDeviceNamesStore } from "@/stores/deviceNames";
-import { deviceLabels } from "@/utils/deviceNames";
 import FanCurveEditor from "@/components/fans/FanCurveEditor.vue";
 import FanGroupCard from "@/components/fans/FanGroupCard.vue";
 import SensorSelect from "@/components/common/SensorSelect.vue";
@@ -64,7 +63,7 @@ const assignmentGroups = computed(() => {
   return result;
 });
 
-const fanLabels = computed(() => deviceLabels(devices.fanDevices));
+const fanLabels = computed(() => devices.labels);
 const curveUsers = computed(() => {
   const name = current.value?.name;
   if (!name) return [];

@@ -4,6 +4,7 @@ import type { DeviceInfo, TelemetrySnapshot } from "@/types";
 import { DONGLE_FAMILIES } from "@/constants";
 import { usePendingAction } from "@/composables/usePendingAction";
 import { DISPLAY_SWITCH_TIMEOUT_MS, displaySwitchComplete } from "@/utils/displaySwitch";
+import { deviceLabels } from "@/utils/deviceNames";
 
 /// Dev-only mock device flags. Activated via `npm run dev:mock` (mode: "mock") or manual toggle.
 const MOCK_MODE = import.meta.env.MODE === "mock";
@@ -157,6 +158,12 @@ export const useDevicesStore = defineStore("devices", () => {
    */
   const lcdDevices = computed(() => allDevices.value.filter((d) => d.has_lcd));
 
+  const labels = computed(() => {
+    const shown = new Map<string, DeviceInfo>();
+    for (const device of [...displayCards.value, ...lcdDevices.value]) shown.set(device.device_id, device);
+    return deviceLabels([...shown.values()]);
+  });
+
   /** Devices that have controllable fans (excluding AIOs handled on the AIO page). */
   const fanDevices = computed(() =>
     visible.value.filter((d) => d.has_fan && (d.fan_count ?? 0) > 0),
@@ -200,6 +207,7 @@ export const useDevicesStore = defineStore("devices", () => {
     telemetry,
     visible,
     displayCards,
+    labels,
     summary,
     lcdDevices,
     fanDevices,
