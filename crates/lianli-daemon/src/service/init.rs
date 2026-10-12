@@ -45,7 +45,7 @@ impl ServiceManager {
         if signals.requested() {
             return;
         }
-        self.try_wireless();
+        self.connect_wireless_at_startup();
         self.wireless_stable_count = self.wireless.devices().len();
         if self.wireless.has_discovered_devices() {
             std::thread::sleep(std::time::Duration::from_millis(500));
@@ -979,52 +979,6 @@ impl ServiceManager {
         configured_ids
     }
 
-    pub(super) fn try_wireless(&mut self) {
-        if !lianli_devices::wireless::tx_dongle_present() {
-            let required = self
-                .configured_wireless_device_ids()
-                .iter()
-                .any(|id| id.starts_with("wireless:"));
-            let mut state = self.ipc.state.lock();
-            if required {
-                state.state_health.wireless_unavailable("Saved settings reference wireless devices, but no transmitter was detected during discovery.");
-            } else {
-                state.state_health.wireless_ready();
-            }
-            debug!("[wireless] no TX/RX devices found, skipping wireless");
-            return;
-        }
-        let restart_controllers = self.controllers.fan.is_some() || self.controllers.aio.is_some();
-        if let Some(rgb) = &self.controllers.rgb {
-            rgb.lock().set_wireless(None);
-        }
-        let result = self
-            .wireless
-            .connect()
-            .and_then(|()| self.wireless.start_polling());
-        if let Err(error) = result {
-            let error = format!("{error:#}");
-            self.ipc
-                .state
-                .lock()
-                .state_health
-                .wireless_unavailable(&error);
-            if self.wireless_recovery_error.as_ref() != Some(&error) {
-                warn!(%error, "Wireless reconnect failed; existing fan and AIO controllers retained");
-                self.wireless_recovery_error = Some(error);
-            }
-            return;
-        }
-        self.wireless_recovery_error = None;
-        self.init_wireless_receiver();
-        info!("Wireless links active");
-        if restart_controllers {
-            self.start_fan_control();
-            self.start_aio_control();
-            self.rebuild_rgb_controller();
-        }
-    }
-
     pub(super) fn init_wireless_receiver(&mut self) {
         match self.wireless.send_rx_sequence() {
             Ok(()) => {
@@ -1043,22 +997,11 @@ impl ServiceManager {
                     .state
                     .lock()
                     .state_health
-                    .wireless_unavailable(&format!(
+                    .wireless_receiver_incomplete(&format!(
                         "Receiver initialization sequence failed: {error:#}"
                     ));
             }
         }
-    }
-
-    #[allow(dead_code)]
-    pub(super) fn recover_wireless(&mut self) -> bool {
-        if self.wireless.soft_reset() {
-            return true;
-        }
-        warn!("Wireless soft-reset failed; reinitialising");
-        self.wireless.stop();
-        self.try_wireless();
-        self.wireless.has_discovered_devices()
     }
 
     pub(super) fn load_config(&mut self, tx: Sender<DaemonEvent>) -> bool {

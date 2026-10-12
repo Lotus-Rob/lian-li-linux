@@ -52,15 +52,23 @@ impl StateHealth {
     }
 
     pub fn wireless_unavailable(&mut self, error: &str) {
+        self.wireless_finding(error, FindingSeverity::Error);
+    }
+
+    pub fn wireless_receiver_incomplete(&mut self, error: &str) {
+        self.wireless_finding(error, FindingSeverity::Warning);
+    }
+
+    fn wireless_finding(&mut self, error: &str, severity: FindingSeverity) {
         self.wireless = Some(InstallationFinding {
             code: "device.wireless.initialization".into(),
             state: CheckState::Failed,
-            severity: FindingSeverity::Warning,
+            severity,
             feature: "Wireless control".into(),
             context: "Selected daemon".into(),
             title: "Wireless initialization failed".into(),
             evidence: bounded(error, 2048),
-            remediation: "Check the transmitter connection, daemon logs and USB permissions. The daemon retries disconnected transmitters automatically. Recheck only reads status.".into(),
+            remediation: "Check the transmitter and receiver connections, daemon logs and USB permissions. Wireless fans and pumps keep their last speed until the link recovers. The daemon retries and resets unresponsive dongles automatically. Recheck only reads status.".into(),
             guide: InstallationGuide::Troubleshooting,
         });
     }
@@ -257,6 +265,9 @@ mod tests {
         assert_eq!(findings[0].code, "device.wireless.initialization");
         assert_eq!(findings[0].evidence, "No transmitter detected");
         assert_eq!(findings[0].state, CheckState::Failed);
+        assert_eq!(findings[0].severity, FindingSeverity::Error);
+        health.wireless_receiver_incomplete("Receiver sequence failed");
+        assert_eq!(health.findings()[0].severity, FindingSeverity::Warning);
         health.wireless_ready();
         assert_eq!(health.findings().len(), 1);
         assert_eq!(health.findings()[0].code, "device.open.hid:controller");

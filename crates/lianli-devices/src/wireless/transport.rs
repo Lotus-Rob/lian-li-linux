@@ -57,6 +57,13 @@ impl<T> TransportState<T> {
     }
 }
 
+/// Controller clones share this state, so releasing here frees the claimed
+/// interface even while other clones still hold the `Arc`.
+pub(super) fn release_transport<T>(transport: &Mutex<TransportState<T>>) {
+    let handle = transport.lock().handle.take();
+    drop(handle);
+}
+
 /// Try to open a USB device matching any of the given VID:PID pairs.
 pub(super) fn open_any(ids: &[(u16, u16)]) -> Result<RusbBulk> {
     let mut last_err = None;
@@ -290,6 +297,30 @@ mod tests {
         assert!(new_dropped.get());
         assert!(handle.get().is_err());
         assert!(handle.handle.is_none());
+    }
+
+    #[test]
+    fn release_frees_the_interface_for_every_clone_of_the_transport() {
+        struct Handle<'a>(&'a Cell<bool>);
+        impl Drop for Handle<'_> {
+            fn drop(&mut self) {
+                self.0.set(true);
+            }
+        }
+        let dropped = Cell::new(false);
+        let owner = std::rc::Rc::new(Mutex::new(TransportState::new(Handle(&dropped))));
+        let clone = std::rc::Rc::clone(&owner);
+        release_transport(&owner);
+        assert!(dropped.get());
+        drop(owner);
+        let result: Result<()> = transport_operation_once(
+            &mut clone.lock(),
+            &AtomicBool::new(true),
+            |_| panic!("released transport must not send"),
+            |_, _| panic!("stopped clone must not reclaim the interface"),
+        );
+        assert!(result.is_err());
+        assert!(clone.lock().get().is_err());
     }
 
     #[test]

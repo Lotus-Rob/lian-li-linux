@@ -14,6 +14,7 @@ impl ServiceManager {
         self.startup_image_job.take();
         self.display_switch.take();
         lianli_transport::usb::SHUTTING_DOWN.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.wireless_recovery.cancel();
         self.lcd_group_recovery.stop();
 
         // The direct-color writer shares this stop flag and is joined below.
@@ -68,6 +69,7 @@ impl ServiceManager {
         self.registry.clear();
         mark("registry", t0);
 
+        self.wireless_recovery.shutdown();
         self.wireless.stop();
         mark("wireless", t0);
         self.openrgb.shutdown();

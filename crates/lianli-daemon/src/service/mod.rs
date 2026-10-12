@@ -36,6 +36,7 @@ mod subsystems;
 mod suspend;
 mod sync;
 mod wired_identity;
+mod wireless_recovery;
 
 use aio_lcd_firmware::AioLcdFirmwareTracker;
 use lifecycle_monitor::OperationMonitor;
@@ -243,7 +244,7 @@ pub struct ServiceManager {
     media_preparation: media_preparation::MediaPreparation,
     targets: Arc<Mutex<HashMap<usize, ActiveTarget>>>,
     wireless: WirelessController,
-    wireless_recovery_error: Option<String>,
+    wireless_recovery: wireless_recovery::WirelessRecovery,
     wireless_rx_init_pending: bool,
     packet_builder: PacketBuilder,
     /// Wired USB device registry (fan handles, HID backends, hot-plug caches).
@@ -319,7 +320,7 @@ impl ServiceManager {
             media_preparation: Default::default(),
             targets: Arc::new(Mutex::new(HashMap::new())),
             wireless: WirelessController::new(),
-            wireless_recovery_error: None,
+            wireless_recovery: Default::default(),
             wireless_rx_init_pending: false,
             packet_builder: PacketBuilder::new(),
             registry: DeviceRegistry::new(),
@@ -417,6 +418,7 @@ impl ServiceManager {
     }
 
     pub fn device_poll(&mut self) {
+        self.poll_wireless_recovery();
         self.lcd_group_recovery.poll();
         self.poll_prepared_media();
         if self.cleaner_reload_pending {
@@ -783,14 +785,8 @@ impl ServiceManager {
                     break;
                 }
                 DaemonEvent::USBCheck => {
-                    // Refresh USB device enumeration
-                    // Wireless discovery is handled by its own RX polling thread.
                     self.refresh_usb_device_cache();
-                    if !self.wireless.is_connected() {
-                        self.try_wireless();
-                    } else if self.wireless_rx_init_pending {
-                        self.init_wireless_receiver();
-                    }
+                    self.supervise_wireless();
                 }
                 DaemonEvent::DevicePoll => {
                     DEVICE_POLL_GATE.dequeued();

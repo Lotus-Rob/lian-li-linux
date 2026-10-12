@@ -4,10 +4,13 @@ use super::discovery::{
     ACK_FRESHNESS, REBIND_FOREIGN_AFTER,
 };
 use super::mb_sync::MbRgbTargetMap;
-use super::transport::{open_any, with_transport_recovery, SharedTransport, TransportState};
+use super::recovery::{write_companion_reset, Dongle, DongleFailure};
+use super::transport::{
+    open_any, release_transport, with_transport_recovery, SharedTransport, TransportState,
+};
 use super::{
-    CMD_RESET, CMD_RX_LCD_MODE, CMD_RX_QUERY_34, CMD_RX_QUERY_37, CMD_VIDEO_START, RF_CHUNKS,
-    RF_CHUNK_SIZE, RF_DATA_SIZE, RF_SELECT, RX_IDS, TX_IDS, USB_CMD_GET_MAC, USB_CMD_SEND_RF,
+    CMD_RX_LCD_MODE, CMD_RX_QUERY_34, CMD_RX_QUERY_37, CMD_VIDEO_START, RF_CHUNKS, RF_CHUNK_SIZE,
+    RF_DATA_SIZE, RF_SELECT, RX_IDS, TX_IDS, USB_CMD_GET_MAC, USB_CMD_SEND_RF,
 };
 use anyhow::{bail, Context, Result};
 use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
@@ -56,6 +59,7 @@ pub struct WirelessController {
     runtime_claim: Option<RuntimeClaim>,
     pub(super) tx: Option<SharedTransport>,
     pub(super) rx: Option<SharedTransport>,
+    owns_transports: bool,
     pub(super) receiver_state: Arc<ReceiverState>,
     pub(super) rx_running: Arc<AtomicBool>,
     pub(super) poll_stop: Arc<AtomicBool>,
@@ -86,6 +90,7 @@ impl Clone for WirelessController {
             runtime_claim: None,
             tx: self.tx.clone(),
             rx: self.rx.clone(),
+            owns_transports: false,
             receiver_state: Arc::clone(&self.receiver_state),
             rx_running: Arc::clone(&self.rx_running),
             poll_stop: Arc::clone(&self.poll_stop),
@@ -118,6 +123,7 @@ impl WirelessController {
             runtime_claim: None,
             tx: None,
             rx: None,
+            owns_transports: false,
             receiver_state: Arc::new(ReceiverState::default()),
             rx_running: Arc::new(AtomicBool::new(false)),
             poll_stop: Arc::new(AtomicBool::new(false)),
@@ -141,6 +147,10 @@ impl WirelessController {
     }
 
     pub fn connect(&mut self) -> Result<()> {
+        self.connect_with_cancel(&AtomicBool::new(false))
+    }
+
+    pub(super) fn connect_with_cancel(&mut self, cancel: &AtomicBool) -> Result<()> {
         self.stop();
         let _claim = RuntimeClaim::acquire(&self.runtime_claimed)?;
         self.poll_stop = Arc::new(AtomicBool::new(false));
@@ -148,6 +158,7 @@ impl WirelessController {
         for health in self.device_health.lock().values_mut() {
             health.channel_correction = Default::default();
         }
+        let cancelled = || cancel.load(Ordering::Acquire);
         let mut tx = None;
         let max_retries = 3;
 
@@ -157,37 +168,51 @@ impl WirelessController {
                     tx = Some(device);
                     break;
                 }
-                Err(e) if attempt < max_retries => {
+                Err(e) if attempt < max_retries && !cancelled() => {
                     debug!("TX device not found (attempt {attempt}/{max_retries}): {e}");
-                    thread::sleep(Duration::from_millis(1000 * attempt as u64));
+                    wait_for_poll(cancel, Duration::from_millis(1000 * attempt as u64));
                 }
                 Err(e) => {
-                    return Err(e).context("opening wireless TX dongle");
+                    return Err(e)
+                        .context(DongleFailure::new(Dongle::Tx, "opening wireless TX dongle"));
                 }
             }
         }
 
         let mut tx = tx.context("TX device failed to open after retries")?;
-        tx.detach_and_configure("TX")?;
+        tx.detach_and_configure_with_cancel("TX", cancelled)
+            .context(DongleFailure::new(
+                Dongle::Tx,
+                "claiming wireless TX dongle",
+            ))?;
         let tx_arc = Arc::new(Mutex::new(TransportState::new(tx)));
 
-        let mut rx = open_any(&RX_IDS).context("opening wireless RX dongle")?;
-        rx.detach_and_configure("RX")?;
+        let mut rx = open_any(&RX_IDS)
+            .context(DongleFailure::new(Dongle::Rx, "opening wireless RX dongle"))?;
+        rx.detach_and_configure_with_cancel("RX", cancelled)
+            .context(DongleFailure::new(
+                Dongle::Rx,
+                "claiming wireless RX dongle",
+            ))?;
         rx.read_flush();
         self.tx = Some(tx_arc);
         self.rx = Some(Arc::new(Mutex::new(TransportState::new(rx))));
+        self.owns_transports = true;
         self.tx_failures.store(0, Ordering::Relaxed);
 
-        if let Err(error) = self.discover_master_mac() {
+        if let Err(error) = self.discover_master_mac(cancel) {
             self.stop();
-            return Err(error);
+            return Err(error.context(DongleFailure::new(
+                Dongle::Tx,
+                "querying the wireless TX master",
+            )));
         }
         Ok(())
     }
 
     /// Discovers master MAC address and channel by querying TX with USB_GetMac.
     /// Tries the default channel first, then scans even, then odd as fallback.
-    fn discover_master_mac(&self) -> Result<()> {
+    fn discover_master_mac(&self, cancel: &AtomicBool) -> Result<()> {
         let tx = self.tx.as_ref().context("TX device not available")?;
         info!("Discovering master MAC address and wireless channel...");
 
@@ -200,6 +225,10 @@ impl WirelessController {
         for channel in channels_to_try {
             let attempts = if channel == 8 { 3 } else { 1 };
             for attempt in 1..=attempts {
+                anyhow::ensure!(
+                    !cancel.load(Ordering::Acquire),
+                    "wireless master discovery cancelled"
+                );
                 let mut cmd = [0u8; 64];
                 cmd[0] = USB_CMD_GET_MAC;
                 cmd[1] = channel;
@@ -335,27 +364,29 @@ impl WirelessController {
                     }
                     consecutive_errors += 1;
                     consecutive_successes = 0;
-                    info!("RX polling ({consecutive_errors}): {err:#}, continuing");
+                    if consecutive_errors == 1 {
+                        info!("RX polling failed: {err:#}, continuing");
+                    } else {
+                        debug!("RX polling ({consecutive_errors}): {err:#}, continuing");
+                    }
                     if consecutive_errors >= 5 {
                         total_resets += 1;
                         if total_resets > MAX_RESETS {
                             error!(
-                                "RX dongle unresponsive after {MAX_RESETS} resets, \
+                                "RX polling still failing after {MAX_RESETS} TX resets, \
                                  stopping wireless polling"
                             );
                             break;
                         }
                         warn!(
-                            "5 consecutive RX errors, sending RX reset ({total_resets}/{MAX_RESETS})"
+                            "5 consecutive RX errors, resetting the TX through the RX ({total_resets}/{MAX_RESETS})"
                         );
                         let handle = rx.lock();
                         if stop_flag.load(Ordering::Acquire) {
                             break;
                         }
-                        let mut reset_cmd = vec![0u8; 64];
-                        reset_cmd[0] = 0x15; // USB_ResetAnother
                         if let Ok(handle) = handle.get() {
-                            if handle.write(&reset_cmd, USB_TIMEOUT).is_ok() {
+                            if write_companion_reset(handle).is_ok() {
                                 let mut resp = [0u8; 64];
                                 let _ = handle.read(&mut resp, Duration::from_millis(2000));
                             }
@@ -514,45 +545,6 @@ impl WirelessController {
             }
         }
         Ok(())
-    }
-
-    pub fn soft_reset(&mut self) -> bool {
-        if self.poll_stop.load(Ordering::Acquire)
-            || lianli_transport::usb::SHUTTING_DOWN.load(Ordering::Relaxed)
-        {
-            return false;
-        }
-
-        if self.tx.is_none() {
-            if let Ok(mut transport) = open_any(&TX_IDS) {
-                if transport
-                    .detach_and_configure_with_cancel("TX", || {
-                        self.poll_stop.load(Ordering::Acquire)
-                    })
-                    .is_ok()
-                {
-                    self.tx = Some(Arc::new(Mutex::new(TransportState::new(transport))));
-                }
-            }
-        }
-
-        if self.tx.is_some() {
-            if self
-                .tx_recover(|handle| {
-                    let written = handle.write(&CMD_RESET, USB_TIMEOUT)?;
-                    anyhow::ensure!(written == CMD_RESET.len(), "short TX reset write");
-                    Ok(())
-                })
-                .is_err()
-            {
-                return false;
-            }
-            self.video_mode_active.store(false, Ordering::Release);
-            thread::sleep(Duration::from_millis(50));
-            return self.ensure_video_mode().is_ok();
-        }
-
-        false
     }
 
     pub fn is_connected(&self) -> bool {
@@ -945,6 +937,12 @@ impl WirelessController {
             self.receiver_state.pwm.store(0xFFFF, Ordering::Relaxed);
             if let Some(queue) = &self.pending_commands {
                 queue.lock().clear();
+            }
+        }
+        if std::mem::take(&mut self.owns_transports) {
+            self.poll_stop.store(true, Ordering::SeqCst);
+            for transport in [&self.tx, &self.rx].into_iter().flatten() {
+                release_transport(transport);
             }
         }
         self.tx.take();
