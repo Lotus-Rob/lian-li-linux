@@ -2,7 +2,7 @@
 import { computed, onUnmounted, ref, watch } from "vue";
 import { useDialog, useMessage } from "naive-ui";
 import { invoke } from "@tauri-apps/api/core";
-import { FolderOpen, Info, Sparkles, Trash2 } from "lucide-vue-next";
+import { FolderOpen, Info, Pause, Play, Sparkles, Trash2 } from "lucide-vue-next";
 import type { DeviceInfo, LcdConfig, MediaFraming, MediaType, SensorDescriptor } from "@/types";
 import { clampFraming, defaultFraming, isDefaultFraming, MAX_ZOOM, panBy, previewPlacement } from "@/utils/mediaFraming";
 import { useConfigStore } from "@/stores/config";
@@ -192,11 +192,11 @@ const sensorPreviewError = ref("");
 const sensorPreviewSupported = computed(
   () => daemon.connected && (daemon.info?.capabilities.includes("sensor_preview") ?? false),
 );
-const previewSize = computed(() => {
+const previewSize = computed<{ width: number; height: number } | null>((previous) => {
   const device = selectedDevice.value;
-  return device?.screen_width && device?.screen_height
-    ? { width: device.screen_width, height: device.screen_height }
-    : null;
+  if (!device?.screen_width || !device?.screen_height) return null;
+  if (previous?.width === device.screen_width && previous.height === device.screen_height) return previous;
+  return { width: device.screen_width, height: device.screen_height };
 });
 const previewTarget = computed<[number, number]>(() => {
   const size = previewSize.value;
@@ -237,11 +237,21 @@ function setFraming(next: MediaFraming, commit = true) {
 }
 
 const sourceSize = ref<[number, number] | null>(null);
+const previewVideo = ref<HTMLVideoElement | null>(null);
+const previewPlaying = ref(false);
+function togglePreviewPlayback() {
+  const video = previewVideo.value;
+  if (!video) return;
+  if (video.paused) void video.play().catch(() => undefined);
+  else video.pause();
+}
+
 function onMediaLoaded(event: Event) {
   const element = event.target as HTMLImageElement | HTMLVideoElement;
   const width = element instanceof HTMLVideoElement ? element.videoWidth : element.naturalWidth;
   const height = element instanceof HTMLVideoElement ? element.videoHeight : element.naturalHeight;
   if (width && height) sourceSize.value = [width, height];
+  if (element instanceof HTMLVideoElement && element.paused) element.currentTime = 0.001;
 }
 const placement = computed(() =>
   sourceSize.value ? previewPlacement(framing.value, sourceSize.value, previewTarget.value) : null,
@@ -302,11 +312,12 @@ let mediaPreviewRevision = 0;
 function clearMediaPreview() {
   if (mediaPreviewUrl.value) URL.revokeObjectURL(mediaPreviewUrl.value);
   mediaPreviewUrl.value = "";
+  previewPlaying.value = false;
   sourceSize.value = null;
 }
 
 watch(
-  () => [isFileMedia.value && showPreview.value, props.entry.path] as const,
+  [() => isFileMedia.value && showPreview.value, () => props.entry.path],
   async ([visible, path]) => {
     const revision = ++mediaPreviewRevision;
     clearMediaPreview();
@@ -834,13 +845,16 @@ async function handleStopClean() {
           <div v-else-if="isFileMedia && mediaPreviewUrl" class="framing-box" :style="placement ? percentRect(placement.box) : undefined">
             <video
               v-if="entry.type === 'video'"
+              ref="previewVideo"
               class="framed-media"
               :src="mediaPreviewUrl"
               :style="placement ? percentRect(placement.media) : undefined"
-              autoplay
+              preload="auto"
               muted
               loop
               playsinline
+              @play="previewPlaying = true"
+              @pause="previewPlaying = false"
               @loadedmetadata="onMediaLoaded"
               @error="mediaPreviewError = 'This video format cannot be previewed here'"
             />
@@ -857,7 +871,18 @@ async function handleStopClean() {
           <div v-else-if="entry.type === 'color'" class="preview-color" :style="{ background: `rgb(${(entry.rgb ?? [0, 0, 0]).join(',')})` }" />
           <span v-else class="muted">{{ previewError ? "!" : "…" }}</span>
         </div>
-        <span class="preview-caption" :class="{ error: previewError }" :title="previewError">{{ previewCaption }}</span>
+        <div class="preview-footer">
+          <span class="preview-caption" :class="{ error: previewError }" :title="previewError">{{ previewCaption }}</span>
+          <button
+            v-if="entry.type === 'video' && mediaPreviewUrl"
+            class="preview-play"
+            :title="previewPlaying ? 'Pause preview' : 'Play preview'"
+            @click="togglePreviewPlayback"
+          >
+            <Pause v-if="previewPlaying" :size="12" />
+            <Play v-else :size="12" />
+          </button>
+        </div>
       </aside>
     </div>
 
@@ -1068,9 +1093,28 @@ async function handleStopClean() {
   height: 100%;
   object-fit: fill;
 }
+.preview-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
 .preview-caption {
   font-size: var(--font-size-xs);
   color: var(--text-muted);
+}
+.preview-play {
+  display: inline-flex;
+  padding: 2px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.preview-play:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 .preview-caption.error {
   color: var(--warning);
