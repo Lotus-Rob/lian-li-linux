@@ -208,11 +208,7 @@ impl WirelessController {
         };
 
         let rf_data = build_bind_packet(&device, target_master_mac, target_rx, master_ch, slot);
-        let send_channel = if device.channel == 0 {
-            master_ch
-        } else {
-            device.channel
-        };
+        let send_channel = self.bind_channel(&device, master_ch);
 
         self.tx_recover(|handle| {
             for _ in 0..6 {
@@ -225,15 +221,32 @@ impl WirelessController {
 
         let verb = if target_rx == 0 { "Unbind" } else { "Bind" };
         info!(
-            "{} sent to {} ({}) rx={} ch={} slot={}",
+            "{} sent to {} ({}) on ch={} rx={} ch={} slot={}",
             verb,
             device.mac_str(),
             device.fan_type.display_name(),
+            send_channel,
             target_rx,
             master_ch,
             slot,
         );
         Ok(())
+    }
+
+    /// Bind and readdress frames go out on the channel the device reports, as
+    /// the vendor does, even when that channel is unusable for normal traffic.
+    /// A device reporting channel 0 still answers on ours.
+    pub(super) fn bind_channel(&self, device: &DiscoveredDevice, master_ch: u8) -> u8 {
+        let reported = self
+            .device_health
+            .lock()
+            .get(&device.mac)
+            .map_or(device.channel, |h| h.raw_channel);
+        if reported == 0 {
+            master_ch
+        } else {
+            reported
+        }
     }
 
     // Reserve both observed and published slots while recovery is pending.

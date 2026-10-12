@@ -1,7 +1,7 @@
 use super::convergence::{PendingQueue, TargetSeqMap};
 use super::discovery::{
-    poll_and_discover, DeviceHealthMap, DiscoveredDevice, MasterEntryMap, ReceiverState,
-    ACK_FRESHNESS, REBIND_FOREIGN_AFTER,
+    is_valid_address, poll_and_discover, traffic_channel, DeviceHealthMap, DiscoveredDevice,
+    MasterEntryMap, ReceiverState, ACK_FRESHNESS, REBIND_FOREIGN_AFTER,
 };
 use super::mb_sync::MbRgbTargetMap;
 use super::recovery::{write_companion_reset, Dongle, DongleFailure};
@@ -672,6 +672,16 @@ impl WirelessController {
             .collect()
     }
 
+    pub fn reports_valid_address(&self, mac: &[u8; 6]) -> bool {
+        let local = *self.master_mac.lock();
+        self.device_health.lock().get(mac).is_some_and(|h| {
+            !h.dead
+                && h.raw_master == local
+                && h.raw_seen.elapsed() <= ACK_FRESHNESS
+                && is_valid_address(h.raw_channel, h.raw_rx)
+        })
+    }
+
     pub(super) fn confirm_binding(&self, mac: &[u8; 6], intent: bool) {
         let mut health = self.device_health.lock();
         let Some(h) = health.get_mut(mac) else { return };
@@ -685,7 +695,7 @@ impl WirelessController {
             h.published.rx_type = h.raw_rx;
         }
         h.confirmed_invalid_address = None;
-        if h.raw_channel != 0 {
+        if super::discovery::is_valid_channel(h.raw_channel) {
             h.published.channel = h.raw_channel;
         }
         if let Some(device) = self
@@ -765,7 +775,7 @@ impl WirelessController {
             self.picture_target.lock().is_none(),
             "Wait for the wireless image upload before changing channels"
         );
-        if !(1..=39).contains(&target) {
+        if !super::discovery::is_valid_channel(target) {
             bail!("invalid channel {target}");
         }
         let current = *self.master_channel.lock();
@@ -841,7 +851,8 @@ impl WirelessController {
         device: &DiscoveredDevice,
         rf_data: &[u8],
     ) -> Result<()> {
-        self.send_rf_packet_addressed(handle, device.channel, device.rx_type, rf_data)
+        let channel = traffic_channel(device.channel, *self.master_channel.lock());
+        self.send_rf_packet_addressed(handle, channel, device.rx_type, rf_data)
     }
 
     /// Send an RF frame with an explicit RX target in the USB header.

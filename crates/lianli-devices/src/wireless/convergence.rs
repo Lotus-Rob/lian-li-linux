@@ -108,7 +108,7 @@ impl WirelessController {
             .context("wireless command queue is unavailable")?;
         let cmd = PendingCommand {
             mac: device.mac,
-            channel: device.channel,
+            channel: super::discovery::traffic_channel(device.channel, *self.master_channel.lock()),
             rx_type: device.rx_type,
             rf_data,
             ack,

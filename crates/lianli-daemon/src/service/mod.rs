@@ -36,6 +36,7 @@ mod subsystems;
 mod suspend;
 mod sync;
 mod wired_identity;
+mod wireless_rebind;
 mod wireless_recovery;
 
 use aio_lcd_firmware::AioLcdFirmwareTracker;
@@ -257,7 +258,7 @@ pub struct ServiceManager {
     wireless_pending_streak: u32,
     wireless_topology_mismatch_streak: u32,
     wireless_rebind_in_flight: Arc<AtomicBool>,
-    wireless_rebind_last: HashMap<[u8; 6], Instant>,
+    wireless_rebind: wireless_rebind::RebindSchedule,
     wireless_channel_streak: Option<(u8, u32)>,
     wireless_channel_in_flight: Arc<AtomicBool>,
     resume_detector: suspend::ResumeDetector,
@@ -330,7 +331,7 @@ impl ServiceManager {
             wireless_pending_streak: 0,
             wireless_topology_mismatch_streak: 0,
             wireless_rebind_in_flight: Arc::new(AtomicBool::new(false)),
-            wireless_rebind_last: HashMap::new(),
+            wireless_rebind: Default::default(),
             wireless_channel_streak: None,
             wireless_channel_in_flight: Arc::new(AtomicBool::new(false)),
             resume_detector: suspend::ResumeDetector::new(),
@@ -525,6 +526,9 @@ impl ServiceManager {
         if self.wireless_rebind_in_flight.load(Ordering::Relaxed) {
             return;
         }
+        let wireless = &self.wireless;
+        self.wireless_rebind
+            .retain(|mac| !wireless.reports_valid_address(mac));
         let configured = self.configured_wireless_device_ids();
         let now = Instant::now();
 
@@ -535,17 +539,26 @@ impl ServiceManager {
                 "wireless:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
                 m[0], m[1], m[2], m[3], m[4], m[5]
             );
-            configured.contains(&id)
-                && self
-                    .wireless_rebind_last
-                    .get(m)
-                    .is_none_or(|t| now.duration_since(*t) >= Duration::from_secs(30))
+            configured.contains(&id) && self.wireless_rebind.due(m, now)
         }) else {
             return;
         };
 
-        info!("Auto-rebinding configured wireless device {:02x?}", mac);
-        self.wireless_rebind_last.insert(mac, now);
+        let attempt = self.wireless_rebind.record_attempt(mac, now);
+        if attempt == wireless_rebind::MAX_ATTEMPTS {
+            warn!(
+                "Auto-rebinding configured wireless device {:02x?} for the last time \
+                 ({attempt}/{}); rebind it manually if it stays unreachable",
+                mac,
+                wireless_rebind::MAX_ATTEMPTS
+            );
+        } else {
+            info!(
+                "Auto-rebinding configured wireless device {:02x?} ({attempt}/{})",
+                mac,
+                wireless_rebind::MAX_ATTEMPTS
+            );
+        }
         self.wireless_rebind_in_flight
             .store(true, Ordering::Relaxed);
         let wireless = self.wireless.clone();

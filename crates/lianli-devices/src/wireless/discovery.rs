@@ -255,11 +255,26 @@ pub(super) fn is_valid_rx(rx: u8) -> bool {
     rx != 0 && rx < RX_SLOT_LIMIT
 }
 
+/// The vendor client offers odd channels up to 39 and auto-assigns even ones
+/// from 8 upward; reported values outside that range are corrupted state.
+pub(super) fn is_valid_channel(channel: u8) -> bool {
+    (1..=39).contains(&channel)
+}
+
+/// Normal traffic keeps a device's last valid channel; without one it uses ours.
+pub(super) fn traffic_channel(published: u8, master: u8) -> u8 {
+    if is_valid_channel(published) {
+        published
+    } else {
+        master
+    }
+}
+
 /// Devices that latched sensor bytes from an old clock broadcast keep
 /// reporting them as their address (channel = CPU usage, rx = CPU temperature)
 /// until rebound. Such records still prove the device is alive.
 pub(super) fn is_valid_address(channel: u8, rx: u8) -> bool {
-    channel != 0 && is_valid_rx(rx)
+    is_valid_channel(channel) && is_valid_rx(rx)
 }
 
 pub(super) const ACK_FRESHNESS: Duration = Duration::from_secs(3);
@@ -401,6 +416,9 @@ impl DeviceHealth {
     }
 
     pub(super) fn new(mut rec: DiscoveredDevice) -> Self {
+        if !is_valid_channel(rec.channel) {
+            rec.channel = 0;
+        }
         if !is_valid_address(rec.channel, rec.rx_type) {
             rec.rx_type = 0;
         }
@@ -671,7 +689,7 @@ fn merge_sightings(
         }
 
         if let Some((ch, rx)) = commit_streak(&mut h.addr_cand, (rec.channel, rec.rx_type)) {
-            if ch != 0 {
+            if is_valid_channel(ch) {
                 h.published.channel = ch;
             }
             if is_valid_address(ch, rx) {
@@ -1039,6 +1057,64 @@ mod tests {
             .expect("device must stay live");
         assert_eq!((device.channel, device.rx_type), (8, 1));
         assert_eq!(controller.rebind_candidates(), vec![mac]);
+    }
+
+    #[test]
+    fn out_of_range_channel_is_never_used_for_traffic_but_still_rebinds() {
+        let controller = super::super::controller::WirelessController::new();
+        let local = [9; 6];
+        let mac = [1; 6];
+        *controller.master_mac.lock() = local;
+        *controller.master_channel.lock() = 12;
+        let merge = |sighting: &DiscoveredDevice| {
+            merge_sightings(
+                std::slice::from_ref(sighting),
+                &controller.device_health,
+                &controller.discovered_devices,
+                &controller.master_mac,
+            );
+        };
+        let mut sighting = rec(mac, local);
+        merge(&sighting);
+
+        sighting.channel = 131;
+        for _ in 0..DEBOUNCE_SIGHTINGS {
+            merge(&sighting);
+        }
+        let device = controller
+            .device_by_mac(&mac)
+            .expect("device must stay live");
+        assert_eq!((device.channel, device.rx_type), (8, 1));
+        assert_eq!(controller.rebind_candidates(), vec![mac]);
+        assert_eq!(controller.bind_channel(&device, 12), 131);
+
+        sighting.channel = 0;
+        merge(&sighting);
+        assert_eq!(controller.bind_channel(&device, 12), 12);
+        assert_eq!(traffic_channel(device.channel, 12), 8);
+    }
+
+    #[test]
+    fn channels_observed_from_corrupted_devices_are_invalid() {
+        assert!(is_valid_channel(1));
+        assert!(is_valid_channel(39));
+        assert!(!is_valid_channel(0));
+        assert!(!is_valid_channel(40));
+        for observed in [64u8, 68, 85, 131, 146, 175, 209, 210, 220, 226, 228] {
+            assert!(
+                !is_valid_channel(observed),
+                "ch={observed} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn out_of_range_channel_at_startup_publishes_no_address() {
+        let mut latched = rec([1; 6], [9; 6]);
+        latched.channel = 45;
+        let health = DeviceHealth::new(latched);
+        assert_eq!((health.published.channel, health.published.rx_type), (0, 0));
+        assert_eq!(traffic_channel(health.published.channel, 12), 12);
     }
 
     #[test]

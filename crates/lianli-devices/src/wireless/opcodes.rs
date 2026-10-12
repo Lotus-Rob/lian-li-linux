@@ -64,7 +64,7 @@ fn picture_packets(
         packet[..4].copy_from_slice(&[
             super::USB_CMD_SEND_RF,
             part as u8,
-            device.channel,
+            super::discovery::traffic_channel(device.channel, channel),
             device.rx_type,
         ]);
         packet[4..].copy_from_slice(&rf[part * 60..(part + 1) * 60]);
