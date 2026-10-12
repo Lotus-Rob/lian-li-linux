@@ -2,6 +2,7 @@
 name = "lianli-control"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Service and installation diagnostics without hardware or GUI libraries"
 
 [dependencies]

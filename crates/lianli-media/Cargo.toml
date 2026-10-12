@@ -2,6 +2,7 @@
 name = "lianli-media"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 lianli-shared = { path = "../lianli-shared" }

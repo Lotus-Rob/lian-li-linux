@@ -2,6 +2,7 @@
 name = "lianli-transport"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 rusb = { workspace = true }

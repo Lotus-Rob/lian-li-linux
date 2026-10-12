@@ -2,6 +2,7 @@
 name = "lianli-gui"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Tauri v2 + Vue 3 desktop GUI for Lian Li Linux"
 
 [lib]
