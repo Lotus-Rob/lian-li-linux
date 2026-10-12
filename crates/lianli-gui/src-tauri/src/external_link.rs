@@ -1,16 +1,16 @@
-use std::path::Path;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use lianli_control::services::host_spawn_bridge;
 use lianli_shared::installation::InstallationContext;
 
-const HOST_SPAWN: [&str; 2] = ["/usr/bin/host-spawn", "/usr/local/bin/host-spawn"];
 const EXIT_WAIT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 pub fn open(url: &str) -> Result<(), String> {
     validate(url)?;
-    let mut command = launcher(&InstallationContext::detect(), url)?;
+    let mut command = launcher(&InstallationContext::detect(), url, host_spawn_bridge)?;
     let child = command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -27,23 +27,26 @@ fn validate(url: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn launcher(context: &InstallationContext, url: &str) -> Result<Command, String> {
-    match context {
+fn launcher(
+    context: &InstallationContext,
+    url: &str,
+    bridge: impl FnOnce() -> Option<PathBuf>,
+) -> Result<Command, String> {
+    let mut command = match context {
         InstallationContext::Distrobox { .. } => {
-            let bridge = HOST_SPAWN
-                .into_iter()
-                .find(|path| Path::new(path).is_file())
-                .ok_or("host-spawn is not installed in this box. Run distrobox-host-exec true once inside the box, then try again")?;
+            let bridge = bridge().ok_or(
+                "host-spawn is not installed in this box. Run distrobox-host-exec true once inside the box, then try again",
+            )?;
             let mut command = Command::new(bridge);
-            command.args(["xdg-open", url]);
-            Ok(command)
+            command.arg("xdg-open");
+            command
         }
         InstallationContext::Native | InstallationContext::UnsupportedContainer => {
-            let mut command = Command::new("xdg-open");
-            command.arg(url);
-            Ok(command)
+            Command::new("xdg-open")
         }
-    }
+    };
+    command.arg(url);
+    Ok(command)
 }
 
 fn wait_for_launcher(mut child: Child) -> Result<(), String> {
@@ -66,6 +69,8 @@ fn wait_for_launcher(mut child: Child) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    const URL: &str = "https://example.com";
+
     #[test]
     fn only_plain_https_links_are_opened() {
         assert!(validate("https://github.com/sgtaziz/lian-li-linux").is_ok());
@@ -76,21 +81,20 @@ mod tests {
     }
 
     #[test]
+    fn native_runs_xdg_open_directly() {
+        let command = launcher(&InstallationContext::Native, URL, || None).unwrap();
+        assert_eq!(command.get_program(), "xdg-open");
+        assert_eq!(command.get_args().collect::<Vec<_>>(), [URL]);
+    }
+
+    #[test]
     fn distrobox_routes_xdg_open_through_the_host_bridge() {
-        let native = launcher(&InstallationContext::Native, "https://example.com").unwrap();
-        assert_eq!(native.get_program(), "xdg-open");
-        let boxed = launcher(
-            &InstallationContext::Distrobox {
-                name: "lianli".into(),
-            },
-            "https://example.com",
-        );
-        if let Ok(command) = boxed {
-            assert!(HOST_SPAWN.iter().any(|path| command.get_program() == *path));
-            assert_eq!(
-                command.get_args().collect::<Vec<_>>(),
-                ["xdg-open", "https://example.com"]
-            );
-        }
+        let boxed = InstallationContext::Distrobox {
+            name: "lianli".into(),
+        };
+        let command = launcher(&boxed, URL, || Some("/usr/bin/host-spawn".into())).unwrap();
+        assert_eq!(command.get_program(), "/usr/bin/host-spawn");
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["xdg-open", URL]);
+        assert!(launcher(&boxed, URL, || None).is_err());
     }
 }

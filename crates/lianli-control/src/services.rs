@@ -33,8 +33,7 @@ impl Route {
                 bail!("Host service access is unavailable in this container")
             }
             InstallationContext::Distrobox { .. } => {
-                let executable = ["/usr/bin/host-spawn", "/usr/local/bin/host-spawn"]
-                    .into_iter().map(PathBuf::from).find(|path| existing_bridge(path).is_ok())
+                let executable = host_spawn_bridge()
                     .context("Run distrobox-host-exec true interactively inside this box to install host-spawn, then Recheck. No helper is installed by this check.")?;
                 let uid = unsafe { libc::geteuid() };
                 let bus = PathBuf::from(format!("/run/host/run/user/{uid}/bus"));
@@ -177,6 +176,13 @@ impl Route {
         );
         Ok(())
     }
+}
+
+pub fn host_spawn_bridge() -> Option<PathBuf> {
+    ["/usr/bin/host-spawn", "/usr/local/bin/host-spawn"]
+        .into_iter()
+        .map(PathBuf::from)
+        .find(|path| existing_bridge(path).is_ok())
 }
 
 fn existing_bridge(path: &Path) -> Result<()> {
