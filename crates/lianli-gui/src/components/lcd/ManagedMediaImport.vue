@@ -4,8 +4,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { useDaemonStore } from "@/stores/daemon";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
-import { useLcdScreensStore } from "@/stores/lcdScreens";
-import { lcdDeviceLabels, lcdEntryKey, resolveLcdDevice } from "@/utils/lcdSelection";
+import { useDeviceNamesStore } from "@/stores/deviceNames";
+import { deviceLabels } from "@/utils/deviceNames";
+import { lcdEntryKey, resolveLcdDevice } from "@/utils/lcdSelection";
 import type { LcdConfig, LcdTemplate } from "@/types";
 
 const props = defineProps<{ lcds: LcdConfig[]; templates: LcdTemplate[] }>();
@@ -15,12 +16,12 @@ interface Status { id: string; active: boolean; result: Result | null; error: st
 const daemon = useDaemonStore();
 const config = useConfigStore();
 const devices = useDevicesStore();
-const screens = useLcdScreensStore();
+const names = useDeviceNamesStore();
 
 function screenName(entry: LcdConfig): string {
   const device = resolveLcdDevice(entry, devices.lcdDevices);
-  const label = device ? lcdDeviceLabels(devices.lcdDevices).get(device.device_id) ?? device.name : null;
-  return screens.names[lcdEntryKey(entry)] || label || "Screen offline";
+  const label = device ? deviceLabels(devices.lcdDevices).get(device.device_id) ?? device.name : null;
+  return names.lcdEntryName(entry) || label || "Screen offline";
 }
 
 const incomplete = computed(() =>

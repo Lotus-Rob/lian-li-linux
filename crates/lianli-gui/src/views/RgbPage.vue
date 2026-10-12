@@ -4,6 +4,8 @@ import { Layers, Palette, Wifi } from "lucide-vue-next";
 import type { RgbDeviceCapabilities } from "@/types";
 import { useDaemonStore } from "@/stores/daemon";
 import { useConfigStore } from "@/stores/config";
+import { useDeviceNamesStore } from "@/stores/deviceNames";
+import { rgbDeviceLabels } from "@/utils/deviceNames";
 import RgbDeviceCard from "@/components/rgb/RgbDeviceCard.vue";
 import RgbSyncEditor from "@/components/rgb/RgbSyncEditor.vue";
 import OpenRgbRegionsToggle from "@/components/rgb/OpenRgbRegionsToggle.vue";
@@ -14,8 +16,9 @@ const QUICK_SYNC = "quick-sync";
 
 const daemon = useDaemonStore();
 const config = useConfigStore();
+const names = useDeviceNamesStore();
 
-const rgb = computed(() => config.ensureRgb());
+const rgb =computed(() => config.ensureRgb());
 
 const openrgbEnabled = computed({
   get: () => rgb.value.openrgb_server,
@@ -41,6 +44,10 @@ const statusText = computed(() => {
 });
 
 const rgbCaps = computed(() => config.rgbCaps.filter((c) => !c.rf_owned));
+const labels = computed(() => rgbDeviceLabels(rgbCaps.value));
+function defaultLabel(cap: RgbDeviceCapabilities): string {
+  return labels.value.get(cap.device_id) ?? cap.device_name;
+}
 
 const syncedCount = computed(() => rgbCaps.value.filter((cap) => quickSyncControls(cap, rgb.value)).length);
 const syncSummary = computed(() => {
@@ -148,7 +155,7 @@ function capSummary(cap: RgbDeviceCapabilities): string {
         >
           <component :is="isWireless(cap) ? Wifi : Palette" :size="16" class="item-icon" />
           <span class="item-text">
-            <span class="item-name">{{ cap.device_name }}</span>
+            <span class="item-name">{{ names.label(cap.device_id, defaultLabel(cap)) }}</span>
             <span class="item-sub">
               <span class="state" :class="`tone-${capState(cap).tone}`" :title="capState(cap).label">
                 <span class="dot" />
@@ -166,7 +173,13 @@ function capSummary(cap: RgbDeviceCapabilities): string {
       </aside>
 
       <RgbSyncEditor v-if="selected === QUICK_SYNC" class="detail" />
-      <RgbDeviceCard v-else-if="selectedCap" :key="selectedCap.device_id" class="detail" :cap="selectedCap" />
+      <RgbDeviceCard
+        v-else-if="selectedCap"
+        :key="selectedCap.device_id"
+        class="detail"
+        :cap="selectedCap"
+        :label="defaultLabel(selectedCap)"
+      />
       <div v-else class="card detail empty muted">
         {{ daemon.connected ? "No RGB-capable devices detected." : "Waiting for the daemon to report RGB devices." }}
       </div>

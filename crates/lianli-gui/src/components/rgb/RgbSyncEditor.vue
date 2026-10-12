@@ -9,6 +9,8 @@ import type {
   RgbSyncKind,
 } from "@/types";
 import { useConfigStore } from "@/stores/config";
+import { useDeviceNamesStore } from "@/stores/deviceNames";
+import { rgbDeviceLabels } from "@/utils/deviceNames";
 import RgbEffectControls from "@/components/rgb/RgbEffectControls.vue";
 import { copyEffect, recallSyncEffect, rememberSyncEffect } from "@/components/rgb/effectMemory";
 import { continuousParametersFor, createDefaultSync, matchedParametersFor, MATCHED_MODES } from "@/components/rgb/syncSettings";
@@ -18,6 +20,8 @@ const config = useConfigStore();
 const rgb = computed(() => config.ensureRgb());
 const storedSync = computed(() => rgb.value.merge_lighting ?? null);
 const visibleCaps = computed(() => config.rgbCaps.filter((cap) => !cap.rf_owned));
+const names = useDeviceNamesStore();
+const labels = computed(() => rgbDeviceLabels(visibleCaps.value));
 
 function motherboardSynced(cap: RgbDeviceCapabilities): boolean {
   return rgb.value.devices.find((device) => device.device_id === cap.device_id)?.mb_rgb_sync ?? false;
@@ -241,7 +245,7 @@ function patchEffect(patch: Partial<RgbEffect>) {
           :disabled="!isSelected(cap) && !isEligible(cap)"
           @update:checked="(value) => setDeviceEnabled(cap, value)"
         >
-          {{ cap.device_name }}
+          {{ names.label(cap.device_id, labels.get(cap.device_id) ?? cap.device_name) }}
         </n-checkbox>
         <span v-if="motherboardSynced(cap)" class="muted unavailable">Motherboard sync enabled</span>
         <span v-else-if="!isEligible(cap)" class="muted unavailable">Effect unavailable</span>

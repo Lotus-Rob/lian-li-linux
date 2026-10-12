@@ -9,9 +9,10 @@ import { useLcdStore } from "@/stores/lcd";
 import { useAioStore } from "@/stores/aio";
 import { useConfigStore } from "@/stores/config";
 import { useDaemonStore } from "@/stores/daemon";
-import { useLcdScreensStore } from "@/stores/lcdScreens";
-import { lcdDeviceLabels, lcdEntryKey, resolveLcdDevice } from "@/utils/lcdSelection";
+import { useDeviceNamesStore } from "@/stores/deviceNames";
+import { deviceLabels } from "@/utils/deviceNames";
 import { useIpc } from "@/composables/useIpc";
+import EditableName from "@/components/common/EditableName.vue";
 import { fanQuantityKey, fanQuantityPort, stageFanQuantity } from "@/utils/fanQuantity";
 import {
   FAMILY_DISPLAY,
@@ -28,7 +29,7 @@ const lcd = useLcdStore();
 const aio = useAioStore();
 const config = useConfigStore();
 const daemon = useDaemonStore();
-const screens = useLcdScreensStore();
+const names = useDeviceNamesStore();
 const dialog = useDialog();
 const ipc = useIpc();
 
@@ -168,20 +169,13 @@ const primaryIcon = computed(() => {
   return Palette;
 });
 
-const title = computed(() =>
-  caps.value.lcd ? lcdDeviceLabels(devices.lcdDevices).get(d.value.device_id) ?? d.value.name : d.value.name,
+const defaultLabel = computed(() =>
+  deviceLabels(caps.value.lcd ? devices.lcdDevices : devices.displayCards).get(d.value.device_id) ?? d.value.name,
 );
-const lcdName = computed(() => {
-  const entry = config.config.lcds.find(
-    (candidate) => resolveLcdDevice(candidate, devices.lcdDevices)?.device_id === d.value.device_id,
-  );
-  return entry ? screens.names[lcdEntryKey(entry)] ?? "" : "";
-});
+const customName = computed(() => names.nameOf(d.value.device_id));
 const role = computed(() => {
   if (caps.value.fan && fanRpms.value.length > 1) return `Fan group · ${fanRpms.value.length} fans`;
-  if (caps.value.lcd && !caps.value.fan && !caps.value.pump) {
-    return lcdName.value ? `LCD screen · ${lcdName.value}` : "LCD screen";
-  }
+  if (caps.value.lcd && !caps.value.fan && !caps.value.pump) return "LCD screen";
   return null;
 });
 
@@ -240,7 +234,11 @@ async function ping() {
 
     <div class="identity">
       <div class="name-line">
-        <span class="name">{{ title }}</span>
+        <EditableName
+          :name="customName"
+          :label="defaultLabel"
+          @rename="(name) => names.setName(d.device_id, name)"
+        />
         <span class="caps">
           <Monitor v-if="caps.lcd" :size="12" class="cap-lcd" title="LCD" />
           <Fan v-if="caps.fan" :size="12" class="cap-fan" title="Fan" />
@@ -343,12 +341,6 @@ async function ping() {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-.name {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .caps {
   display: inline-flex;

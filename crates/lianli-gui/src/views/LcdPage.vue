@@ -5,7 +5,9 @@ import type { LcdConfig, MediaType } from "@/types";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
 import { useLcdScreensStore } from "@/stores/lcdScreens";
-import { lcdDeviceLabels, lcdEntryKey, orderedLcdIndices, resolveLcdDevice } from "@/utils/lcdSelection";
+import { useDeviceNamesStore } from "@/stores/deviceNames";
+import { deviceLabels } from "@/utils/deviceNames";
+import { lcdEntryKey, orderedLcdIndices, resolveLcdDevice } from "@/utils/lcdSelection";
 import LcdConfigCard from "@/components/lcd/LcdConfigCard.vue";
 import MediaAccessNotice from "@/components/lcd/MediaAccessNotice.vue";
 import ManagedMediaImport from "@/components/lcd/ManagedMediaImport.vue";
@@ -14,6 +16,7 @@ import StartupImageDialog from "@/components/lcd/StartupImageDialog.vue";
 const config = useConfigStore();
 const devices = useDevicesStore();
 const screens = useLcdScreensStore();
+const names = useDeviceNamesStore();
 
 const entries = computed(() => config.config.lcds);
 const ordered = computed(() => orderedLcdIndices(entries.value, screens.order));
@@ -51,11 +54,11 @@ function mediaMeta(entry: LcdConfig) {
   return MEDIA_META[entry.type] ?? { label: entry.type, icon: Image };
 }
 
-const labels = computed(() => lcdDeviceLabels(devices.lcdDevices));
+const labels = computed(() => deviceLabels(devices.lcdDevices));
 function deviceLabel(entry: LcdConfig): string | null {
   const device = resolveLcdDevice(entry, devices.lcdDevices);
   if (!device) return null;
-  return screens.names[lcdEntryKey(entry)] || (labels.value.get(device.device_id) ?? device.name);
+  return names.lcdEntryName(entry) || (labels.value.get(device.device_id) ?? device.name);
 }
 
 function moveRow(from: number, to: number) {
@@ -112,7 +115,7 @@ const addOptions = computed(() => {
   );
   return devices.lcdDevices
     .filter((device) => !configured.has(device.device_id))
-    .map((device) => ({ label: labels.value.get(device.device_id) ?? device.name, key: device.device_id }))
+    .map((device) => ({ label: names.label(device.device_id, labels.value.get(device.device_id) ?? device.name), key: device.device_id }))
     .sort((a, b) => a.label.localeCompare(b.label));
 });
 
@@ -161,7 +164,7 @@ function addLcd(deviceId: string) {
     />
 
     <div v-for="device in wirelessImageDevices" :key="device.device_id" class="card wireless-row">
-      <span>{{ device.name }} · Wireless</span>
+      <span>{{ names.label(device.device_id, device.name) }} · Wireless</span>
       <StartupImageDialog :device="device" />
     </div>
 

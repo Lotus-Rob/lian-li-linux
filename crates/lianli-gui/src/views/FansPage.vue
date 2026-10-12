@@ -4,6 +4,8 @@ import { useDialog } from "naive-ui";
 import { Plus, X } from "lucide-vue-next";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
+import { useDeviceNamesStore } from "@/stores/deviceNames";
+import { deviceLabels } from "@/utils/deviceNames";
 import FanCurveEditor from "@/components/fans/FanCurveEditor.vue";
 import FanGroupCard from "@/components/fans/FanGroupCard.vue";
 import SensorSelect from "@/components/common/SensorSelect.vue";
@@ -12,6 +14,7 @@ import { enumerateSensorsAsOptions } from "@/stores/sensorOptions";
 
 const config = useConfigStore();
 const devices = useDevicesStore();
+const names = useDeviceNamesStore();
 const dialog = useDialog();
 
 const selectedCurve = ref(0);
@@ -61,6 +64,7 @@ const assignmentGroups = computed(() => {
   return result;
 });
 
+const fanLabels = computed(() => deviceLabels(devices.fanDevices));
 const curveUsers = computed(() => {
   const name = current.value?.name;
   if (!name) return [];
@@ -70,7 +74,8 @@ const curveUsers = computed(() => {
     const count = slots.filter((speed) => speed === name).length;
     if (!count) return [];
     if (!device) return [`${group.device_id ?? "Unknown device"} (offline)`];
-    return [`${device.name} (${count} fan${count === 1 ? "" : "s"})`];
+    const name = names.label(device.device_id, fanLabels.value.get(device.device_id) ?? device.name);
+    return [`${name} (${count} fan${count === 1 ? "" : "s"})`];
   });
 });
 

@@ -5,15 +5,18 @@ import { Save, Trash2, Locate } from "lucide-vue-next";
 import type { RgbDeviceCapabilities } from "@/types";
 import { useRgbStore } from "@/stores/rgb";
 import { useConfigStore } from "@/stores/config";
+import { useDeviceNamesStore } from "@/stores/deviceNames";
 import { useIpc } from "@/composables/useIpc";
+import EditableName from "@/components/common/EditableName.vue";
 import RgbZoneEditor from "@/components/rgb/RgbZoneEditor.vue";
 import RgbRegionEditor from "@/components/rgb/RgbRegionEditor.vue";
 import { motherboardSyncEnabled, quickSyncControls } from "@/components/rgb/syncSettings";
 
-const props = defineProps<{ cap: RgbDeviceCapabilities }>();
+const props = defineProps<{ cap: RgbDeviceCapabilities; label: string }>();
 
 const rgb = useRgbStore();
 const config = useConfigStore();
+const names = useDeviceNamesStore();
 const dialog = useDialog();
 const ipc = useIpc();
 
@@ -153,7 +156,11 @@ const summary = computed(() =>
   <div class="card rgb-device">
     <div class="head">
       <div class="title-wrap">
-        <span class="title">{{ cap.device_name }}</span>
+        <EditableName
+          :name="names.nameOf(cap.device_id)"
+          :label="label"
+          @rename="(name) => names.setName(cap.device_id, name)"
+        />
         <span class="device-label">{{ summary }}</span>
       </div>
       <button class="ping-btn" title="Identify device" @click="ping">
@@ -252,15 +259,9 @@ const summary = computed(() =>
 }
 .title-wrap {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-2);
   min-width: 0;
-}
-.title {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .device-label {
   font-size: var(--font-size-xs);

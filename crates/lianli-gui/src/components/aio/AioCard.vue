@@ -4,6 +4,7 @@ import type { DeviceInfo, AioConfig, FanSpeed } from "@/types";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
 import { useFansStore } from "@/stores/fans";
+import { useDeviceNamesStore } from "@/stores/deviceNames";
 import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
 import SensorSelect from "@/components/common/SensorSelect.vue";
@@ -14,6 +15,7 @@ const props = defineProps<{ device: DeviceInfo }>();
 const config = useConfigStore();
 const devices = useDevicesStore();
 const fans = useFansStore();
+const names = useDeviceNamesStore();
 
 const aio = computed<AioConfig>(() => config.aioConfigFor(props.device.device_id));
 const pumpRange = computed(() => props.device.pump_rpm_range ?? [0, 4200]);
@@ -131,7 +133,7 @@ const mac = computed(() =>
   <div class="card aio">
     <div class="head">
       <div>
-        <div class="name">{{ device.name }}</div>
+        <div class="name">{{ names.label(device.device_id, device.name) }}</div>
         <div class="muted mono">{{ mac }}</div>
       </div>
       <div class="telemetry">

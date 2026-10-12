@@ -8,20 +8,6 @@ export function resolveLcdDevice(entry: LcdConfig, devices: DeviceInfo[]): Devic
   return devices[entry.index ?? 0];
 }
 
-export function lcdDeviceLabels(devices: DeviceInfo[]): Map<string, string> {
-  const sorted = [...devices].sort((a, b) => a.device_id.localeCompare(b.device_id));
-  const totals = new Map<string, number>();
-  for (const device of sorted) totals.set(device.name, (totals.get(device.name) ?? 0) + 1);
-  const seen = new Map<string, number>();
-  const labels = new Map<string, string>();
-  for (const device of sorted) {
-    const n = (seen.get(device.name) ?? 0) + 1;
-    seen.set(device.name, n);
-    labels.set(device.device_id, (totals.get(device.name) ?? 1) > 1 ? `${device.name} #${n}` : device.name);
-  }
-  return labels;
-}
-
 export function lcdEntryKey(entry: LcdConfig): string {
   return entry.serial ? `serial:${entry.serial.replace(/^hid:/, "")}` : `index:${entry.index ?? 0}`;
 }

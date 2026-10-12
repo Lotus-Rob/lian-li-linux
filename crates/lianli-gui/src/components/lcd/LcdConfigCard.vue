@@ -2,7 +2,7 @@
 import { computed, onUnmounted, ref, watch } from "vue";
 import { useDialog, useMessage } from "naive-ui";
 import { invoke } from "@tauri-apps/api/core";
-import { FolderOpen, Info, Pencil, Sparkles, Trash2 } from "lucide-vue-next";
+import { FolderOpen, Info, Sparkles, Trash2 } from "lucide-vue-next";
 import type { DeviceInfo, LcdConfig, MediaFraming, MediaType, SensorDescriptor } from "@/types";
 import { clampFraming, defaultFraming, isDefaultFraming, MAX_ZOOM, panBy, previewPlacement } from "@/utils/mediaFraming";
 import { useConfigStore } from "@/stores/config";
@@ -11,8 +11,11 @@ import { useLcdStore } from "@/stores/lcd";
 import { useDaemonStore } from "@/stores/daemon";
 import { useIpc } from "@/composables/useIpc";
 import { useDebounce } from "@/composables/useDebounce";
-import { hasSavedLcdDevice, lcdDeviceLabels, lcdEntryKey, resolveLcdDevice } from "@/utils/lcdSelection";
+import { hasSavedLcdDevice, lcdEntryKey, resolveLcdDevice } from "@/utils/lcdSelection";
+import { deviceLabels } from "@/utils/deviceNames";
 import { useLcdScreensStore } from "@/stores/lcdScreens";
+import { useDeviceNamesStore } from "@/stores/deviceNames";
+import EditableName from "@/components/common/EditableName.vue";
 import { brightnessError } from "@/utils/brightnessControl";
 import { matchesMediaFile, pickMediaFile } from "@/utils/mediaPicker";
 import SensorGaugeEditor from "@/components/lcd/SensorGaugeEditor.vue";
@@ -40,25 +43,15 @@ const message = useMessage();
 const lcdDevices = computed(() => devices.lcdDevices);
 
 const screens = useLcdScreensStore();
-const deviceLabels = computed(() => lcdDeviceLabels(lcdDevices.value));
+const names = useDeviceNamesStore();
+const labels = computed(() => deviceLabels(lcdDevices.value));
 const entryKey = computed(() => lcdEntryKey(props.entry));
-const customName = computed(() => screens.names[entryKey.value] ?? "");
+const customName = computed(() => names.lcdEntryName(props.entry));
 const deviceLabel = computed(() => {
   const device = deviceForEntry();
-  return device ? deviceLabels.value.get(device.device_id) ?? device.name : "";
+  return device ? labels.value.get(device.device_id) ?? device.name : "";
 });
 const displayName = computed(() => customName.value || deviceLabel.value || "Screen offline");
-const renaming = ref(false);
-const nameDraft = ref("");
-function startRename() {
-  nameDraft.value = customName.value;
-  renaming.value = true;
-}
-function commitName() {
-  if (!renaming.value) return;
-  screens.setName(entryKey.value, nameDraft.value);
-  renaming.value = false;
-}
 const sharesDevice = computed(() => {
   const device = deviceForEntry();
   if (!device) return false;
@@ -66,7 +59,7 @@ const sharesDevice = computed(() => {
 });
 const needsDeviceChoice = computed(() => !deviceForEntry() || sharesDevice.value);
 const deviceOptions = computed(() =>
-  [...deviceLabels.value].map(([value, label]) => ({ label, value })),
+  [...labels.value].map(([value, label]) => ({ label: names.label(value, label), value })),
 );
 
 function deviceForEntry(): DeviceInfo | undefined {
@@ -84,9 +77,11 @@ function onSelectDevice(id: string) {
   const d = lcdDevices.value.find((x) => x.device_id === id);
   if (!d) return;
   const previousKey = entryKey.value;
+  const previousName = customName.value;
   props.entry.serial = d.device_id;
   props.entry.index = undefined;
   screens.carryOver(previousKey, entryKey.value);
+  if (previousName && !names.nameOf(d.device_id)) names.setName(d.device_id, previousName);
   config.markDirty();
 }
 
@@ -632,25 +627,13 @@ async function handleStopClean() {
 <template>
   <div class="card lcd-config">
     <div class="head">
-      <div class="title-wrap">
-        <n-input
-          v-if="renaming"
-          v-model:value="nameDraft"
-          size="small"
-          class="name-input"
-          :placeholder="deviceLabel || 'Screen name'"
-          :maxlength="40"
-          autofocus
-          @blur="commitName"
-          @keydown.enter="commitName"
-          @keydown.esc="renaming = false"
-        />
-        <template v-else>
-          <span class="title">{{ displayName }}</span>
-          <button class="rename-btn" title="Rename this screen" @click="startRename"><Pencil :size="12" /></button>
-          <span v-if="customName && deviceLabel" class="device-label">{{ deviceLabel }}</span>
-        </template>
-      </div>
+      <EditableName
+        :name="customName"
+        :label="deviceLabel"
+        empty-label="Screen offline"
+        rename-title="Rename this screen"
+        @rename="(name) => names.setLcdEntryName(entry, name)"
+      />
       <div class="head-actions">
         <template v-if="entryChanged">
           <span class="unsaved">Unsaved changes</span>
@@ -928,39 +911,7 @@ async function handleStopClean() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-}
-.title {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.title-wrap {
-  display: flex;
-  align-items: center;
   gap: var(--space-2);
-  min-width: 0;
-}
-.name-input {
-  width: 220px;
-}
-.rename-btn {
-  display: inline-flex;
-  padding: 2px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.rename-btn:hover {
-  color: var(--text-primary);
-  background: var(--bg-hover);
-}
-.device-label {
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary);
-  white-space: nowrap;
 }
 .assign-alert .field label {
   font-size: var(--font-size-sm);
