@@ -279,6 +279,8 @@ pub(super) fn is_valid_address(channel: u8, rx: u8) -> bool {
 
 pub(super) const ACK_FRESHNESS: Duration = Duration::from_secs(3);
 pub(super) const REBIND_FOREIGN_AFTER: Duration = Duration::from_secs(10);
+/// Devices that swap slots briefly look like duplicates until both commit.
+pub(super) const REBIND_DUPLICATE_AFTER: Duration = Duration::from_secs(5);
 
 /// A master dongle heard on the current channel, reported by GetDev as a
 /// device record with device_type 0xFF. Foreign masters stay online only
@@ -365,6 +367,7 @@ pub(super) struct DeviceHealth {
     pub foreign_since: Option<Instant>,
     pub observed_master: [u8; 6],
     pub confirmed_invalid_address: Option<(u8, u8)>,
+    pub duplicate_since: Option<Instant>,
     rx_published_at: Instant,
     master_cand: Option<([u8; 6], u32)>,
     addr_cand: Option<((u8, u8), u32)>,
@@ -427,6 +430,7 @@ impl DeviceHealth {
             channel_correction: ChannelCorrection::default(),
             observed_master: rec.master_mac,
             confirmed_invalid_address: None,
+            duplicate_since: None,
             rx_published_at: Instant::now(),
             published: rec,
             last_seen: Instant::now(),
@@ -695,6 +699,7 @@ fn merge_sightings(
         h.raw_rx = rec.rx_type;
         if is_valid_address(rec.channel, rec.rx_type) && rx_taken_by.is_none() {
             h.confirmed_invalid_address = None;
+            h.duplicate_since = None;
         }
         h.raw_channel = rec.channel;
 
@@ -752,9 +757,11 @@ fn merge_sightings(
                     );
                 }
                 h.confirmed_invalid_address = Some((ch, rx));
+                h.duplicate_since.get_or_insert(now);
             } else if is_valid_address(ch, rx) {
                 h.publish_rx(rx);
             } else {
+                h.duplicate_since = None;
                 if h.confirmed_invalid_address.is_none() && (rx != 0 || intent) {
                     warn!(
                         "{} reported invalid address ch={ch} rx={rx}; keeping ch={} rx={} pending recovery",
@@ -1171,6 +1178,14 @@ mod tests {
         controller
     }
 
+    fn age_duplicate_flags(controller: &super::super::controller::WirelessController) {
+        for h in controller.device_health.lock().values_mut() {
+            h.duplicate_since = h
+                .duplicate_since
+                .map(|since| since - REBIND_DUPLICATE_AFTER);
+        }
+    }
+
     #[test]
     fn device_reporting_another_masters_mac_is_never_a_rebind_candidate() {
         let local = [9; 6];
@@ -1249,6 +1264,8 @@ mod tests {
             &[rec(holder, local), moved.clone()],
             DEBOUNCE_SIGHTINGS * 2,
         );
+        assert!(controller.rebind_candidates().is_empty());
+        age_duplicate_flags(&controller);
         assert_eq!(controller.rebind_candidates(), vec![newcomer]);
         assert_eq!(controller.device_by_mac(&holder).unwrap().rx_type, 1);
         assert_eq!(controller.device_by_mac(&newcomer).unwrap().rx_type, 2);
@@ -1272,6 +1289,7 @@ mod tests {
             &[rec([1; 6], local), rec([2; 6], local)],
             DEBOUNCE_SIGHTINGS * 2,
         );
+        age_duplicate_flags(&controller);
         assert_eq!(controller.rebind_candidates(), vec![[2; 6]]);
         assert_eq!(controller.device_by_mac(&[1; 6]).unwrap().rx_type, 1);
         assert_eq!(
@@ -1297,13 +1315,24 @@ mod tests {
         );
         first.rx_type = 2;
         second.rx_type = 1;
+        let mut transient_flag = false;
         for _ in 0..DEBOUNCE_SIGHTINGS * 3 {
             merge_into(&controller, &[first.clone(), second.clone()], 1);
-            assert!(controller.rebind_candidates().len() <= 1);
+            let flagged = controller
+                .device_health
+                .lock()
+                .values()
+                .filter(|h| h.duplicate_since.is_some())
+                .count();
+            assert!(flagged <= 1);
+            transient_flag |= flagged == 1;
+            assert!(controller.rebind_candidates().is_empty());
         }
+        assert!(transient_flag, "the swap must exercise the debounce");
+        age_duplicate_flags(&controller);
+        assert!(controller.rebind_candidates().is_empty());
         assert_eq!(controller.device_by_mac(&[1; 6]).unwrap().rx_type, 2);
         assert_eq!(controller.device_by_mac(&[2; 6]).unwrap().rx_type, 1);
-        assert!(controller.rebind_candidates().is_empty());
     }
 
     #[test]

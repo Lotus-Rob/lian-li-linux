@@ -1,7 +1,7 @@
 use super::convergence::{PendingQueue, TargetSeqMap};
 use super::discovery::{
     is_valid_address, poll_and_discover, traffic_channel, DeviceHealthMap, DiscoveredDevice,
-    MasterEntryMap, ReceiverState, ACK_FRESHNESS, REBIND_FOREIGN_AFTER,
+    MasterEntryMap, ReceiverState, ACK_FRESHNESS, REBIND_DUPLICATE_AFTER, REBIND_FOREIGN_AFTER,
 };
 use super::mb_sync::MbRgbTargetMap;
 use super::recovery::{write_companion_reset, Dongle, DongleFailure};
@@ -681,7 +681,9 @@ impl WirelessController {
                 }
                 if h.observed_master == local && h.raw_master == local {
                     return h.bind_intent
-                        && h.confirmed_invalid_address == Some((h.raw_channel, h.raw_rx));
+                        && h.confirmed_invalid_address == Some((h.raw_channel, h.raw_rx))
+                        && h.duplicate_since
+                            .is_none_or(|t| t.elapsed() >= REBIND_DUPLICATE_AFTER);
                 }
                 h.observed_master == [0; 6]
                     && h.raw_master == [0; 6]
@@ -717,6 +719,7 @@ impl WirelessController {
             h.publish_rx(h.raw_rx);
         }
         h.confirmed_invalid_address = None;
+        h.duplicate_since = None;
         if super::discovery::is_valid_channel(h.raw_channel) {
             h.published.channel = h.raw_channel;
         }
