@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import { RefreshCw, Download, CheckCircle, AlertCircle, Loader2, X, ExternalLink } from "lucide-vue-next";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { useExternalLink } from "@/composables/useExternalLink";
 import { getVersion } from "@tauri-apps/api/app";
 import type { CatalogManifest, CatalogTemplate } from "@/types";
 import { useConfigStore } from "@/stores/config";
@@ -12,6 +12,7 @@ import { boundedFetch } from "@/utils/boundedFetch";
 
 const config = useConfigStore();
 const lcd = useLcdStore();
+const openExternal = useExternalLink();
 
 const CATALOG_URL =
   "https://raw.githubusercontent.com/sgtaziz/lian-li-linux/main/templates/default_templates.json";
@@ -184,7 +185,7 @@ function previewAspect(t: CatalogTemplate): string {
   <div class="browser-window">
     <div class="topbar">
       <span class="title">Template Browser</span>
-      <button class="guide" title="Open publishing guide in your browser" @click="openUrl(PUBLISHING_URL)">
+      <button class="guide" title="Open publishing guide in your browser" @click="openExternal(PUBLISHING_URL)">
         <ExternalLink :size="13" /> Publishing Guide
       </button>
       <div class="spacer" />

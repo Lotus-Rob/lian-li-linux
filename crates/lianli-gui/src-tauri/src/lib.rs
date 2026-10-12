@@ -1,6 +1,7 @@
 //! Tauri command handlers + multi-window setup for the Lian Li Linux GUI.
 
 mod diagnostic_export;
+mod external_link;
 mod installation;
 mod ipc;
 mod managed_import;
@@ -168,6 +169,13 @@ async fn managed_import_status() -> Result<Option<lianli_control::media_import_j
     })
     .await
     .map_err(|error| format!("Import status worker failed: {error}"))?
+}
+
+#[tauri::command]
+async fn open_external(url: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || external_link::open(&url))
+        .await
+        .map_err(|error| format!("Link worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -369,6 +377,7 @@ pub fn run() {
             managed_import_status,
             managed_import_result,
             media_preview,
+            open_external,
             service_action,
             service_change,
             container_setup_proposal,

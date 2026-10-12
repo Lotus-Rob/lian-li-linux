@@ -3,7 +3,7 @@ import { computed, ref, onMounted, watch } from "vue";
 import OpenRgbRegionsToggle from "@/components/rgb/OpenRgbRegionsToggle.vue";
 import { invoke } from "@tauri-apps/api/core";
 import { ExternalLink } from "lucide-vue-next";
-import { open as openUrl } from "@tauri-apps/plugin-shell";
+import { useExternalLink } from "@/composables/useExternalLink";
 import { useDaemonStore } from "@/stores/daemon";
 import { useConfigStore } from "@/stores/config";
 import { useThermalStore } from "@/stores/thermal";
@@ -19,6 +19,7 @@ const daemon = useDaemonStore();
 const config = useConfigStore();
 const thermal = useThermalStore();
 const ipc = useIpc();
+const openExternal = useExternalLink();
 const retryingOpenRgb = ref(false);
 const openrgbFeedback = ref("");
 watch(() => daemon.info?.instance_id, () => { openrgbFeedback.value = ""; });
@@ -276,7 +277,7 @@ function onHidBackend(v: "hidraw" | "rusb") {
         Open-source Linux replacement for L-Connect 3
         <span class="muted"> · v{{ appVersion }}</span>
       </p>
-      <button class="repo-link" @click="openUrl(REPO_URL)">
+      <button class="repo-link" @click="openExternal(REPO_URL)">
         <ExternalLink :size="13" /> github.com/sgtaziz/lian-li-linux
       </button>
     </section>

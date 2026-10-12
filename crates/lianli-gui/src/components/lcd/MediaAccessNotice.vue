@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
-import { open } from "@tauri-apps/plugin-shell";
+import { useExternalLink } from "@/composables/useExternalLink";
 import { AlertTriangle, CheckCircle2, Info, Loader2 } from "lucide-vue-next";
 import { useIpc } from "@/composables/useIpc";
 import { useDaemonStore } from "@/stores/daemon";
@@ -10,6 +10,7 @@ const props = defineProps<{ lcds: LcdConfig[]; templates: LcdTemplate[] }>();
 const emit = defineEmits<{ issues: [present: boolean] }>();
 const ipc = useIpc();
 const daemon = useDaemonStore();
+const openExternal = useExternalLink();
 const report = ref<AssetAccessReport | null>(null);
 const error = ref("");
 const checking = ref(false);
@@ -77,7 +78,7 @@ onUnmounted(() => {
       <Info v-else :size="16" class="status-icon" aria-hidden="true" />
       <span class="access-summary" role="status" aria-live="polite">{{ summary }}</span>
       <n-button v-if="supported" size="tiny" quaternary :disabled="checking" @click="schedule">Recheck</n-button>
-      <n-button v-if="report?.failed" size="tiny" secondary @click="open('https://github.com/sgtaziz/lian-li-linux/blob/main/docs/lcd-assets.md')">File access guide</n-button>
+      <n-button v-if="report?.failed" size="tiny" secondary @click="openExternal('https://github.com/sgtaziz/lian-li-linux/blob/main/docs/lcd-assets.md')">File access guide</n-button>
       <slot name="actions" />
     </div>
     <details v-if="report?.failed || error" class="access-details">

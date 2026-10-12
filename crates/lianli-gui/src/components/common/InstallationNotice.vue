@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
-import { open } from "@tauri-apps/plugin-shell";
-import { useMessage } from "naive-ui";
+import { useExternalLink } from "@/composables/useExternalLink";
 import { useInstallationStore } from "@/stores/installation";
 import { useDaemonStore } from "@/stores/daemon";
 import { INSTALLATION_GUIDES } from "@/types/installation";
@@ -12,17 +11,13 @@ import ServiceStatus from "./ServiceStatus.vue";
 const installation = useInstallationStore();
 const daemon = useDaemonStore();
 const router = useRouter();
-const message = useMessage();
 const initialSetup = computed(() => !daemon.connected && canSetUpServices(installation.report?.services));
 onMounted(() => { void installation.start(); });
 
+const openExternal = useExternalLink();
 async function openGuide() {
-  try {
-    const fallback = installation.report?.context.kind === "distrobox" ? "distrobox" : "service_modes";
-    await open(INSTALLATION_GUIDES[installation.issues[0]?.guide ?? fallback]);
-  } catch (error) {
-    message.error(`Could not open the guide: ${String(error)}`);
-  }
+  const fallback = installation.report?.context.kind === "distrobox" ? "distrobox" : "service_modes";
+  await openExternal(INSTALLATION_GUIDES[installation.issues[0]?.guide ?? fallback]);
 }
 
 function review() {

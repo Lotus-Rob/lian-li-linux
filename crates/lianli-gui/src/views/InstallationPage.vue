@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
-import { open } from "@tauri-apps/plugin-shell";
-import { useMessage } from "naive-ui";
+import { useExternalLink } from "@/composables/useExternalLink";
 import { useDaemonStore } from "@/stores/daemon";
 import { useInstallationStore } from "@/stores/installation";
 import MediaStreamStatus from "@/components/common/MediaStreamStatus.vue";
@@ -11,7 +10,6 @@ import { INSTALLATION_GUIDES, type CheckState, type InstallationGuide } from "@/
 
 const installation = useInstallationStore();
 const daemon = useDaemonStore();
-const message = useMessage();
 const checkedAt = computed(() => installation.report
   ? new Date(installation.report.checked_at_unix_ms).toLocaleString() : "Not checked yet");
 const needsAttention = computed(() => (installation.report?.findings ?? []).filter((finding) => finding.state !== "passed" && finding.state !== "not_applicable"));
@@ -23,12 +21,9 @@ onMounted(() => {
   if (!installation.report) void installation.recheck();
 });
 
+const openExternal = useExternalLink();
 async function guide(id: InstallationGuide) {
-  try {
-    await open(INSTALLATION_GUIDES[id]);
-  } catch (error) {
-    message.error(`Could not open the guide: ${String(error)}`);
-  }
+  await openExternal(INSTALLATION_GUIDES[id]);
 }
 
 async function recheck() {
