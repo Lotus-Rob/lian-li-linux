@@ -166,13 +166,7 @@ impl WirelessController {
                 .map(|h| (h.raw_master, h.raw_rx, h.raw_channel));
 
             let master_ch = *self.master_channel.lock();
-            let converged = match observed {
-                Some((m, r, ch)) => {
-                    &m == target_master_mac && r == target_rx && (target_rx == 0 || ch == master_ch)
-                }
-                None => false,
-            };
-            if converged {
+            if bind_converged(observed, target_master_mac, target_rx, master_ch) {
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -298,6 +292,17 @@ impl WirelessController {
             Ok(())
         })
     }
+}
+
+fn bind_converged(
+    observed: Option<([u8; 6], u8, u8)>,
+    target_master: &[u8; 6],
+    target_rx: u8,
+    master_ch: u8,
+) -> bool {
+    observed.is_some_and(|(master, rx, channel)| {
+        master == *target_master && rx == target_rx && (target_rx == 0 || channel == master_ch)
+    })
 }
 
 fn build_bind_packet(
@@ -464,6 +469,40 @@ mod tests {
             2,
             "slot 1 is still live via published.rx_type even though raw_rx disagrees"
         );
+    }
+
+    #[test]
+    fn duplicate_rebind_confirms_only_after_the_device_leaves_the_contested_rx() {
+        let c = controller_with([9; 6], false);
+        let holder = [1; 6];
+        let newcomer = [2; 6];
+        seed_device(&c, &holder, [9; 6], true);
+        seed_device(&c, &newcomer, [9; 6], true);
+        {
+            let mut health = c.device_health.lock();
+            let h = health.get_mut(&newcomer).unwrap();
+            h.published.rx_type = 2;
+            h.raw_channel = 8;
+            h.raw_rx = 1;
+            h.confirmed_invalid_address = Some((8, 1));
+        }
+        let assigned = c.get_rx_unused().unwrap();
+        assert_eq!(assigned, 3);
+        assert!(!bind_converged(Some(([9; 6], 1, 8)), &[9; 6], assigned, 8));
+        assert!(!bind_converged(None, &[9; 6], assigned, 8));
+        assert!(bind_converged(
+            Some(([9; 6], assigned, 8)),
+            &[9; 6],
+            assigned,
+            8
+        ));
+
+        c.device_health.lock().get_mut(&newcomer).unwrap().raw_rx = assigned;
+        c.confirm_binding(&newcomer, true);
+        let health = c.device_health.lock();
+        assert_eq!(health[&newcomer].published.rx_type, assigned);
+        assert!(health[&newcomer].confirmed_invalid_address.is_none());
+        assert_eq!(health[&holder].published.rx_type, 1);
     }
 
     #[test]

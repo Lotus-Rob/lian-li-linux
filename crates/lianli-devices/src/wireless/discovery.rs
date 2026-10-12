@@ -365,6 +365,7 @@ pub(super) struct DeviceHealth {
     pub foreign_since: Option<Instant>,
     pub observed_master: [u8; 6],
     pub confirmed_invalid_address: Option<(u8, u8)>,
+    rx_published_at: Instant,
     master_cand: Option<([u8; 6], u32)>,
     addr_cand: Option<((u8, u8), u32)>,
 }
@@ -426,6 +427,7 @@ impl DeviceHealth {
             channel_correction: ChannelCorrection::default(),
             observed_master: rec.master_mac,
             confirmed_invalid_address: None,
+            rx_published_at: Instant::now(),
             published: rec,
             last_seen: Instant::now(),
             bind_intent: false,
@@ -438,6 +440,13 @@ impl DeviceHealth {
             foreign_since: None,
             master_cand: None,
             addr_cand: None,
+        }
+    }
+
+    pub(super) fn publish_rx(&mut self, rx: u8) {
+        if self.published.rx_type != rx {
+            self.published.rx_type = rx;
+            self.rx_published_at = Instant::now();
         }
     }
 }
@@ -687,9 +696,6 @@ fn merge_sightings(
         if is_valid_address(rec.channel, rec.rx_type) && rx_taken_by.is_none() {
             h.confirmed_invalid_address = None;
         }
-        if rx_taken_by.is_some() && h.published.rx_type == rec.rx_type {
-            h.published.rx_type = 0;
-        }
         h.raw_channel = rec.channel;
 
         let p = &mut h.published;
@@ -747,7 +753,7 @@ fn merge_sightings(
                 }
                 h.confirmed_invalid_address = Some((ch, rx));
             } else if is_valid_address(ch, rx) {
-                h.published.rx_type = rx;
+                h.publish_rx(rx);
             } else {
                 if h.confirmed_invalid_address.is_none() && (rx != 0 || intent) {
                     warn!(
@@ -776,7 +782,8 @@ fn merge_sightings(
 }
 
 /// The vendor treats two devices under its own master reporting the same rx
-/// as a conflict. The device already published on that rx keeps it.
+/// as a conflict. The device that published that rx first keeps it, and an
+/// already flagged device holds nothing, so exactly one side is rebound.
 fn rx_holder(
     health: &BTreeMap<[u8; 6], DeviceHealth>,
     rec: &DiscoveredDevice,
@@ -785,6 +792,10 @@ fn rx_holder(
     if *local == [0; 6] || rec.master_mac != *local || !is_valid_rx(rec.rx_type) {
         return None;
     }
+    let own_claim = health
+        .get(&rec.mac)
+        .filter(|own| !own.dead && own.published.rx_type == rec.rx_type)
+        .map(|own| (own.rx_published_at, rec.mac));
     health
         .iter()
         .find(|(mac, h)| {
@@ -792,7 +803,10 @@ fn rx_holder(
                 && h.bind_intent
                 && !h.dead
                 && h.raw_master == *local
+                && h.raw_seen.elapsed() <= ACK_FRESHNESS
+                && h.confirmed_invalid_address.is_none()
                 && h.published.rx_type == rec.rx_type
+                && own_claim.is_none_or(|own| (h.rx_published_at, **mac) < own)
         })
         .map(|(mac, _)| *mac)
 }
@@ -1260,7 +1274,60 @@ mod tests {
         );
         assert_eq!(controller.rebind_candidates(), vec![[2; 6]]);
         assert_eq!(controller.device_by_mac(&[1; 6]).unwrap().rx_type, 1);
-        assert_eq!(controller.device_by_mac(&[2; 6]).unwrap().rx_type, 0);
+        assert_eq!(
+            controller.device_by_mac(&[2; 6]).unwrap().rx_type,
+            1,
+            "a flagged device keeps its last address so it stays under fan control"
+        );
+        assert!(controller.reports_valid_address(&[1; 6]));
+        assert!(!controller.reports_valid_address(&[2; 6]));
+    }
+
+    #[test]
+    fn swapped_rx_reports_never_flag_both_devices() {
+        let local = [9; 6];
+        let controller = controller_with_master(local);
+        let mut first = rec([1; 6], local);
+        let mut second = rec([2; 6], local);
+        second.rx_type = 2;
+        merge_into(
+            &controller,
+            &[first.clone(), second.clone()],
+            DEBOUNCE_SIGHTINGS,
+        );
+        first.rx_type = 2;
+        second.rx_type = 1;
+        for _ in 0..DEBOUNCE_SIGHTINGS * 3 {
+            merge_into(&controller, &[first.clone(), second.clone()], 1);
+            assert!(controller.rebind_candidates().len() <= 1);
+        }
+        assert_eq!(controller.device_by_mac(&[1; 6]).unwrap().rx_type, 2);
+        assert_eq!(controller.device_by_mac(&[2; 6]).unwrap().rx_type, 1);
+        assert!(controller.rebind_candidates().is_empty());
+    }
+
+    #[test]
+    fn silent_holder_does_not_flag_a_device_on_its_rx() {
+        let local = [9; 6];
+        let controller = controller_with_master(local);
+        let mut moved = rec([2; 6], local);
+        moved.rx_type = 2;
+        merge_into(
+            &controller,
+            &[rec([1; 6], local), moved.clone()],
+            DEBOUNCE_SIGHTINGS,
+        );
+        controller
+            .device_health
+            .lock()
+            .get_mut(&[1; 6])
+            .unwrap()
+            .raw_seen = Instant::now() - ACK_FRESHNESS - Duration::from_secs(1);
+
+        moved.rx_type = 1;
+        merge_into(&controller, &[moved], DEBOUNCE_SIGHTINGS);
+        assert!(controller.rebind_candidates().is_empty());
+        assert_eq!(controller.device_by_mac(&[2; 6]).unwrap().rx_type, 1);
     }
 
     #[test]

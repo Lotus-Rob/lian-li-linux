@@ -714,7 +714,7 @@ impl WirelessController {
         h.published.bind_intent = intent;
         h.published.master_mac = h.raw_master;
         if !intent || super::discovery::is_valid_address(h.raw_channel, h.raw_rx) {
-            h.published.rx_type = h.raw_rx;
+            h.publish_rx(h.raw_rx);
         }
         h.confirmed_invalid_address = None;
         if super::discovery::is_valid_channel(h.raw_channel) {
