@@ -99,15 +99,19 @@ If you have tested a device not marked above, please
 
 ### Arch Linux (AUR)
 
+Install the latest release:
+
 ```sh
-yay -S lianli-linux-git
+yay -S lianli-linux
 ```
 
-To build the package directly:
+`lianli-linux-git` builds the latest `main` instead, for testing unreleased changes. The two packages conflict, so install only one.
+
+To build the release package without an AUR helper:
 
 ```sh
-git clone --recurse-submodules https://github.com/sgtaziz/lian-li-linux.git
-cd lian-li-linux/packaging/archlinux
+git clone https://aur.archlinux.org/lianli-linux.git
+cd lianli-linux
 makepkg -si
 ```
 

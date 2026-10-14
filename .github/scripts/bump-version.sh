@@ -57,11 +57,19 @@ for tool in cargo git-cliff; do
     }
 done
 
-# The three places the version is written. Anywhere else derives it:
-# packaging/archlinux/PKGBUILD computes pkgver() from git describe, and every
+# The places the version is written. Anywhere else derives it:
+# packaging/archlinux/git/PKGBUILD computes pkgver() from git describe, and every
 # crate takes `version.workspace = true`.
 sed -i '/^\[workspace\.package\]/,/^\[/ s/^version = ".*"/version = "'"$version"'"/' Cargo.toml
 sed -i 's/^Version:.*/Version:        '"$version"'/' packaging/fedora/lian-li-linux.spec
+
+# The tag tarball checksums only exist after the tag is pushed; the AUR
+# workflow fills them in when it publishes.
+pkgbuild=packaging/archlinux/release/PKGBUILD
+sed -i -e "s/^pkgver=.*/pkgver=$version/" -e "s/^pkgrel=.*/pkgrel=1/" \
+    -e "s/^_tinyuz=.*/_tinyuz=$(git ls-tree HEAD vendor/tinyuz | awk '{print $3}')/" \
+    -e "s/^_hdiffpatch=.*/_hdiffpatch=$(git ls-tree HEAD vendor/HDiffPatch | awk '{print $3}')/" \
+    "$pkgbuild"
 
 # Rewrites only the workspace members' own entries in the lock file, which is
 # the 14-line diff every previous bump commit shows. A bare `cargo update`
@@ -72,7 +80,7 @@ cargo update --workspace --quiet
 # release are filed under it instead of under "Unreleased".
 git cliff --config .github/cliff.toml --tag "$tag" -o CHANGELOG.md
 
-git add Cargo.toml Cargo.lock packaging/fedora/lian-li-linux.spec CHANGELOG.md
+git add Cargo.toml Cargo.lock packaging/fedora/lian-li-linux.spec "$pkgbuild" CHANGELOG.md
 git commit -m "bump version $version"
 
 # Annotated, and made now rather than left for later: git-cliff dates an
