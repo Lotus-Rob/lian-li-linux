@@ -185,6 +185,37 @@ IPC changes must remain compatible where practical. Add `serde` defaults for new
 
 Configuration writes must use the existing persistence path and notification flow. Do not add direct frontend writes to `config.json`.
 
+## Localization
+
+The GUI ships English and Simplified Chinese (`zh-CN`) through vue-i18n. English is the source language and the fallback. Every user-visible string must be translatable, including text that originates in the daemon, `lianli-control` or the Tauri backend.
+
+### GUI text
+
+- Messages live in `crates/lianli-gui/src/i18n/locales/<locale>/<namespace>.ts`, nested by component with camelCase keys. `zh-CN` files are typed `typeof en`, so both locales must define the same keys. Add or change both locales in the same change.
+- Use `useTranslate()` in components and `tr()` in plain TypeScript. Both accept only a typed `MessageKey`. Do not use `useI18n`, `$t` or `i18n.global.t` directly outside the i18n helpers.
+- Call `tr()` where the text is read, never at module load, so a language switch updates the UI. Map dynamic values to keys with an explicit typed record instead of building key strings.
+- Write whole sentences with named placeholders. Never concatenate translated fragments, because word order differs between languages. Avoid English plural logic; use neutral phrasing or separate keys.
+- vue-i18n treats `{`, `}`, `@`, `$` and `|` as message syntax. Escape literal ones as `{'@'}`, `{'{'}`, `{'|'}`.
+- Translate display text only. Keep enum values, IPC fields, config values, storage keys, CSS classes, log output and test data unchanged. Keep product names, protocols, commands, paths and URLs literal, preferably as placeholders.
+- Use `common.*` only when the meaning is identical. Native dialog titles shown by Tauri are passed from the frontend already translated.
+- Browser storage keys use the `lianli-linux.` prefix.
+
+### Backend text
+
+The daemon, `lianli-control` and the Tauri backend send English plus an optional `UiMessage { key, params }` from `lianli-shared/src/ui_message.rs`. The GUI translates the key under `backend.*` and falls back to the English when the key is absent or unknown. Logs, CLI output and the English field always stay English.
+
+- Return user-facing errors as `UiError`. Over IPC use `IpcResponse::error_ui` or `IpcResponse::from_error`. Tauri commands return `CommandError`. Status structs carry a sibling `*_ui: Option<UiMessage>` field beside the English field, with a serde default.
+- `ui_message_of` uses a key only when the outermost error layer is a `UiError`. Wrapping a keyed error in an English `context` leaves the message untranslated. When a keyed message wraps another error whose detail matters, pass that detail as a parameter instead of dropping it.
+- Keys are literal strings in Rust. Every emitted key must exist in both `backend` locale folders with the same placeholders. Parameter values are inserted as plain text and need no escaping.
+- In the GUI, show backend text with `backendText(english, ui)`. Import `invoke` from `@/utils/backendText` so command errors are translated.
+- Installation findings carry `message_key` and `message_params` for their `findings.*` title and remediation. Their `feature` and `context` values are translated by matching English text in `findings/labels.ts` and `CONTEXT_PATTERNS` in `utils/findingText.ts`, so a new feature or context needs an entry there.
+
+### Chinese style
+
+- Use mainland software conventions, a concise UI register, full-width punctuation and a half-width space between Chinese and Latin letters or digits (`LCD 屏幕`, `60 fps`).
+- Reuse the terminology already in the `zh-CN` files. Search them before introducing a term. Established choices include 守护进程 (daemon), 无线控制器 (dongle), 发射器 and 接收器 (transmitter and receiver), 灯效 (lighting effect), 素材 (LCD assets), 串流 (streaming), 一体式水冷 (AIO), 配置文件 (profile), 安装检查 (installation health) and 接管 (take over).
+- Prefer an accurate literal rendering over a stylish one. The maintainer reviews Chinese through back-translation.
+
 ## Concurrency and lifecycle
 
 Before changing shared state or worker ownership, identify:
@@ -259,6 +290,8 @@ cargo test --workspace
 
 Building the Tauri GUI through Cargo runs the required npm frontend build automatically. Use `cargo check -p lianli-gui` for a focused GUI check and the workspace commands above for cross-project validation. Do not run a separate npm build unless the task specifically requires frontend-only diagnosis.
 
+The frontend build type-checks translation keys and locale parity. It cannot see keys emitted from Rust. When backend text changes, confirm that each new key exists in both `backend` locale folders with matching placeholders.
+
 The full workspace and GUI require system libraries for libusb, FFmpeg, WebKitGTK, and related graphics dependencies. EVDI is dynamically loaded and is optional at runtime. If a broad build fails because a required library is unavailable, run the strongest focused checks possible and report the missing dependency precisely.
 
 For packaging changes, check the affected distribution recipe and shared installed assets. Available hardware-free checks include:
@@ -285,6 +318,6 @@ When reviewing code, prioritize findings in this order:
 5. Deadlocks, races, dropped commands, and misleading success responses
 6. Configuration and IPC compatibility
 7. Media correctness and frame pacing
-8. Packaging and user-visible behavior
+8. Packaging, localization, and user-visible behavior
 
 Each finding should identify the trigger, the resulting behavior, and the relevant code location. Distinguish verified defects from risks that still need hardware confirmation. Do not bury a serious issue among style notes.
