@@ -2,15 +2,58 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use gio::glib::{ToVariant, Variant, VariantDict, VariantTy};
 use lianli_control::services::host_spawn_bridge;
 use lianli_shared::installation::InstallationContext;
 
 const EXIT_WAIT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
+const PORTAL_TIMEOUT_MS: i32 = 5_000;
 
 pub fn open(url: &str) -> Result<(), String> {
     validate(url)?;
-    let mut command = launcher(&InstallationContext::detect(), url, host_spawn_bridge)?;
+    let context = InstallationContext::detect();
+    if matches!(context, InstallationContext::Native) {
+        return open_with_xdg(&context, url);
+    }
+    // Host commands from a container inherit the host's systemd user
+    // environment, which can lack the desktop and Flatpak paths xdg-open needs.
+    let portal_error = match open_with_portal(url) {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
+    open_with_xdg(&context, url)
+        .map_err(|error| format!("Desktop portal failed ({portal_error}); {error}"))
+}
+
+fn open_with_portal(url: &str) -> Result<(), String> {
+    let bus = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE)
+        .map_err(|error| format!("no session bus: {error}"))?;
+    bus.call_sync(
+        Some("org.freedesktop.portal.Desktop"),
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.OpenURI",
+        "OpenURI",
+        Some(&portal_arguments(url)),
+        Some(VariantTy::new("(o)").expect("valid reply type")),
+        gio::DBusCallFlags::NONE,
+        PORTAL_TIMEOUT_MS,
+        gio::Cancellable::NONE,
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
+}
+
+fn portal_arguments(url: &str) -> Variant {
+    Variant::tuple_from_iter([
+        "".to_variant(),
+        url.to_variant(),
+        VariantDict::new(None).end(),
+    ])
+}
+
+fn open_with_xdg(context: &InstallationContext, url: &str) -> Result<(), String> {
+    let mut command = launcher(context, url, host_spawn_bridge)?;
     let child = command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -78,6 +121,13 @@ mod tests {
         assert!(validate("file:///etc/passwd").is_err());
         assert!(validate("https://example.com/a b").is_err());
         assert!(validate("https://example.com/\n--help").is_err());
+    }
+
+    #[test]
+    fn portal_request_matches_the_open_uri_signature() {
+        let arguments = portal_arguments(URL);
+        assert_eq!(arguments.type_().as_str(), "(ssa{sv})");
+        assert_eq!(arguments.child_value(1).str(), Some(URL));
     }
 
     #[test]

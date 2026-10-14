@@ -2615,6 +2615,7 @@ name = "lianli-gui"
 version = "1.2.0"
 dependencies = [
  "anyhow",
+ "gio",
  "lianli-control",
  "lianli-shared",
  "libc",
