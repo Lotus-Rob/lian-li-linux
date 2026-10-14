@@ -7,8 +7,8 @@ import { deviceNameKey } from "@/utils/deviceNames";
 import { resolveLcdDevice } from "@/utils/lcdSelection";
 import { readStoredJson, writeStoredJson } from "@/utils/storedPreference";
 
-const NAMES_KEY = "lianli.deviceNames";
-const LEGACY_LCD_NAMES_KEY = "lianli.lcdNames";
+const NAMES_KEY = "lianli-linux.deviceNames";
+const LEGACY_LCD_NAMES_KEY = "lianli-linux.lcdNames";
 export const MAX_DEVICE_NAME_LENGTH = 40;
 
 function stringMap(value: unknown): Record<string, string> | null {

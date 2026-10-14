@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { readStoredJson, writeStoredJson } from "@/utils/storedPreference";
 
-const ORDER_KEY = "lianli.lcdOrder";
+const ORDER_KEY = "lianli-linux.lcdOrder";
 
 function readOrder(): string[] {
   const stored = readStoredJson(ORDER_KEY);

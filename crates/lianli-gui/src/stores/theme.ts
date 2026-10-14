@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 
 export type ThemeMode = "dark" | "light";
 
-const STORAGE_KEY = "lianli.theme";
+const STORAGE_KEY = "lianli-linux.theme";
 const VALID: ThemeMode[] = ["dark", "light"];
 
 function readStored(): ThemeMode | null {
