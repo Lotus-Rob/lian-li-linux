@@ -31,9 +31,13 @@ const error = ref("");
 const templates = ref<CatalogTemplate[]>([]);
 const previewCache = ref<Record<string, string>>({});
 const previewErrors = ref<Record<string, string>>({});
+const previewOpen = ref(false);
+const selectedPreview = ref<CatalogTemplate | null>(null);
 let downloads = new AbortController();
 let disposed = false;
 function clearPreviews() {
+  previewOpen.value = false;
+  selectedPreview.value = null;
   for (const url of Object.values(previewCache.value)) URL.revokeObjectURL(url);
   previewCache.value = {};
   previewErrors.value = {};
@@ -243,6 +247,12 @@ function closeWindow() {
 
 const PUBLISHING_URL = "https://github.com/sgtaziz/lian-li-linux/tree/main/templates";
 
+function openPreview(entry: CatalogTemplate) {
+  if (!previewCache.value[entry.id]) return;
+  selectedPreview.value = entry;
+  previewOpen.value = true;
+}
+
 /** Effective (post-rotation) aspect ratio for a catalog template. */
 function previewAspect(t: CatalogTemplate): string {
   const w = t.rotated ? t.base_height : t.base_width;
@@ -285,10 +295,18 @@ function previewAspect(t: CatalogTemplate): string {
 
       <div v-else class="grid">
         <div v-for="tpl in templates" :key="tpl.id" class="card tpl-card">
-          <div class="preview" :style="{ aspectRatio: previewAspect(tpl) }">
+          <button
+            type="button"
+            class="preview"
+            :style="{ aspectRatio: previewAspect(tpl) }"
+            :disabled="!previewCache[tpl.id]"
+            :aria-label="t('editor.browser.enlargePreviewOf', { name: tpl.name })"
+            :title="t('editor.browser.enlargePreview')"
+            @click="openPreview(tpl)"
+          >
             <img v-if="previewCache[tpl.id]" :src="previewCache[tpl.id]" alt="" />
-            <div v-else class="preview-ph" :title="previewErrors[tpl.id]">{{ previewErrors[tpl.id] ? t("editor.browser.previewUnavailable") : "" }}</div>
-          </div>
+            <span v-else class="preview-ph" :title="previewErrors[tpl.id]">{{ previewErrors[tpl.id] ? t("editor.browser.previewUnavailable") : "" }}</span>
+          </button>
           <div class="info">
             <div class="name">{{ tpl.name }}</div>
             <div class="author muted" v-if="tpl.author">{{ t("editor.browser.byAuthor", { author: tpl.author }) }}</div>
@@ -313,7 +331,22 @@ function previewAspect(t: CatalogTemplate): string {
         </div>
       </div>
     </div>
+    <n-modal
+      v-model:show="previewOpen"
+      preset="card"
+      closable
+      :title="selectedPreview?.name ?? t('editor.browser.templatePreview')"
+      style="width: min(1400px, 95vw)"
+    >
+      <img
+        v-if="selectedPreview && previewCache[selectedPreview.id]"
+        class="enlarged-preview"
+        :src="previewCache[selectedPreview.id]"
+        :alt="t('editor.browser.previewOf', { name: selectedPreview.name })"
+      />
+    </n-modal>
     <SensorBindingDialog :request="bindingRequest" @confirm="onBindingsConfirmed" @cancel="closeBindings" />
+
   </div>
 </template>
 
@@ -381,6 +414,8 @@ function previewAspect(t: CatalogTemplate): string {
   gap: var(--space-2);
 }
 .preview {
+  display: block;
+  padding: 0;
   width: 100%;
   max-height: 220px;
   /* aspect-ratio is set inline from each template's effective dimensions. */
@@ -389,12 +424,29 @@ function previewAspect(t: CatalogTemplate): string {
   overflow: hidden;
   border: 1px solid var(--border);
 }
+.preview:not(:disabled) {
+  cursor: zoom-in;
+}
+.preview:disabled {
+  cursor: default;
+}
+.preview:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.enlarged-preview {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
 .preview img {
   width: 100%;
   height: 100%;
   object-fit: contain;
 }
 .preview-ph {
+  display: block;
   width: 100%;
   height: 100%;
 }
