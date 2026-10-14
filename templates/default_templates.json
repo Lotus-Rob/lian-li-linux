@@ -218,6 +218,55 @@
           "sha256": "bed7a9b44078b609b540179cf3665dff1fc22c8527b730dfa3d5ba3b89c0bcce"
         }
       ]
+    },
+    {
+      "id": "cyber-rain-horizontal",
+      "name": "Cyber Rain / Mustard",
+      "description": "Bright rainy cyberpunk dashboard with analog CPU/GPU and network gauges, RAM, free disk space and NVMe temperature.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.2.0",
+      "folder": "cyber-rain-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "09bf0d27f7847180e4f07fdc3baa679ac566d3bd5f093ccaff1d5cdcb619f7ea",
+      "preview": "preview.jpg",
+      "preview_sha256": "0e33903e0d3621ef827dca6c34070cb875d345e838e2ec5ad117756b3e1ca976",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "files": [
+        {
+          "path": "CREDITS.md",
+          "sha256": "05f3798121f5a595cbe255000ca40f9e2bc8ea59558b8bada788d37f3adc0c46"
+        },
+        {
+          "path": "JetBrainsMono-Bold.ttf",
+          "sha256": "d22c4f3821d725eb01210d278d95dfcfcaadc34699a06658d47c8a5cc5830ada"
+        },
+        {
+          "path": "JetBrainsMono-OFL.txt",
+          "sha256": "a76abf002c49097d146e86740a3105a5d00450b1592e820a1109a8c5680cd697"
+        },
+        {
+          "path": "README.md",
+          "sha256": "6b7521d2eb9bb12810012a5e9d7b0187bdfb7e9a0cc950fde825dc10d23c0bf1"
+        },
+        {
+          "path": "Rajdhani-OFL.txt",
+          "sha256": "f62ef357d3a1c3d27edd35a6e1ba350e8a8d13499797964eeadefbf0b3b15d1f"
+        },
+        {
+          "path": "Rajdhani-SemiBold.ttf",
+          "sha256": "94bbd25a18ca665999feb05a537de9fd2b860dcfb78bbe9ca00270825bf235da"
+        },
+        {
+          "path": "panels.png",
+          "sha256": "c886d5704a1f0d773c141fc242f96080992c10b6b05f499b141ece535354b265"
+        },
+        {
+          "path": "rain-city.png",
+          "sha256": "e8f378cd5662a86b853ac608522a9aedbbe26b8b6f89b1ea3eb6a8aeeda286cf"
+        }
+      ]
     }
   ]
 }
