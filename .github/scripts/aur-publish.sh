@@ -15,12 +15,13 @@ sudo -u builder makepkg --nobuild --nodeps --noconfirm
 sudo -u builder sh -c 'makepkg --printsrcinfo > .SRCINFO'
 grep -E '^\s*(pkgver|source|sha256sums) =' .SRCINFO
 
-install -d -m 700 ~/.ssh
-(umask 077; printf '%s\n' "$AUR_SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/aur)
-ssh-keyscan -t ed25519 aur.archlinux.org > ~/.ssh/known_hosts
+# ssh takes its home from passwd, not $HOME, so every path is passed explicitly.
+ssh_dir=$(mktemp -d)
+(umask 077; printf '%s\n' "$AUR_SSH_PRIVATE_KEY" | tr -d '\r' > "$ssh_dir/aur")
+ssh-keyscan -t ed25519 aur.archlinux.org > "$ssh_dir/known_hosts"
 # Published on https://aur.archlinux.org; refuse any other host key.
-ssh-keygen -lf ~/.ssh/known_hosts | grep -q 'SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4'
-export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+ssh-keygen -lf "$ssh_dir/known_hosts" | grep -q 'SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4'
+export GIT_SSH_COMMAND="ssh -i $ssh_dir/aur -o UserKnownHostsFile=$ssh_dir/known_hosts -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
 
 git clone "ssh://aur@aur.archlinux.org/$pkgbase.git" /tmp/aur
 cp PKGBUILD .SRCINFO "$license" /tmp/aur/
