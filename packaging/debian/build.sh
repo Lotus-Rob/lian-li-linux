@@ -25,7 +25,7 @@ rsync -a --exclude=.git --exclude=target --exclude=tmp --exclude=node_modules \
     --exclude=dist --exclude=.cache --exclude=.codex --exclude=.agents \
     --exclude='.env*' --exclude=.npmrc --exclude='.cargo/credentials*' \
     --exclude='*.deb' --exclude='*.rpm' \
-    --exclude=packaging/archlinux/pkg --exclude=packaging/archlinux/src \
+    --exclude=packaging/archlinux \
     "$root/" "$stage/source/"
 cd "$stage/source"
 export DEBFULLNAME=sgtaziz DEBEMAIL=sgtaziz013@gmail.com

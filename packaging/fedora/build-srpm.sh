@@ -26,8 +26,7 @@ rsync -a \
     --exclude='.cache' \
     --exclude='node_modules' \
     --exclude='dist' \
-    --exclude='packaging/archlinux/pkg' \
-    --exclude='packaging/archlinux/src' \
+    --exclude='packaging/archlinux' \
     --exclude='*.pkg.tar.zst' \
     ./ "$STAGE/"
 
