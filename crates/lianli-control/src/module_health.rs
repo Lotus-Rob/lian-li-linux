@@ -1,6 +1,7 @@
 use anyhow::{ensure, Context, Result};
 use lianli_shared::installation::{
-    CheckState, FindingSeverity, InstallationContext, InstallationFinding, InstallationGuide,
+    message_params, CheckState, FindingSeverity, InstallationContext, InstallationFinding,
+    InstallationGuide,
 };
 use std::time::{Duration, Instant};
 
@@ -44,6 +45,8 @@ fn unavailable(module: &str, error: &str) -> InstallationFinding {
         evidence: error.into(),
         remediation: "Check the host installation using the desktop backend guide. Hyprland needs no optional display module.".into(),
         guide: InstallationGuide::Troubleshooting,
+        message_key: Some("control.moduleUnavailable".into()),
+        message_params: message_params([("module", module.into())]),
     }
 }
 
@@ -205,6 +208,11 @@ fn failure_message<'a>(messages: &'a [String], module: &str) -> Option<&'a str> 
     })
 }
 
+fn advise(finding: &mut InstallationFinding, key: &str, remediation: &str) {
+    finding.message_key = Some(key.into());
+    finding.remediation = remediation.into();
+}
+
 fn classify(
     module: &str,
     kernel: &str,
@@ -218,7 +226,7 @@ fn classify(
     if loaded {
         finding.state = CheckState::Passed;
         finding.evidence = format!("Loaded in host kernel {kernel}. Output ownership, mode, capture and encoding are checked separately during desktop startup.");
-        finding.remediation.clear();
+        advise(&mut finding, "control.moduleLoaded", "");
     } else if let Some(error) = journal
         .as_ref()
         .ok()
@@ -228,27 +236,30 @@ fn classify(
         finding.severity = FindingSeverity::Warning;
         finding.evidence =
             format!("Not loaded. Host kernel reported this during the current boot: {error}");
-        finding.remediation = "Review the host kernel log, then repair module compatibility or signing. Retry desktop mode after repair.".into();
+        advise(&mut finding, "control.moduleLoadFailed", "Review the host kernel log, then repair module compatibility or signing. Retry desktop mode after repair.");
     } else if registered && matches!(installed, ModuleFile::Missing) {
         finding.state = CheckState::Failed;
         finding.severity = FindingSeverity::Warning;
         finding.evidence = format!("DKMS lists {module}, but modinfo reports no installed module for host kernel {kernel}.");
-        finding.remediation = if headers == Some(false) {
-            "Matching host kernel build files are missing. Install the kernel development package, then repair the DKMS build using the host package instructions."
+        if headers == Some(false) {
+            advise(&mut finding, "control.moduleBuildFilesMissing", "Matching host kernel build files are missing. Install the kernel development package, then repair the DKMS build using the host package instructions.");
         } else {
-            "Review the host DKMS build log and finish installing the module for the running kernel."
-        }.into();
+            advise(&mut finding, "control.moduleBuildIncomplete", "Review the host DKMS build log and finish installing the module for the running kernel.");
+        }
     } else if let ModuleFile::Installed(path) = installed {
         finding.state = CheckState::Passed;
         finding.evidence = format!("Installed for host kernel {kernel}: {}. Not loaded. This does not verify signing trust or desktop operation.", path.trim());
-        finding.remediation =
-            "If this backend is needed, follow the host driver startup instructions.".into();
+        advise(
+            &mut finding,
+            "control.moduleInstalled",
+            "If this backend is needed, follow the host driver startup instructions.",
+        );
     } else if let ModuleFile::Unverified(error) = installed {
         finding.evidence = error.clone();
     } else {
         finding.state = CheckState::NotApplicable;
         finding.evidence = format!("Optional module is not installed for host kernel {kernel}.");
-        finding.remediation = "Install this host driver only if you need its desktop backend. Hyprland uses native headless output.".into();
+        advise(&mut finding, "control.moduleNotInstalled", "Install this host driver only if you need its desktop backend. Hyprland uses native headless output.");
     }
     if !loaded && journal.is_err() {
         finding

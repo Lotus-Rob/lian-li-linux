@@ -9,7 +9,8 @@ import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import LedStrip from "@/components/rgb/LedStrip.vue";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
 import { recallDeviceEffect, rememberDeviceEffect } from "@/components/rgb/effectMemory";
-import { RGB_DIRECTIONS, RGB_BRIGHTNESS, modeLabel } from "@/constants";
+import { RGB_DIRECTIONS, RGB_BRIGHTNESS, modeLabel, scopeLabel } from "@/constants";
+import { useTranslate } from "@/i18n";
 
 const props = defineProps<{
   deviceId: string;
@@ -22,6 +23,7 @@ const props = defineProps<{
   lightingLocked?: boolean;
 }>();
 
+const t = useTranslate();
 const rgb = useRgbStore();
 const config = useConfigStore();
 const dialog = useDialog();
@@ -101,10 +103,10 @@ function patchEffect(p: Partial<RgbEffect>) {
         propagateToZones();
       } else if (propagateChoice.value === "ask") {
         dialog.warning({
-          title: "Apply to all zones?",
-          content: "Animated effects on zone 0 propagate to all zones on this device.",
-          positiveText: "Apply to all",
-          negativeText: "Zone 0 only",
+          title: t("rgb.zoneEditor.applyAllTitle"),
+          content: t("rgb.zoneEditor.applyAllContent"),
+          positiveText: t("rgb.zoneEditor.applyAll"),
+          negativeText: t("rgb.zoneEditor.zoneZeroOnly"),
           onPositiveClick: () => {
             propagateChoice.value = "yes";
             propagateToZones();
@@ -153,10 +155,10 @@ function addColor() {
 function removeColor(index: number) {
   if (effect.value.colors.length <= 1) return;
   dialog.error({
-    title: "Remove color?",
-    content: `Color ${index + 1} will be removed from the palette.`,
-    positiveText: "Remove",
-    negativeText: "Cancel",
+    title: t("rgb.zoneEditor.removeColorTitle"),
+    content: t("rgb.zoneEditor.removeColorContent", { index: index + 1 }),
+    positiveText: t("common.remove"),
+    negativeText: t("common.cancel"),
     onPositiveClick: () => {
       const next = effect.value.colors.filter((_, i) => i !== index);
       patchEffect({ colors: next });
@@ -224,10 +226,10 @@ function fillAll() {
 
 function clearAll() {
   dialog.error({
-    title: "Clear all LEDs?",
-    content: "All direct LED colors on this zone will be set to black.",
-    positiveText: "Clear",
-    negativeText: "Cancel",
+    title: t("rgb.zoneEditor.clearAllTitle"),
+    content: t("rgb.zoneEditor.clearAllContent"),
+    positiveText: t("rgb.zoneEditor.clear"),
+    negativeText: t("common.cancel"),
     onPositiveClick: () => {
       ledColors.value = Array.from({ length: ledCount.value }, () => [0, 0, 0]);
       markDirectChange();
@@ -237,7 +239,7 @@ function clearAll() {
 }
 
 const zoneLabel = computed(
-  () => props.groupEffects ? "Port effects" : props.cap.zones[props.zoneIndex]?.name ?? `Zone ${props.zoneIndex}`,
+  () => props.groupEffects ? t("rgb.zoneEditor.portEffects") : props.cap.zones[props.zoneIndex]?.name ?? t("rgb.zoneEditor.zoneName", { index: props.zoneIndex }),
 );
 </script>
 
@@ -245,22 +247,22 @@ const zoneLabel = computed(
   <div class="zone" :class="{ collapsed: !expanded }">
     <div class="zone-head" @click="expanded = !expanded">
       <span class="zone-name">{{ zoneLabel }}</span>
-      <span class="muted">{{ ledCount }} LED(s)</span>
+      <span class="muted">{{ t("rgb.zoneEditor.ledCount", { count: ledCount }) }}</span>
     </div>
 
     <div v-if="expanded" class="zone-body">
       <details v-if="countControl" class="led-count-settings">
-        <summary>Configure LED count</summary>
+        <summary>{{ t("rgb.zoneEditor.configureLedCount") }}</summary>
         <div class="led-count-row">
-          <LabeledSlider class="led-count-slider" label="LED count" :model-value="ledCount" :min="countControl.min" :max="countControl.max" :step="1" @update:model-value="onLedCount" />
-          <n-button v-if="ledCount !== countControl.default" size="tiny" quaternary :title="`Reset to ${countControl.default}`" :aria-label="`Reset LED count to ${countControl.default}`" @click="onLedCount(countControl.default)">
+          <LabeledSlider class="led-count-slider" :label="t('rgb.zoneEditor.ledCountLabel')" :model-value="ledCount" :min="countControl.min" :max="countControl.max" :step="1" @update:model-value="onLedCount" />
+          <n-button v-if="ledCount !== countControl.default" size="tiny" quaternary :title="t('rgb.zoneEditor.resetTo', { value: countControl.default })" :aria-label="t('rgb.zoneEditor.resetLedCountTo', { value: countControl.default })" @click="onLedCount(countControl.default)">
             <template #icon><RotateCcw :size="14" /></template>
           </n-button>
         </div>
       </details>
       <div class="effect-controls" :class="{ 'sync-locked': lightingLocked }" :inert="lightingLocked || undefined">
       <div class="row">
-        <label class="muted">Mode</label>
+        <label class="muted">{{ t("rgb.effect.mode") }}</label>
         <n-select
           size="small"
           :value="directOnly ? 'Direct' : effect.mode"
@@ -270,14 +272,10 @@ const zoneLabel = computed(
         />
       </div>
 
-      <p v-if="groupEffects" class="muted">Changes apply to every fan in this port. Save changes to apply lighting.</p>
-      <p v-else-if="perFanOnly" class="muted">Individual fan effects replace the port's group effect when edited. Save changes to apply lighting.</p>
-      <p v-else-if="directOnly" class="muted">
-        Applying direct colors replaces the group's animation with direct LED control.
-      </p>
-      <p v-else-if="hasSoftwareRenderer" class="muted">
-        Each zone can use its own effect. Save changes to apply lighting.
-      </p>
+      <p v-if="groupEffects" class="muted">{{ t("rgb.zoneEditor.groupEffectsHint") }}</p>
+      <p v-else-if="perFanOnly" class="muted">{{ t("rgb.zoneEditor.perFanHint") }}</p>
+      <p v-else-if="directOnly" class="muted">{{ t("rgb.zoneEditor.directHint") }}</p>
+      <p v-else-if="hasSoftwareRenderer" class="muted">{{ t("rgb.zoneEditor.softwareHint") }}</p>
 
       <div v-if="isDirect && canEditLeds && ledCount > 0" class="direct">
         <LedStrip
@@ -287,15 +285,15 @@ const zoneLabel = computed(
           @select="onSelectLed"
         />
         <div class="direct-controls">
-          <ColorPicker class="direct-color" :model-value="directColor" label="Color" @update:model-value="setDirectColor" />
-          <n-button size="small" :disabled="!selectedLeds.length" @click="applyDirect">Apply</n-button>
-          <n-button size="small" @click="fillAll">Fill All</n-button>
-          <n-button size="small" @click="clearAll">Clear</n-button>
+          <ColorPicker class="direct-color" :model-value="directColor" :label="t('rgb.effect.color')" @update:model-value="setDirectColor" />
+          <n-button size="small" :disabled="!selectedLeds.length" @click="applyDirect">{{ t("common.apply") }}</n-button>
+          <n-button size="small" @click="fillAll">{{ t("rgb.zoneEditor.fillAll") }}</n-button>
+          <n-button size="small" @click="clearAll">{{ t("rgb.zoneEditor.clear") }}</n-button>
         </div>
       </div>
 
       <div v-if="!isDirect && !(isSoftware && ['Off', 'Rainbow', 'RainbowMorph'].includes(effect.mode))" class="colors">
-        <label class="muted">Colors</label>
+        <label class="muted">{{ t("rgb.effect.colors") }}</label>
         <div class="color-list">
           <div v-for="(_, i) in effect.colors" :key="i" class="color-item">
             <ColorPicker
@@ -316,14 +314,14 @@ const zoneLabel = computed(
       <div v-if="!isDirect" class="two-col">
         <LabeledSlider
           v-if="isAnimated"
-          label="Speed"
+          :label="t('rgb.effect.speed')"
           :model-value="effect.speed"
           :min="0"
           :max="4"
           @update:model-value="onSpeed"
         />
         <div class="field">
-          <label class="muted">Brightness</label>
+          <label class="muted">{{ t("rgb.effect.brightness") }}</label>
           <n-select
             size="small"
             :value="effect.brightness"
@@ -335,7 +333,7 @@ const zoneLabel = computed(
 
       <div v-if="showDirection || showScope" class="two-col">
         <div v-if="showDirection" class="field">
-          <label class="muted">Direction</label>
+          <label class="muted">{{ t("rgb.effect.direction") }}</label>
           <n-select
             size="small"
             :value="effect.direction"
@@ -344,19 +342,19 @@ const zoneLabel = computed(
           />
         </div>
         <div v-if="showScope" class="field">
-          <label class="muted">Scope</label>
+          <label class="muted">{{ t("rgb.effect.scope") }}</label>
           <n-select
             size="small"
             :value="groupEffects && effect.scope === 'Fan' ? 'All' : effect.scope"
-            :options="supportedScopes.map((s) => ({ label: s, value: s }))"
+            :options="supportedScopes.map((s) => ({ label: scopeLabel(s), value: s }))"
             @update:value="onScope"
           />
         </div>
       </div>
 
       <div v-if="cap.supports_direction && !groupEffects" class="checkboxes">
-        <n-checkbox :checked="zone.swap_lr" @update:checked="onSwapLr">Swap L/R</n-checkbox>
-        <n-checkbox :checked="zone.swap_tb" @update:checked="onSwapTb">Swap T/B</n-checkbox>
+        <n-checkbox :checked="zone.swap_lr" @update:checked="onSwapLr">{{ t("rgb.zoneEditor.swapLr") }}</n-checkbox>
+        <n-checkbox :checked="zone.swap_tb" @update:checked="onSwapTb">{{ t("rgb.zoneEditor.swapTb") }}</n-checkbox>
       </div>
       </div>
     </div>

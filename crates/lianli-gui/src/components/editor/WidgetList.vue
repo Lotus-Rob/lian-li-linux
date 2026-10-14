@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { ChevronUp, ChevronDown, Plus, Trash2, Copy } from "lucide-vue-next";
 import type { Widget } from "@/types";
+import { useTranslate, type MessageKey } from "@/i18n";
 
 const props = defineProps<{
   widgets: Widget[];
@@ -16,25 +17,29 @@ const emit = defineEmits<{
   move: [id: string, dir: -1 | 1];
 }>();
 
-const KINDS = [
-  { id: "label", label: "Label" },
-  { id: "value_text", label: "Sensor Value" },
-  { id: "radial_gauge", label: "Radial Gauge" },
-  { id: "vertical_bar", label: "Vertical Bar" },
-  { id: "horizontal_bar", label: "Horizontal Bar" },
-  { id: "speedometer", label: "Speedometer" },
-  { id: "core_bars", label: "Core Usage" },
-  { id: "image", label: "Image" },
-  { id: "video", label: "Video" },
-  { id: "clock_digital", label: "Clock (Digital)" },
-  { id: "clock_analog", label: "Clock (Analog)" },
-  { id: "sparkline", label: "Sparkline" },
-] as const;
+const t = useTranslate();
+
+const KINDS: { id: string; label: MessageKey }[] = [
+  { id: "label", label: "editor.kinds.label" },
+  { id: "value_text", label: "editor.kinds.valueText" },
+  { id: "radial_gauge", label: "editor.kinds.radialGauge" },
+  { id: "vertical_bar", label: "editor.kinds.verticalBar" },
+  { id: "horizontal_bar", label: "editor.kinds.horizontalBar" },
+  { id: "speedometer", label: "editor.kinds.speedometer" },
+  { id: "core_bars", label: "editor.kinds.coreBars" },
+  { id: "image", label: "editor.kinds.image" },
+  { id: "video", label: "editor.kinds.video" },
+  { id: "clock_digital", label: "editor.kinds.clockDigital" },
+  { id: "clock_analog", label: "editor.kinds.clockAnalog" },
+  { id: "sparkline", label: "editor.kinds.sparkline" },
+];
+
+const kindOptions = computed(() => KINDS.map((k) => ({ label: t(k.label), value: k.id })));
 
 function friendly(kind: any): string {
-  const t = kind?.type;
-  const found = KINDS.find((k) => k.id === t);
-  return found?.label ?? t ?? "Widget";
+  const type = kind?.type;
+  const found = KINDS.find((k) => k.id === type);
+  return found ? t(found.label) : type ?? t("editor.widgetList.widget");
 }
 </script>
 
@@ -43,8 +48,8 @@ function friendly(kind: any): string {
     <div class="add-row">
       <n-select
         size="small"
-        placeholder="Add widget"
-        :options="KINDS.map((k) => ({ label: k.label, value: k.id }))"
+        :placeholder="t('editor.widgetList.addWidget')"
+        :options="kindOptions"
         @update:value="(v) => v && emit('add', v)"
       />
     </div>
@@ -61,15 +66,15 @@ function friendly(kind: any): string {
         <div class="ops">
           <button class="op" :disabled="i === 0" @click.stop="emit('move', w.id, -1)"><ChevronUp :size="13" /></button>
           <button class="op" :disabled="i === widgets.length - 1" @click.stop="emit('move', w.id, 1)"><ChevronDown :size="13" /></button>
-          <button class="op" title="Duplicate (Ctrl+D)" @click.stop="emit('duplicate', w.id)"><Copy :size="13" /></button>
-          <button class="op danger" title="Delete (Del)" @click.stop="emit('remove', w.id)"><Trash2 :size="13" /></button>
+          <button class="op" :title="t('editor.widgetList.duplicate')" @click.stop="emit('duplicate', w.id)"><Copy :size="13" /></button>
+          <button class="op danger" :title="t('editor.widgetList.delete')" @click.stop="emit('remove', w.id)"><Trash2 :size="13" /></button>
         </div>
       </div>
-      <div v-if="!widgets.length" class="empty muted">No widgets yet.</div>
+      <div v-if="!widgets.length" class="empty muted">{{ t("editor.widgetList.empty") }}</div>
     </div>
     <div class="hints muted">
-      Arrows: nudge · Shift+Arrows: ×10<br />
-      Ctrl+C/V: copy/paste · Ctrl+D: duplicate · Del: delete
+      {{ t("editor.widgetList.hintNudge") }}<br />
+      {{ t("editor.widgetList.hintShortcuts") }}
     </div>
   </div>
 </template>

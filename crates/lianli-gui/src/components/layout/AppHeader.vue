@@ -6,6 +6,7 @@ import { Moon, RefreshCw, Save, Sun } from "lucide-vue-next";
 import { useDaemonStore } from "@/stores/daemon";
 import { useConfigStore } from "@/stores/config";
 import { useThemeStore } from "@/stores/theme";
+import { useTranslate } from "@/i18n";
 import { MAIN_ROUTES } from "@/router";
 
 const daemon = useDaemonStore();
@@ -13,11 +14,13 @@ const config = useConfigStore();
 const theme = useThemeStore();
 const route = useRoute();
 const message = useMessage();
+const t = useTranslate();
 const saving = ref(false);
 
-const title = computed(
-  () => MAIN_ROUTES.find((r) => r.name === route.name)?.label ?? "Lian Li Linux",
-);
+const title = computed(() => {
+  const match = MAIN_ROUTES.find((r) => r.name === route.name);
+  return t(match?.labelKey ?? "nav.appName");
+});
 
 const refreshing = ref(false);
 
@@ -39,7 +42,7 @@ async function onSave() {
   try {
     await config.save();
   } catch (error) {
-    message.error(`Save failed: ${error instanceof Error ? error.message : String(error)}`, { duration: 10000 });
+    message.error(t("shell.header.saveFailed", { error: error instanceof Error ? error.message : String(error) }), { duration: 10000 });
   } finally {
     saving.value = false;
     (document.activeElement as HTMLElement | null)?.blur();
@@ -59,7 +62,7 @@ function onToggleTheme() {
     <n-button
       quaternary
       size="small"
-      :title="theme.isDark ? 'Switch to light mode' : 'Switch to dark mode'"
+      :title="theme.isDark ? t('shell.header.switchToLight') : t('shell.header.switchToDark')"
       @click="onToggleTheme"
     >
       <template #icon>
@@ -72,7 +75,7 @@ function onToggleTheme() {
       size="small"
       :loading="refreshing"
       :disabled="refreshing"
-      :title="refreshing ? 'Refreshing…' : 'Refresh now'"
+      :title="refreshing ? t('shell.header.refreshing') : t('shell.header.refreshNow')"
       @click="onRefresh"
     >
       <template #icon>
@@ -88,7 +91,7 @@ function onToggleTheme() {
       @click="onSave"
     >
       <template #icon><Save :size="15" /></template>
-      Save{{ config.dirty ? "*" : "" }}
+      {{ t("common.save") }}{{ config.dirty ? "*" : "" }}
     </n-button>
   </header>
 </template>

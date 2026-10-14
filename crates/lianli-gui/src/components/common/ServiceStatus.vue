@@ -7,10 +7,29 @@ import { useConfigStore } from "@/stores/config";
 import type { ContainerDeployment, ServiceAction, ServiceChangeRequest, ServiceOperationStatus, ServiceScope } from "@/types/installation";
 import { useInstallationStore } from "@/stores/installation";
 import { useDaemonStore } from "@/stores/daemon";
-import { canSetUpServices, canSwitchServices } from "@/utils/serviceSetup";
+import { canSetUpServices, canSwitchServices, DAEMON_MODE_LABELS } from "@/utils/serviceSetup";
+import { findingRemediation } from "@/utils/findingText";
+import { useTranslate, type MessageKey } from "@/i18n";
 
 defineProps<{ setupOnly?: boolean }>();
 
+const t = useTranslate();
+const actionLabels: Record<ServiceAction, MessageKey> = {
+  start: "service.serviceStatus.action.start",
+  stop: "service.serviceStatus.action.stop",
+  restart: "service.serviceStatus.action.restart",
+};
+const actionTitles: Record<ServiceAction, MessageKey> = {
+  start: "service.serviceStatus.actionTitle.start",
+  stop: "service.serviceStatus.actionTitle.stop",
+  restart: "service.serviceStatus.actionTitle.restart",
+};
+const actionConfirmations: Record<ServiceAction, MessageKey> = {
+  start: "service.serviceStatus.actionConfirm.start",
+  stop: "service.serviceStatus.actionConfirm.stop",
+  restart: "service.serviceStatus.actionConfirm.restart",
+};
+const setupIntroKey: MessageKey = "service.serviceStatus.setupIntro";
 const installation = useInstallationStore();
 const daemon = useDaemonStore();
 const config = useConfigStore();
@@ -26,10 +45,14 @@ watch(() => daemon.info, (info) => {
 }, { immediate: true });
 const destination = ref<ServiceScope | null>(null);
 const settingsChoice = ref(daemon.connected ? "carry" : "destination");
-const modeOptions = [
-  { label: "User (at login)", value: "user" },
-  { label: "System (at boot)", value: "system" },
-];
+const modeOptions = computed(() => [
+  { label: t("service.serviceStatus.modeUser"), value: "user" },
+  { label: t("service.serviceStatus.modeSystem"), value: "system" },
+]);
+const settingsOptions = computed(() => [
+  { label: t("service.serviceStatus.carrySettings"), value: "carry" },
+  { label: t("service.serviceStatus.destinationSettings"), value: "destination" },
+]);
 const busy = computed(() => submitting.value || operation.value.active);
 const canSwitch = computed(() => canSwitchServices(report.value));
 let unlisten: UnlistenFn | undefined;
@@ -128,14 +151,14 @@ async function perform(command: "service_action" | "service_change", request: { 
 }
 
 function act(scope: ServiceScope, action: ServiceAction) {
-  const title = action[0].toUpperCase() + action.slice(1);
+  const scopeLabel = t(DAEMON_MODE_LABELS[scope]);
   dialog.warning({
-    title: `${title} host ${scope} service`,
+    title: t(actionTitles[action], { scope: scopeLabel }),
     content: config.dirty
-      ? "Save your pending configuration changes before continuing. Save and close any open template editor first."
-      : `${title} the host ${scope} hardware service? Startup selection stays as configured.`,
-    positiveText: config.dirty ? "Save and continue" : title,
-    negativeText: "Cancel",
+      ? t("service.serviceStatus.actionSaveFirst")
+      : t(actionConfirmations[action], { scope: scopeLabel }),
+    positiveText: t(config.dirty ? "service.serviceStatus.saveAndContinue" : actionLabels[action]),
+    negativeText: t("common.cancel"),
     onPositiveClick: async () => {
       if (config.dirty) {
         try { await config.save(); }
@@ -152,19 +175,18 @@ function change(request: ServiceChangeRequest) {
   if (busy.value || (request.kind === "switch" && request.scope === currentMode.value)) return;
   const recovery = request.kind === "recover";
   const setup = !recovery && initialSetup.value;
+  const scope = request.kind === "switch" ? t(DAEMON_MODE_LABELS[request.scope]) : "";
   dialog.warning({
-    title: recovery ? "Recover host service switch" : setup ? `Enable host ${request.scope} service` : `Switch to host ${request.scope} service`,
+    title: recovery ? t("service.serviceStatus.recoverTitle") : t(setup ? "service.serviceStatus.enableTitle" : "service.serviceStatus.switchTitle", { scope }),
     content: config.dirty
-      ? "Save or discard your pending configuration changes before switching or recovering services. Save and close the template editor first."
+      ? t("service.serviceStatus.changeSaveFirst")
       : recovery
-        ? "Resume the interrupted operation and restore the previous service mode where needed? Administrator authorization is required."
+        ? t("service.serviceStatus.recoverConfirm")
         : setup
-          ? `Enable and start the ${request.scope} service? The other mode will stay disabled. Saved settings will be used if available. Administrator authorization is required.`
-        : `Stop the previous service cleanly, enable only the ${request.scope} service and start it? ${request.carry_settings
-          ? "Copy current settings and media to this account. Back up its existing settings first."
-          : "The destination account's saved settings will be used. If none exist, the daemon will use its defaults."} Cooling control briefly pauses while the services change. Administrator authorization is required.`,
-    positiveText: config.dirty ? "Close" : recovery ? "Recover" : setup ? "Enable and start" : "Switch service",
-    negativeText: "Cancel",
+          ? t("service.serviceStatus.enableConfirm", { scope })
+        : t(request.carry_settings ? "service.serviceStatus.switchConfirmCarry" : "service.serviceStatus.switchConfirmDestination", { scope }),
+    positiveText: t(config.dirty ? "common.close" : recovery ? "service.serviceStatus.recover" : setup ? "service.serviceStatus.enableAndStart" : "service.serviceStatus.switchService"),
+    negativeText: t("common.cancel"),
     onPositiveClick: async () => {
       if (!config.dirty) await perform("service_change", request);
     },
@@ -186,20 +208,20 @@ const currentMode = computed<ServiceScope | null>(() => {
 watch(currentMode, (mode) => { if (mode) destination.value = mode; }, { immediate: true });
 const controlsReady = computed(() => report.value?.operation_lock?.state === "known");
 const units = computed(() => report.value ? [
-  { label: "Host user service", scope: "user" as const, probe: report.value.user },
-  { label: "Host system service", scope: "system" as const, probe: report.value.system },
+  { label: t("service.serviceStatus.hostUserService"), scope: "user" as const, probe: report.value.user },
+  { label: t("service.serviceStatus.hostSystemService"), scope: "system" as const, probe: report.value.system },
 ] : []);
 const owner = computed(() => {
   const ownership = report.value?.ownership;
-  if (ownership?.state !== "known") return "Unverified";
-  if (ownership.value.owner_pid === null) return "None";
+  if (ownership?.state !== "known") return t("service.serviceStatus.unverified");
+  if (ownership.value.owner_pid === null) return t("common.none");
   const process = ownership.value.process;
-  if (!process) return "Process identity has not been checked";
-  if (process.state === "unavailable") return `Unverified: ${process.reason}`;
-  const label = process.value.service === "user" ? "Your user service"
-    : process.value.service === "system" ? "System service"
-    : "Manual launch or another service";
-  return `${label} (host UID ${process.value.effective_uid})`;
+  if (!process) return t("service.serviceStatus.processUnchecked");
+  if (process.state === "unavailable") return t("service.serviceStatus.ownerUnverified", { reason: process.reason });
+  const label: MessageKey = process.value.service === "user" ? "service.serviceStatus.ownerUserService"
+    : process.value.service === "system" ? "service.serviceStatus.ownerSystemService"
+    : "service.serviceStatus.ownerOther";
+  return t(label, { uid: process.value.effective_uid });
 });
 const lockMatch = computed(() => {
   const held = daemon.info?.ownership_lock;
@@ -210,31 +232,31 @@ const lockMatch = computed(() => {
 </script>
 
 <template>
-  <n-card :title="initialSetup ? 'Choose a service' : 'Services'" size="small">
+  <n-card :title="t(initialSetup ? 'service.serviceStatus.titleSetup' : 'service.serviceStatus.title')" size="small">
     <template #header-extra>
-      <n-button size="small" :loading="installation.checking" :disabled="busy" @click="installation.recheck">Recheck</n-button>
+      <n-button size="small" :loading="installation.checking" :disabled="busy" @click="installation.recheck">{{ t("service.serviceStatus.recheck") }}</n-button>
     </template>
     <n-alert v-if="submissionError || installation.error" type="error">{{ submissionError || installation.error }}</n-alert>
     <n-alert v-if="operation.message" :type="operation.success === false ? 'error' : operation.success === true ? 'success' : 'info'">{{ operation.message }}</n-alert>
-    <p v-if="initialSetup">User mode starts at login. System mode starts at boot. Choose one to enable.</p>
-    <p v-if="!report" class="muted">{{ installation.checking ? "Checking services…" : "Service status unavailable." }}</p>
-    <p v-if="report?.operation_lock?.state === 'unavailable'">Controls unavailable: {{ report.operation_lock.reason }}</p>
+    <p v-if="initialSetup">{{ t("service.serviceStatus.setupIntroLine") }}</p>
+    <p v-if="!report" class="muted">{{ t(installation.checking ? "service.serviceStatus.checking" : "service.serviceStatus.statusUnavailable") }}</p>
+    <p v-if="report?.operation_lock?.state === 'unavailable'">{{ t("service.serviceStatus.controlsUnavailable", { reason: report.operation_lock.reason }) }}</p>
     <div v-if="(canSwitch && controlsReady) || report?.context.kind === 'distrobox'" class="switch-row">
       <template v-if="canSwitch && controlsReady">
-        <n-select v-model:value="destination" :options="modeOptions" placeholder="Select mode" :disabled="busy || installation.checking" class="mode-select" />
+        <n-select v-model:value="destination" :options="modeOptions" :placeholder="t('service.serviceStatus.selectMode')" :disabled="busy || installation.checking" class="mode-select" />
         <n-select v-if="!initialSetup && destination && destination !== currentMode" v-model:value="settingsChoice"
-          :options="[{ label: 'Copy current settings & media', value: 'carry' }, { label: 'Use destination settings', value: 'destination' }]"
+          :options="settingsOptions"
           :disabled="busy || installation.checking" class="settings-select" />
         <n-button :disabled="busy || installation.checking || !destination || destination === currentMode"
-          @click="destination && change({ kind: 'switch', scope: destination, carry_settings: !initialSetup && settingsChoice === 'carry' })">{{ initialSetup ? 'Enable and start' : 'Switch service' }}</n-button>
+          @click="destination && change({ kind: 'switch', scope: destination, carry_settings: !initialSetup && settingsChoice === 'carry' })">{{ t(initialSetup ? 'service.serviceStatus.enableAndStart' : 'service.serviceStatus.switchService') }}</n-button>
       </template>
-      <n-button v-if="report?.context.kind === 'distrobox'" :disabled="busy || installation.checking || daemon.connected || config.dirty" @click="prepareSetup">{{ canSwitch ? 'Repair host support' : 'Set up host support' }}</n-button>
+      <n-button v-if="report?.context.kind === 'distrobox'" :disabled="busy || installation.checking || daemon.connected || config.dirty" @click="prepareSetup">{{ t(canSwitch ? 'service.serviceStatus.repairHostSupport' : 'service.serviceStatus.setUpHostSupport') }}</n-button>
     </div>
-    <p v-if="!(canSwitch && controlsReady) && report?.context.kind === 'distrobox'" class="muted">Set up both host service wrappers to switch modes in this box.</p>
-    <n-alert v-if="destination === 'system' && lingeringIssue" type="warning" title="Manual setup required">{{ lingeringIssue.remediation }}</n-alert>
+    <p v-if="!(canSwitch && controlsReady) && report?.context.kind === 'distrobox'" class="muted">{{ t("service.serviceStatus.setUpWrappers") }}</p>
+    <n-alert v-if="destination === 'system' && lingeringIssue" type="warning" :title="t('service.serviceStatus.manualSetupRequired')">{{ findingRemediation(lingeringIssue) }}</n-alert>
     <n-space v-if="report?.context.kind === 'distrobox'" vertical>
-      <span v-if="daemon.connected" class="muted">Stop the current daemon before setup.</span>
-      <span v-else-if="config.dirty" class="muted">Save or discard pending edits before setup.</span>
+      <span v-if="daemon.connected" class="muted">{{ t("service.serviceStatus.stopDaemonFirst") }}</span>
+      <span v-else-if="config.dirty" class="muted">{{ t("service.serviceStatus.saveEditsFirst") }}</span>
     </n-space>
     <div v-if="!setupOnly" class="units">
       <div v-for="unit in units" :key="unit.scope" class="unit">
@@ -242,54 +264,54 @@ const lockMatch = computed(() => {
           <n-tag v-if="unit.probe.state === 'known'" size="small" :type="unit.probe.value.active_state === 'active' ? 'success' : 'default'">{{ unit.probe.value.active_state }}</n-tag>
         </div>
         <template v-if="unit.probe.state === 'known'">
-          <p class="muted">Startup: {{ unit.probe.value.unit_file_state }}<span v-if="unit.probe.value.distrobox_name"> · Daemon: Distrobox ({{ unit.probe.value.distrobox_name }})</span></p>
+          <p class="muted">{{ t("service.serviceStatus.startup", { state: unit.probe.value.unit_file_state }) }}<span v-if="unit.probe.value.distrobox_name"> · {{ t("service.serviceStatus.daemonDistrobox", { name: unit.probe.value.distrobox_name }) }}</span></p>
           <n-space v-if="controlsReady && unit.probe.value.load_state === 'loaded' && (unit.scope === 'user' || canSwitch)">
-            <n-button size="small" :disabled="busy || installation.checking || !['inactive', 'failed'].includes(unit.probe.value.active_state)" @click="act(unit.scope, 'start')">Start</n-button>
-            <n-button size="small" :disabled="busy || installation.checking || unit.probe.value.active_state !== 'active'" @click="act(unit.scope, 'stop')">Stop</n-button>
-            <n-button size="small" :disabled="busy || installation.checking || unit.probe.value.active_state !== 'active'" @click="act(unit.scope, 'restart')">Restart</n-button>
+            <n-button size="small" :disabled="busy || installation.checking || !['inactive', 'failed'].includes(unit.probe.value.active_state)" @click="act(unit.scope, 'start')">{{ t(actionLabels.start) }}</n-button>
+            <n-button size="small" :disabled="busy || installation.checking || unit.probe.value.active_state !== 'active'" @click="act(unit.scope, 'stop')">{{ t(actionLabels.stop) }}</n-button>
+            <n-button size="small" :disabled="busy || installation.checking || unit.probe.value.active_state !== 'active'" @click="act(unit.scope, 'restart')">{{ t(actionLabels.restart) }}</n-button>
           </n-space>
         </template>
         <p v-else>{{ unit.probe.reason }}</p>
       </div>
     </div>
-    <n-alert v-if="daemon.connected && lockMatch === false" type="error">Daemon ownership lock mismatch. Stop competing launch routes before switching services.</n-alert>
+    <n-alert v-if="daemon.connected && lockMatch === false" type="error">{{ t("service.serviceStatus.lockMismatchAlert") }}</n-alert>
     <details v-if="report && !setupOnly">
-      <summary>Ownership & recovery</summary>
+      <summary>{{ t("service.serviceStatus.ownershipRecovery") }}</summary>
       <dl v-if="daemon.connected && daemon.info" class="daemon-details">
-        <div><dt>Daemon</dt><dd>{{ daemon.info.version }} · {{ daemon.info.mode }} · PID {{ daemon.info.pid }}</dd></div>
-        <div><dt>Instance</dt><dd>{{ daemon.info.instance_id }}</dd></div>
-        <div class="config-path"><dt>Configuration</dt><dd>{{ daemon.info.config_path }}</dd></div>
+        <div><dt>{{ t("service.serviceStatus.daemon") }}</dt><dd>{{ daemon.info.version }} · {{ t(DAEMON_MODE_LABELS[daemon.info.mode]) }} · PID {{ daemon.info.pid }}</dd></div>
+        <div><dt>{{ t("service.serviceStatus.instance") }}</dt><dd>{{ daemon.info.instance_id }}</dd></div>
+        <div class="config-path"><dt>{{ t("service.serviceStatus.configuration") }}</dt><dd>{{ daemon.info.config_path }}</dd></div>
       </dl>
-      <p>Owner: {{ owner }}</p>
-      <p v-if="report.selection?.state === 'known'">Startup selection: {{ report.selection.value?.scope ?? 'Not configured' }}</p>
+      <p>{{ t("service.serviceStatus.owner", { owner }) }}</p>
+      <p v-if="report.selection?.state === 'known'">{{ t("service.serviceStatus.startupSelection", { selection: report.selection.value ? t(DAEMON_MODE_LABELS[report.selection.value.scope]) : t("service.serviceStatus.notConfigured") }) }}</p>
       <p v-else-if="report.selection?.state === 'unavailable'">{{ report.selection.reason }}</p>
-      <p v-if="report.global_user.state === 'known'">Global user startup: {{ report.global_user.value }}</p>
+      <p v-if="report.global_user.state === 'known'">{{ t("service.serviceStatus.globalUserStartup", { state: report.global_user.value }) }}</p>
       <p v-else>{{ report.global_user.reason }}</p>
       <p v-if="report.ownership?.state === 'unavailable'">{{ report.ownership.reason }}</p>
-      <p v-if="daemon.connected">Ownership lock: {{ lockMatch === true ? 'Matched' : lockMatch === false ? 'Mismatch' : 'Unverified' }}</p>
+      <p v-if="daemon.connected">{{ t("service.serviceStatus.ownershipLock", { state: t(lockMatch === true ? 'service.serviceStatus.lockMatched' : lockMatch === false ? 'service.serviceStatus.lockMismatch' : 'service.serviceStatus.unverified') }) }}</p>
       <div v-for="unit in units" :key="unit.scope">
-        <p v-if="unit.probe.state === 'known'">{{ unit.label }}: {{ unit.probe.value.load_state }} / {{ unit.probe.value.sub_state }} · PID {{ unit.probe.value.main_pid || '—' }}<br />{{ unit.probe.value.fragment_path }}</p>
+        <p v-if="unit.probe.state === 'known'">{{ t("service.serviceStatus.unitDetails", { label: unit.label, load: unit.probe.value.load_state, sub: unit.probe.value.sub_state, pid: unit.probe.value.main_pid || '—' }) }}<br />{{ unit.probe.value.fragment_path }}</p>
       </div>
-      <n-button v-if="canSwitch && controlsReady" size="small" :disabled="busy || installation.checking" @click="change({ kind: 'recover' })">Recover interrupted switch</n-button>
+      <n-button v-if="canSwitch && controlsReady" size="small" :disabled="busy || installation.checking" @click="change({ kind: 'recover' })">{{ t("service.serviceStatus.recoverInterrupted") }}</n-button>
     </details>
   </n-card>
-  <n-modal v-model:show="setupOpen" preset="card" title="Distrobox host support" style="width: min(620px, 92vw)" :closable="!busy" :mask-closable="!busy">
+  <n-modal v-model:show="setupOpen" preset="card" :title="t('service.serviceStatus.setupDialogTitle')" style="width: min(620px, 92vw)" :closable="!busy" :mask-closable="!busy">
     <template v-if="setupProposal">
-      <p>Install service and recovery support for <strong>{{ setupProposal.route.launch.name }}</strong>. Both hardware services must be stopped. Choose a mode after setup.</p>
+      <i18n-t :keypath="setupIntroKey" tag="p" scope="global"><template #name><strong>{{ setupProposal.route.launch.name }}</strong></template></i18n-t>
       <n-alert v-if="submissionError" type="error">{{ submissionError }}</n-alert>
       <n-form label-placement="top" size="small">
-        <n-form-item label="User configuration"><n-input v-model:value="setupProposal.route.user_config" :disabled="busy" /></n-form-item>
-        <n-form-item label="System configuration"><n-input v-model:value="setupProposal.route.system_config" :disabled="busy" /></n-form-item>
-        <n-collapse><n-collapse-item title="Launch paths" name="paths">
-          <n-form-item label="Binaries inside the box"><n-input v-model:value="setupProposal.route.launch.binaries" :disabled="busy" /></n-form-item>
-          <n-form-item label="Host distrobox-enter"><n-input v-model:value="setupProposal.route.launch.host_enter" :disabled="busy" /></n-form-item>
-          <n-form-item label="User working directory"><n-input v-model:value="setupProposal.route.user_working_directory" :disabled="busy" /></n-form-item>
-          <n-form-item label="System working directory"><n-input v-model:value="setupProposal.route.system_working_directory" :disabled="busy" /></n-form-item>
+        <n-form-item :label="t('service.serviceStatus.userConfiguration')"><n-input v-model:value="setupProposal.route.user_config" :disabled="busy" /></n-form-item>
+        <n-form-item :label="t('service.serviceStatus.systemConfiguration')"><n-input v-model:value="setupProposal.route.system_config" :disabled="busy" /></n-form-item>
+        <n-collapse><n-collapse-item :title="t('service.serviceStatus.launchPaths')" name="paths">
+          <n-form-item :label="t('service.serviceStatus.boxBinaries')"><n-input v-model:value="setupProposal.route.launch.binaries" :disabled="busy" /></n-form-item>
+          <n-form-item :label="t('service.serviceStatus.hostEnter')"><n-input v-model:value="setupProposal.route.launch.host_enter" :disabled="busy" /></n-form-item>
+          <n-form-item :label="t('service.serviceStatus.userWorkingDirectory')"><n-input v-model:value="setupProposal.route.user_working_directory" :disabled="busy" /></n-form-item>
+          <n-form-item :label="t('service.serviceStatus.systemWorkingDirectory')"><n-input v-model:value="setupProposal.route.system_working_directory" :disabled="busy" /></n-form-item>
         </n-collapse-item></n-collapse>
       </n-form>
       <n-space justify="end">
-        <n-button :disabled="busy" @click="setupOpen = false">Cancel</n-button>
-        <n-button type="primary" :loading="submitting" :disabled="busy || daemon.connected || config.dirty" @click="installSupport">Install host support</n-button>
+        <n-button :disabled="busy" @click="setupOpen = false">{{ t("common.cancel") }}</n-button>
+        <n-button type="primary" :loading="submitting" :disabled="busy || daemon.connected || config.dirty" @click="installSupport">{{ t("service.serviceStatus.installHostSupport") }}</n-button>
       </n-space>
     </template>
   </n-modal>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { RGB } from "@/types";
+import { useTranslate } from "@/i18n";
 
 const props = defineProps<{
   colors: RGB[];
@@ -11,6 +12,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [index: number];
 }>();
+
+const t = useTranslate();
 
 const leds = computed(() => {
   const arr: { color: RGB; selected: boolean }[] = [];
@@ -37,7 +40,7 @@ function css(c: RGB): string {
       class="led"
       :class="{ selected: led.selected }"
       :style="{ background: css(led.color) }"
-      :title="`LED ${i + 1}`"
+      :title="t('rgb.ledStrip.led', { index: i + 1 })"
       @click="emit('select', i)"
     />
   </div>

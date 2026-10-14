@@ -7,6 +7,7 @@ import { useDevicesStore } from "@/stores/devices";
 import { useDeviceNamesStore } from "@/stores/deviceNames";
 import { lcdEntryKey, resolveLcdDevice } from "@/utils/lcdSelection";
 import type { LcdConfig, LcdTemplate } from "@/types";
+import { useTranslate, type MessageKey } from "@/i18n";
 
 const props = defineProps<{ lcds: LcdConfig[]; templates: LcdTemplate[] }>();
 const emit = defineEmits<{ inProgress: [active: boolean] }>();
@@ -16,17 +17,18 @@ const daemon = useDaemonStore();
 const config = useConfigStore();
 const devices = useDevicesStore();
 const names = useDeviceNamesStore();
+const t = useTranslate();
 
 function screenName(entry: LcdConfig): string {
   const device = resolveLcdDevice(entry, devices.lcdDevices);
   const label = device ? devices.labels.get(device.device_id) ?? device.name : null;
-  return names.lcdEntryName(entry) || label || "Screen offline";
+  return names.lcdEntryName(entry) || label || t("lcd.screenOffline");
 }
 
 const incomplete = computed(() =>
   props.lcds.flatMap((entry) => {
-    if (["image", "gif", "video"].includes(entry.type) && !entry.path) return [`${screenName(entry)}: choose a file`];
-    if (entry.type === "custom" && !entry.template_id) return [`${screenName(entry)}: choose a template`];
+    if (["image", "gif", "video"].includes(entry.type) && !entry.path) return [t("lcd.managedImport.chooseFile", { screen: screenName(entry) })];
+    if (entry.type === "custom" && !entry.template_id) return [t("lcd.managedImport.chooseTemplate", { screen: screenName(entry) })];
     return [];
   }),
 );
@@ -42,7 +44,7 @@ function readableError(message: string): string {
 const status = ref<Status | null>(null);
 const busy = ref(false);
 const error = ref("");
-const notice = ref("");
+const notice = ref<MessageKey | "">("");
 const confirmed = ref(false);
 const pending = ref("");
 const stagedId = ref("");
@@ -82,19 +84,19 @@ async function check() {
   try {
     const value = await invoke<Status | null>("managed_import_status");
     if (current !== revision) return;
-    if (value && (!/^[a-f0-9]{32}$/i.test(value.id) || typeof value.active !== "boolean")) throw new Error("Invalid import progress");
+    if (value && (!/^[a-f0-9]{32}$/i.test(value.id) || typeof value.active !== "boolean")) throw new Error(t("lcd.managedImport.invalidProgress"));
     if (pending.value && value?.id !== pending.value) {
-      notice.value = "The submitted worker has not reported yet. Check progress again before retrying.";
+      notice.value = "lcd.managedImport.notReported";
       if (++pendingChecks < 30) timer = setTimeout(() => void check(), 1000);
       return;
     }
     status.value = value;
     pending.value = "";
     pendingChecks = 0;
-    error.value = value?.error ? `Import failed: ${value.error}` : "";
-    notice.value = value?.active ? "Copying and checking media. You can close this page while it finishes."
-      : value?.result ? "Copies are ready. Review and stage them below, then Save to apply."
-        : value ? "Import did not complete. Inspect the reported error before retrying." : "No import is recorded for this desktop session.";
+    error.value = "";
+    notice.value = value?.active ? "lcd.managedImport.copying"
+      : value?.result ? "lcd.managedImport.ready"
+        : value ? "lcd.managedImport.incomplete" : "lcd.managedImport.noImport";
     if (value?.active) timer = setTimeout(() => void check(), 1000);
   } catch (reason) {
     if (current === revision) error.value = String(reason);
@@ -111,15 +113,15 @@ async function start() {
   error.value = "";
   status.value = null;
   confirmed.value = false;
-  notice.value = "Submitting managed copy…";
+  notice.value = "lcd.managedImport.submitting";
   try {
     const id = await invoke<string>("managed_import_start", { instance: daemon.info.instance_id, lcds: props.lcds, templates: props.templates });
     if (current !== revision) return;
     pending.value = id;
-    notice.value = "Submitted. A desktop authentication prompt may appear.";
+    notice.value = "lcd.managedImport.submitted";
     timer = setTimeout(() => void check(), 1000);
   } catch (reason) {
-    if (current === revision) { error.value = String(reason); notice.value = "Submission was not confirmed. Check import progress before retrying."; }
+    if (current === revision) { error.value = String(reason); notice.value = "lcd.managedImport.notConfirmed"; }
   } finally {
     if (current === revision) busy.value = false;
   }
@@ -136,7 +138,7 @@ async function stage() {
     config.stageImportedMedia(result.lcds, result.templates, instance);
     stagedId.value = status.value?.id ?? "";
     confirmed.value = false;
-    notice.value = "Copied paths are staged. Save the configuration to apply them, or Reload to discard these drafts.";
+    notice.value = "lcd.managedImport.staged";
   } catch (reason) {
     if (current === revision) error.value = String(reason);
   } finally {
@@ -146,22 +148,23 @@ async function stage() {
 </script>
 
 <template>
-  <n-card title="Managed media copies" size="small">
-    <p>Copy selected media and template assets into daemon-managed storage. Originals stay unchanged. Native imports require authorization. Distrobox supports either daemon mode under the same account and inside the same box.</p>
+  <n-card :title="t('lcd.managedImport.title')" size="small">
+    <p>{{ t("lcd.managedImport.description") }}</p>
     <n-space>
-      <n-button :disabled="busy || !daemon.connected || !lcds.length || !!incomplete.length || !!config.imported || !!status?.active || !!pending" @click="start">Copy into managed storage</n-button>
-      <n-button :disabled="busy" @click="check">Check import progress</n-button>
+      <n-button :disabled="busy || !daemon.connected || !lcds.length || !!incomplete.length || !!config.imported || !!status?.active || !!pending" @click="start">{{ t("lcd.managedImport.copy") }}</n-button>
+      <n-button :disabled="busy" @click="check">{{ t("lcd.managedImport.check") }}</n-button>
     </n-space>
-    <p v-if="notice" role="status">{{ notice }}</p>
-    <n-alert v-if="incomplete.length" type="warning" title="Finish these screens before copying">
+    <p v-if="notice" role="status">{{ t(notice) }}</p>
+    <n-alert v-if="incomplete.length" type="warning" :title="t('lcd.managedImport.incompleteTitle')">
       <ul class="incomplete"><li v-for="item in incomplete" :key="item">{{ item }}</li></ul>
     </n-alert>
     <n-alert v-if="error" type="error">{{ readableError(error) }}</n-alert>
+    <n-alert v-else-if="status?.error" type="error">{{ t("lcd.managedImport.importFailed", { error: readableError(status.error) }) }}</n-alert>
     <template v-if="status?.result">
-      <p>{{ status.result.lcds.length }} LCD selections · {{ status.result.templates.length }} templates copied</p>
-      <ul><li v-for="(lcd, index) in status.result.lcds" :key="index">{{ screenName(lcd) }}: {{ lcd.path ?? lcd.template_id ?? lcd.type }}</li></ul>
-      <n-checkbox v-model:checked="confirmed" :disabled="busy || !!config.imported">Replace my current LCD drafts and matching templates with this copied selection.</n-checkbox>
-      <n-button :disabled="busy || !confirmed || !!config.imported || !daemon.connected" @click="stage">Stage copied paths</n-button>
+      <p>{{ t("lcd.managedImport.resultSummary", { lcds: status.result.lcds.length, templates: status.result.templates.length }) }}</p>
+      <ul><li v-for="(lcd, index) in status.result.lcds" :key="index">{{ t("lcd.managedImport.resultItem", { screen: screenName(lcd), value: lcd.path ?? lcd.template_id ?? lcd.type }) }}</li></ul>
+      <n-checkbox v-model:checked="confirmed" :disabled="busy || !!config.imported">{{ t("lcd.managedImport.confirm") }}</n-checkbox>
+      <n-button :disabled="busy || !confirmed || !!config.imported || !daemon.connected" @click="stage">{{ t("lcd.managedImport.stage") }}</n-button>
     </template>
   </n-card>
 </template>

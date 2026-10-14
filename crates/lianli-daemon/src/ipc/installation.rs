@@ -4,6 +4,7 @@ use lianli_shared::installation::{
     CheckState, FindingSeverity, InstallationFinding, InstallationGuide,
 };
 use lianli_shared::ipc::IpcResponse;
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -77,6 +78,7 @@ fn openrgb_finding(
         context:"Selected daemon".into(), title:"OpenRGB server".into(), evidence,
         remediation:"Free the configured TCP port or fix access in the daemon's network namespace. Use Retry OpenRGB in Settings to retry saved settings, or edit the port and Save. Recheck only reads status.".into(),
         guide:InstallationGuide::Troubleshooting,
+        message_key: Some("daemon.openrgbServer".into()), message_params: BTreeMap::new(),
     })
 }
 
@@ -127,6 +129,7 @@ pub(super) fn check(state: &SharedState) -> IpcResponse {
         code: "runtime.unavailable".into(), state: CheckState::Unavailable, severity: FindingSeverity::Warning,
         feature: "Runtime installation checks".into(), context: "Selected daemon".into(), title: "Runtime helper unavailable".into(),
         evidence: format!("{error:#}"), remediation: "Install or rebuild the matching lianli-control beside the daemon. Repair unavailable storage or account services, then Recheck.".into(), guide: InstallationGuide::Troubleshooting,
+        message_key: Some("daemon.runtimeHelperUnavailable".into()), message_params: BTreeMap::new(),
     }]);
     {
         let state = state.lock();

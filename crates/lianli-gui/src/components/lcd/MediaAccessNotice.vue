@@ -4,10 +4,17 @@ import { useExternalLink } from "@/composables/useExternalLink";
 import { AlertTriangle, CheckCircle2, Info, Loader2 } from "lucide-vue-next";
 import { useIpc } from "@/composables/useIpc";
 import { useDaemonStore } from "@/stores/daemon";
-import type { AssetAccessReport, LcdConfig, LcdTemplate } from "@/types";
+import type { AssetAccessReport, DaemonInfo, LcdConfig, LcdTemplate } from "@/types";
+import { useTranslate, type MessageKey } from "@/i18n";
 
 const props = defineProps<{ lcds: LcdConfig[]; templates: LcdTemplate[] }>();
 const emit = defineEmits<{ issues: [present: boolean] }>();
+const t = useTranslate();
+const DAEMON_MODE_LABELS: Record<DaemonInfo["mode"], MessageKey> = {
+  user: "lcd.mediaAccess.modes.user",
+  system: "lcd.mediaAccess.modes.system",
+  unknown: "lcd.mediaAccess.modes.unknown",
+};
 const ipc = useIpc();
 const daemon = useDaemonStore();
 const openExternal = useExternalLink();
@@ -18,13 +25,18 @@ const supported = computed(() => daemon.connected && daemon.info?.capabilities.i
 const hasSelection = computed(() => props.lcds.length > 0 || props.templates.length > 0);
 const selection = computed(() => JSON.stringify({ lcds: props.lcds, templates: props.templates }));
 const summary = computed(() => {
-  if (checking.value) return "Checking file access…";
-  if (error.value) return "File access could not be checked.";
-  if (!daemon.connected) return "Connect to the daemon to check file access.";
-  if (!supported.value) return "Update and restart the daemon to check file access.";
-  if (report.value?.failed) return `${report.value.failed} file access ${report.value.failed === 1 ? "issue" : "issues"}`;
-  if (report.value) return report.value.checked ? `${report.value.checked} media ${report.value.checked === 1 ? "dependency" : "dependencies"} readable` : "No external files to check";
-  return "File access check scheduled…";
+  if (checking.value) return t("lcd.mediaAccess.checking");
+  if (error.value) return t("lcd.mediaAccess.checkFailed");
+  if (!daemon.connected) return t("lcd.mediaAccess.connect");
+  if (!supported.value) return t("lcd.mediaAccess.updateDaemon");
+  if (report.value?.failed) {
+    return t(report.value.failed === 1 ? "lcd.mediaAccess.issue" : "lcd.mediaAccess.issues", { count: report.value.failed });
+  }
+  if (report.value) {
+    if (!report.value.checked) return t("lcd.mediaAccess.noFiles");
+    return t(report.value.checked === 1 ? "lcd.mediaAccess.readableOne" : "lcd.mediaAccess.readableMany", { count: report.value.checked });
+  }
+  return t("lcd.mediaAccess.scheduled");
 });
 let timer: ReturnType<typeof setTimeout> | undefined;
 let revision = 0;
@@ -77,21 +89,21 @@ onUnmounted(() => {
       <CheckCircle2 v-else-if="report" :size="16" class="status-icon success" aria-hidden="true" />
       <Info v-else :size="16" class="status-icon" aria-hidden="true" />
       <span class="access-summary" role="status" aria-live="polite">{{ summary }}</span>
-      <n-button v-if="supported" size="tiny" quaternary :disabled="checking" @click="schedule">Recheck</n-button>
-      <n-button v-if="report?.failed" size="tiny" secondary @click="openExternal('https://github.com/sgtaziz/lian-li-linux/blob/main/docs/lcd-assets.md')">File access guide</n-button>
+      <n-button v-if="supported" size="tiny" quaternary :disabled="checking" @click="schedule">{{ t("lcd.mediaAccess.recheck") }}</n-button>
+      <n-button v-if="report?.failed" size="tiny" secondary @click="openExternal('https://github.com/sgtaziz/lian-li-linux/blob/main/docs/lcd-assets.md')">{{ t("lcd.mediaAccess.guide") }}</n-button>
       <slot name="actions" />
     </div>
     <details v-if="report?.failed || error" class="access-details">
-      <summary>View details</summary>
+      <summary>{{ t("lcd.mediaAccess.viewDetails") }}</summary>
       <p v-if="error">{{ error }}</p>
       <template v-if="report?.failed">
-        <p>The {{ daemon.info?.mode }} daemon (UID {{ report.uid }}) needs access to these files and their parent folders.</p>
+        <p>{{ t("lcd.mediaAccess.needsAccess", { mode: daemon.info ? t(DAEMON_MODE_LABELS[daemon.info.mode]) : "", uid: report.uid }) }}</p>
         <ul>
           <li v-for="(issue, index) in report.issues" :key="index">
             <strong>{{ issue.owner }}</strong><span v-if="issue.path"> — {{ issue.path }}</span>: {{ issue.error }}
           </li>
         </ul>
-        <p v-if="report.failed > report.issues.length">Showing {{ report.issues.length }} of {{ report.failed }} issues.</p>
+        <p v-if="report.failed > report.issues.length">{{ t("lcd.mediaAccess.showing", { shown: report.issues.length, total: report.failed }) }}</p>
       </template>
     </details>
   </div>

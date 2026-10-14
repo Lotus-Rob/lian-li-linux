@@ -5,6 +5,7 @@ import { FolderOpen, Plus, Trash2 } from "lucide-vue-next";
 import type { Widget, RGBA, RGB, SensorSourceConfig, SensorRange, GradientStop } from "@/types";
 import { pickMediaFile } from "@/utils/mediaPicker";
 import SensorSelect from "@/components/common/SensorSelect.vue";
+import { useTranslate, type MessageKey } from "@/i18n";
 
 const props = defineProps<{
   widget: Widget | null;
@@ -19,6 +20,7 @@ const emit = defineEmits<{
 
 const dialog = useDialog();
 const message = useMessage();
+const t = useTranslate();
 
 const w = computed(() => props.widget);
 
@@ -123,22 +125,116 @@ function valueKind(
   return "text";
 }
 
-const alignOptions = [
-  { label: "Left", value: "left" },
-  { label: "Center", value: "center" },
-  { label: "Right", value: "right" },
-];
-const fitOptions = [
-  { label: "Stretch", value: "stretch" },
-  { label: "Contain", value: "contain" },
-  { label: "Cover", value: "cover" },
-];
-const orientationOptions = [
-  { label: "Horizontal", value: "horizontal" },
-  { label: "Vertical", value: "vertical" },
-];
+const alignOptions = computed(() => [
+  { label: t("editor.properties.align.left"), value: "left" },
+  { label: t("editor.properties.align.center"), value: "center" },
+  { label: t("editor.properties.align.right"), value: "right" },
+]);
+const fitOptions = computed(() => [
+  { label: t("editor.properties.fit.stretch"), value: "stretch" },
+  { label: t("editor.properties.fit.contain"), value: "contain" },
+  { label: t("editor.properties.fit.cover"), value: "cover" },
+]);
+const orientationOptions = computed(() => [
+  { label: t("editor.properties.orientation.horizontal"), value: "horizontal" },
+  { label: t("editor.properties.orientation.vertical"), value: "vertical" },
+]);
 
-function pretty(key: string): string {
+const FIELD_LABELS: Partial<Record<string, MessageKey>> = {
+  text: "editor.properties.fields.text",
+  font: "editor.properties.fields.font",
+  font_size: "editor.properties.fields.fontSize",
+  color: "editor.properties.fields.color",
+  align: "editor.properties.fields.align",
+  letter_spacing: "editor.properties.fields.letterSpacing",
+  source: "editor.properties.fields.source",
+  format: "editor.properties.fields.format",
+  unit: "editor.properties.fields.unit",
+  value_min: "editor.properties.fields.valueMin",
+  value_max: "editor.properties.fields.valueMax",
+  start_angle: "editor.properties.fields.startAngle",
+  sweep_angle: "editor.properties.fields.sweepAngle",
+  inner_radius_pct: "editor.properties.fields.innerRadiusPct",
+  background_color: "editor.properties.fields.backgroundColor",
+  bg_corner_radius: "editor.properties.fields.bgCornerRadius",
+  value_corner_radius: "editor.properties.fields.valueCornerRadius",
+  gradient: "editor.properties.fields.gradient",
+  corner_radius: "editor.properties.fields.cornerRadius",
+  needle_color: "editor.properties.fields.needleColor",
+  tick_color: "editor.properties.fields.tickColor",
+  tick_count: "editor.properties.fields.tickCount",
+  show_gauge: "editor.properties.fields.showGauge",
+  show_needle: "editor.properties.fields.showNeedle",
+  needle_width: "editor.properties.fields.needleWidth",
+  needle_length_pct: "editor.properties.fields.needleLengthPct",
+  needle_border_color: "editor.properties.fields.needleBorderColor",
+  needle_border_width: "editor.properties.fields.needleBorderWidth",
+  orientation: "editor.properties.fields.orientation",
+  show_labels: "editor.properties.fields.showLabels",
+  path: "editor.properties.fields.path",
+  opacity: "editor.properties.fields.opacity",
+  fit: "editor.properties.fields.fit",
+  loop_playback: "editor.properties.fields.loopPlayback",
+  auto_range: "editor.properties.fields.autoRange",
+  history_length: "editor.properties.fields.historyLength",
+  line_width: "editor.properties.fields.lineWidth",
+  line_color: "editor.properties.fields.lineColor",
+  fill_color: "editor.properties.fields.fillColor",
+  border_color: "editor.properties.fields.borderColor",
+  border_width: "editor.properties.fields.borderWidth",
+  padding: "editor.properties.fields.padding",
+  show_points: "editor.properties.fields.showPoints",
+  point_radius: "editor.properties.fields.pointRadius",
+  show_baseline: "editor.properties.fields.showBaseline",
+  baseline_value: "editor.properties.fields.baselineValue",
+  baseline_color: "editor.properties.fields.baselineColor",
+  baseline_width: "editor.properties.fields.baselineWidth",
+  smooth: "editor.properties.fields.smooth",
+  scroll_rtl: "editor.properties.fields.scrollRtl",
+  fill_from_ranges: "editor.properties.fields.fillFromRanges",
+  range_blend: "editor.properties.fields.rangeBlend",
+  show_gridlines: "editor.properties.fields.showGridlines",
+  gridlines_horizontal: "editor.properties.fields.gridlinesHorizontal",
+  gridlines_vertical: "editor.properties.fields.gridlinesVertical",
+  gridline_color: "editor.properties.fields.gridlineColor",
+  gridline_width: "editor.properties.fields.gridlineWidth",
+  show_axis_labels: "editor.properties.fields.showAxisLabels",
+  axis_label_count: "editor.properties.fields.axisLabelCount",
+  axis_labels_on_right: "editor.properties.fields.axisLabelsOnRight",
+  axis_label_format: "editor.properties.fields.axisLabelFormat",
+  axis_label_font: "editor.properties.fields.axisLabelFont",
+  axis_label_size: "editor.properties.fields.axisLabelSize",
+  axis_label_color: "editor.properties.fields.axisLabelColor",
+  axis_label_padding: "editor.properties.fields.axisLabelPadding",
+  face_color: "editor.properties.fields.faceColor",
+  minor_tick_color: "editor.properties.fields.minorTickColor",
+  hour_hand_color: "editor.properties.fields.hourHandColor",
+  minute_hand_color: "editor.properties.fields.minuteHandColor",
+  second_hand_color: "editor.properties.fields.secondHandColor",
+  hub_color: "editor.properties.fields.hubColor",
+  numbers_color: "editor.properties.fields.numbersColor",
+  numbers_font: "editor.properties.fields.numbersFont",
+  numbers_font_size: "editor.properties.fields.numbersFontSize",
+  show_seconds: "editor.properties.fields.showSeconds",
+  show_hour_ticks: "editor.properties.fields.showHourTicks",
+  show_minor_ticks: "editor.properties.fields.showMinorTicks",
+  show_numbers: "editor.properties.fields.showNumbers",
+  hour_hand_width: "editor.properties.fields.hourHandWidth",
+  minute_hand_width: "editor.properties.fields.minuteHandWidth",
+  second_hand_width: "editor.properties.fields.secondHandWidth",
+  hour_hand_length_pct: "editor.properties.fields.hourHandLengthPct",
+  minute_hand_length_pct: "editor.properties.fields.minuteHandLengthPct",
+  second_hand_length_pct: "editor.properties.fields.secondHandLengthPct",
+  hour_tick_length_pct: "editor.properties.fields.hourTickLengthPct",
+  minor_tick_length_pct: "editor.properties.fields.minorTickLengthPct",
+  hour_tick_width: "editor.properties.fields.hourTickWidth",
+  minor_tick_width: "editor.properties.fields.minorTickWidth",
+  hub_radius: "editor.properties.fields.hubRadius",
+};
+
+function fieldLabel(key: string): string {
+  const label = FIELD_LABELS[key];
+  if (label) return t(label);
   return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
@@ -153,33 +249,33 @@ function sourceLabel(src: SensorSourceConfig | null | undefined): string {
     case "hwmon":
       return `${src.name}: ${src.label}`;
     case "command":
-      return `command (${(src.cmd || "").slice(0, 24)})`;
+      return t("editor.properties.sources.command", { cmd: (src.cmd || "").slice(0, 24) });
     case "constant":
-      return `constant ${src.value}`;
+      return t("editor.properties.sources.constant", { value: src.value });
     case "nvidia_gpu":
-      return `NVIDIA GPU ${src.gpu_index ?? 0} (${src.metric ?? "temp"})`;
+      return t("editor.properties.sources.nvidiaGpu", { index: src.gpu_index ?? 0, metric: src.metric ?? "temp" });
     case "amd_gpu_usage":
-      return `AMD GPU ${src.card_index ?? 0} Usage (%)`;
+      return t("editor.properties.sources.amdGpuUsage", { index: src.card_index ?? 0 });
     case "wireless_coolant":
-      return `Coolant (${src.device_id}) (°C)`;
+      return t("editor.properties.sources.coolant", { device: src.device_id });
     case "cpu_usage":
-      return "CPU Usage (%)";
+      return t("editor.properties.sources.cpuUsage");
     case "mem_usage":
-      return "Memory Usage (%)";
+      return t("editor.properties.sources.memUsage");
     case "mem_used":
-      return "Memory Used (GB)";
+      return t("editor.properties.sources.memUsed");
     case "mem_free":
-      return "Memory Free (GB)";
+      return t("editor.properties.sources.memFree");
     case "network_rx":
-      return `Network ${src.iface}: Rx (MB/s)`;
+      return t("editor.properties.sources.networkRx", { iface: src.iface });
     case "network_tx":
-      return `Network ${src.iface}: Tx (MB/s)`;
+      return t("editor.properties.sources.networkTx", { iface: src.iface });
     case "disk_read":
-      return `Disk ${src.device}: Read (MB/s)`;
+      return t("editor.properties.sources.diskRead", { device: src.device });
     case "disk_write":
-      return `Disk ${src.device}: Write (MB/s)`;
+      return t("editor.properties.sources.diskWrite", { device: src.device });
     default:
-      return (src as any).type ?? "source";
+      return (src as any).type ?? t("editor.properties.sources.fallback");
   }
 }
 
@@ -221,12 +317,12 @@ function listNumKey(key: string): "max" | "position" {
   return key === "ranges" ? "max" : "position";
 }
 function listNumLabel(key: string): string {
-  return key === "ranges" ? "max %" : "pos %";
+  return key === "ranges" ? t("editor.properties.rangeMax") : t("editor.properties.stopPosition");
 }
 function listHeadLabel(key: string): string {
-  if (key === "gradient_stops") return "Gradient Stops (% of Value Max)";
-  if (key === "ranges") return "Gauge Ranges";
-  return pretty(key);
+  if (key === "gradient_stops") return t("editor.properties.gradientStops");
+  if (key === "ranges") return t("editor.properties.gaugeRanges");
+  return fieldLabel(key);
 }
 function listNumMin(key: string): number {
   return key === "ranges" ? -1 : 0;
@@ -259,7 +355,7 @@ function numMax(key: string): number | undefined {
   return undefined;
 }
 function numLabel(key: string): string {
-  return isPctKey(key) ? `${pretty(key)} (%)` : pretty(key);
+  return isPctKey(key) ? t("editor.properties.percentLabel", { label: fieldLabel(key) }) : fieldLabel(key);
 }
 function numCommit(key: string, v: number | null): number {
   const n = v ?? 0;
@@ -285,10 +381,10 @@ function addListItem(key: string) {
 }
 function removeListItem(key: string, index: number) {
   dialog.error({
-    title: "Remove item?",
-    content: `Item ${index + 1} will be removed.`,
-    positiveText: "Remove",
-    negativeText: "Cancel",
+    title: t("editor.properties.removeItemTitle"),
+    content: t("editor.properties.removeItemContent", { index: index + 1 }),
+    positiveText: t("common.remove"),
+    negativeText: t("common.cancel"),
     onPositiveClick: () => {
       const arr = ((current.value.kind as any)[key] as unknown[]).filter((_, i) => i !== index);
       emit("patchKind", current.value.id, key, arr);
@@ -312,7 +408,7 @@ async function browsePath(key: string) {
 <template>
   <div class="props">
     <template v-if="w">
-      <div class="group-title">Common</div>
+      <div class="group-title">{{ t("editor.properties.common") }}</div>
       <div class="field"><label class="muted">ID</label>
         <n-input v-model:value="idDraft" size="small" @blur="emit('patchCommon', current.id, 'id', idDraft)" />
       </div>
@@ -323,23 +419,23 @@ async function browsePath(key: string) {
         <div class="field"><label class="muted">Y</label>
           <n-input-number :value="current.y" size="small" @update:value="(v) => emit('patchCommon', current.id, 'y', v ?? 0)" />
         </div>
-        <div class="field"><label class="muted">W</label>
+        <div class="field"><label class="muted">{{ t("editor.properties.width") }}</label>
           <n-input-number :value="current.width" size="small" :min="1" @update:value="(v) => emit('patchCommon', current.id, 'width', v ?? 1)" />
         </div>
-        <div class="field"><label class="muted">H</label>
+        <div class="field"><label class="muted">{{ t("editor.properties.height") }}</label>
           <n-input-number :value="current.height" size="small" :min="1" @update:value="(v) => emit('patchCommon', current.id, 'height', v ?? 1)" />
         </div>
       </div>
       <div class="grid4">
-        <div class="field"><label class="muted">Rotation</label>
+        <div class="field"><label class="muted">{{ t("editor.properties.rotation") }}</label>
           <n-input-number :value="current.rotation ?? 0" size="small" @update:value="(v) => emit('patchCommon', current.id, 'rotation', v ?? 0)" />
         </div>
-        <div class="field check"><n-checkbox :checked="current.visible !== false" @update:checked="(v) => emit('patchCommon', current.id, 'visible', v)">Visible</n-checkbox></div>
+        <div class="field check"><n-checkbox :checked="current.visible !== false" @update:checked="(v) => emit('patchCommon', current.id, 'visible', v)">{{ t("editor.properties.visible") }}</n-checkbox></div>
       </div>
       <div v-if="needsFps" class="field"><label class="muted">FPS</label>
         <n-input-number :value="current.fps ?? 30" size="small" :min="1" :max="120" @update:value="(v) => emit('patchCommon', current.id, 'fps', v ?? 30)" />
       </div>
-      <div v-if="needsUpdateInterval" class="field"><label class="muted">Update interval (ms)</label>
+      <div v-if="needsUpdateInterval" class="field"><label class="muted">{{ t("editor.properties.updateInterval") }}</label>
         <n-input-number :value="current.update_interval_ms ?? 1000" size="small" :min="100" :max="10000" :step="100" @update:value="(v) => emit('patchCommon', current.id, 'update_interval_ms', v ?? 1000)" />
       </div>
 
@@ -347,7 +443,7 @@ async function browsePath(key: string) {
       <template v-for="key in kindKeys" :key="key">
         <!-- Source (sensor) -->
         <div v-if="valueKind(key, (current.kind as any)[key]) === 'source'" class="field">
-          <label class="muted">{{ pretty(key) }}</label>
+          <label class="muted">{{ fieldLabel(key) }}</label>
           <SensorSelect
             size="small"
             :value="sourceSelectValue(key)"
@@ -358,7 +454,7 @@ async function browsePath(key: string) {
           <n-input
             v-if="isCommandSource(key)"
             size="small"
-            placeholder="Shell command — must print a number to stdout"
+            :placeholder="t('editor.properties.commandPlaceholder')"
             :value="(current.kind as any)[key].cmd"
             @update:value="(v) => emit('patchKind', current.id, key, { type: 'command', cmd: v })"
           />
@@ -368,7 +464,7 @@ async function browsePath(key: string) {
           <div class="list-head">
             <label class="muted">{{ listHeadLabel(key) }}</label>
             <n-button size="tiny" quaternary @click="addListItem(key)">
-              <template #icon><Plus :size="12" /></template>Add
+              <template #icon><Plus :size="12" /></template>{{ t("common.add") }}
             </n-button>
           </div>
           <div
@@ -391,28 +487,28 @@ async function browsePath(key: string) {
               <template #icon><Trash2 :size="12" /></template>
             </n-button>
           </div>
-          <div v-if="key === 'ranges'" class="hint muted">Use max = -1 for the open-ended (final) range.</div>
+          <div v-if="key === 'ranges'" class="hint muted">{{ t("editor.properties.rangesHint") }}</div>
         </div>
         <!-- Color -->
         <div v-else-if="valueKind(key, (current.kind as any)[key]) === 'color'" class="field">
-          <label class="muted">{{ pretty(key) }}</label>
+          <label class="muted">{{ fieldLabel(key) }}</label>
           <ColorInline :model-value="(current.kind as any)[key]" @update:model-value="(v) => emit('patchKind', current.id, key, v)" />
         </div>
         <!-- Bool -->
         <div v-else-if="valueKind(key, (current.kind as any)[key]) === 'bool'" class="field check">
-          <n-checkbox :checked="(current.kind as any)[key]" @update:checked="(v) => emit('patchKind', current.id, key, v)">{{ pretty(key) }}</n-checkbox>
+          <n-checkbox :checked="(current.kind as any)[key]" @update:checked="(v) => emit('patchKind', current.id, key, v)">{{ fieldLabel(key) }}</n-checkbox>
         </div>
         <!-- Align / Fit / Orientation -->
         <div v-else-if="valueKind(key, (current.kind as any)[key]) === 'align'" class="field">
-          <label class="muted">{{ pretty(key) }}</label>
+          <label class="muted">{{ fieldLabel(key) }}</label>
           <n-select size="small" :value="(current.kind as any)[key]" :options="alignOptions" @update:value="(v) => emit('patchKind', current.id, key, v)" />
         </div>
         <div v-else-if="valueKind(key, (current.kind as any)[key]) === 'fit'" class="field">
-          <label class="muted">{{ pretty(key) }}</label>
+          <label class="muted">{{ fieldLabel(key) }}</label>
           <n-select size="small" :value="(current.kind as any)[key]" :options="fitOptions" @update:value="(v) => emit('patchKind', current.id, key, v)" />
         </div>
         <div v-else-if="valueKind(key, (current.kind as any)[key]) === 'orientation'" class="field">
-          <label class="muted">{{ pretty(key) }}</label>
+          <label class="muted">{{ fieldLabel(key) }}</label>
           <n-select size="small" :value="(current.kind as any)[key]" :options="orientationOptions" @update:value="(v) => emit('patchKind', current.id, key, v)" />
         </div>
         <!-- Number -->
@@ -427,7 +523,7 @@ async function browsePath(key: string) {
         </div>
         <!-- Font / path-like text -->
         <div v-else-if="valueKind(key, (current.kind as any)[key]) === 'font'" class="field">
-          <label class="muted">{{ pretty(key) }}</label>
+          <label class="muted">{{ fieldLabel(key) }}</label>
           <n-select
             size="small"
             :value="(current.kind as any)[key]?.path ?? ''"
@@ -438,7 +534,7 @@ async function browsePath(key: string) {
         </div>
         <!-- Text (incl. path fields) -->
         <div v-else class="field">
-          <label class="muted">{{ pretty(key) }}</label>
+          <label class="muted">{{ fieldLabel(key) }}</label>
           <div class="path-row" v-if="key === 'path'">
             <n-input :value="(current.kind as any)[key]" size="small" @update:value="(v) => emit('patchKind', current.id, key, v)" />
             <n-button size="small" @click="browsePath(key)"><template #icon><FolderOpen :size="14" /></template></n-button>
@@ -447,7 +543,7 @@ async function browsePath(key: string) {
         </div>
       </template>
     </template>
-    <div v-else class="empty muted">Select a widget to edit its properties.</div>
+    <div v-else class="empty muted">{{ t("editor.properties.empty") }}</div>
   </div>
 </template>
 

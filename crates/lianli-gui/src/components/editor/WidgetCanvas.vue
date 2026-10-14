@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { LcdTemplate, Widget } from "@/types";
+import { useTranslate } from "@/i18n";
 
 const props = defineProps<{
   template: LcdTemplate;
@@ -13,6 +14,8 @@ const emit = defineEmits<{
   select: [id: string | null];
   move: [id: string, x: number, y: number];
 }>();
+
+const t = useTranslate();
 
 // The template's base dimensions are authoritative. Toggling "Rotated" in the
 // editor physically swaps these dims and rotates widget coords in-place (see
@@ -153,7 +156,7 @@ function onUp() {
         </div>
       </div>
     </div>
-    <div v-if="previewLoading" class="loading">Rendering preview…</div>
+    <div v-if="previewLoading" class="loading">{{ t("editor.canvas.renderingPreview") }}</div>
     <div class="dims mono">{{ effectiveW }} × {{ effectiveH }}</div>
   </div>
 </template>

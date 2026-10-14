@@ -5,9 +5,11 @@ import type { RGB, RGBA, RgbDirection, RgbEffect, RgbEffectParameters } from "@/
 import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
 import { RGB_BRIGHTNESS, RGB_DIRECTIONS } from "@/constants";
+import { useTranslate } from "@/i18n";
 
 const props = defineProps<{ effect: RgbEffect; parameters: RgbEffectParameters }>();
 const emit = defineEmits<{ update: [patch: Partial<RgbEffect>] }>();
+const t = useTranslate();
 
 const directionOptions = computed(() => RGB_DIRECTIONS.filter((option) =>
   props.parameters.directions.includes(option.value),
@@ -39,7 +41,7 @@ function removeColor(index: number) {
 <template>
   <div class="effect-settings">
     <div v-if="parameters.max_colors > 0" class="field">
-      <label class="muted">Colors</label>
+      <label class="muted">{{ t("rgb.effect.colors") }}</label>
       <div class="color-list">
         <div v-for="(_, index) in paletteColors" :key="index" class="color-item">
           <ColorPicker class="effect-color" :model-value="paletteColors[index]" @update:model-value="(value) => setColor(index, value)" />
@@ -53,14 +55,14 @@ function removeColor(index: number) {
       </div>
     </div>
     <div class="two-col">
-      <LabeledSlider v-if="parameters.supports_speed" label="Speed" :model-value="effect.speed" :min="0" :max="4" @update:model-value="(value) => emit('update', { speed: value })" />
+      <LabeledSlider v-if="parameters.supports_speed" :label="t('rgb.effect.speed')" :model-value="effect.speed" :min="0" :max="4" @update:model-value="(value) => emit('update', { speed: value })" />
       <div class="field">
-        <label class="muted">Brightness</label>
+        <label class="muted">{{ t("rgb.effect.brightness") }}</label>
         <n-select :value="effect.brightness" :options="RGB_BRIGHTNESS" size="small" @update:value="(value) => emit('update', { brightness: value })" />
       </div>
     </div>
     <div v-if="directionOptions.length" class="field">
-      <label class="muted">Direction</label>
+      <label class="muted">{{ t("rgb.effect.direction") }}</label>
       <n-select :value="effect.direction" :options="directionOptions" size="small" @update:value="(value: RgbDirection) => emit('update', { direction: value })" />
     </div>
   </div>

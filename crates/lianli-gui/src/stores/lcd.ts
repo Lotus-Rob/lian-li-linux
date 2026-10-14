@@ -7,6 +7,7 @@ import { useDebounce } from "@/composables/useDebounce";
 import { brightnessConfirmed, createBrightnessControl } from "@/utils/brightnessControl";
 import { useDevicesStore } from "@/stores/devices";
 import type { CatalogTemplate, LcdConfig, LcdTemplate, PixelCleanStatus } from "@/types";
+import { tr } from "@/i18n";
 
 /** Broadcast when SetLcdTemplates changes the template list, so other open
  *  windows (each with their own config store instance) know to reload it. */
@@ -39,7 +40,7 @@ function hidIdNorm(id: string): string {
 function formatSeconds(secs: number): string {
   const m = Math.floor(secs / SECONDS_PER_MINUTE);
   const s = secs % SECONDS_PER_MINUTE;
-  return `${m}m ${s < 10 ? "0" : ""}${s}s`;
+  return tr("lcd.cleaner.remaining", { minutes: m, seconds: `${s < 10 ? "0" : ""}${s}` });
 }
 
 function cleanerMatchesTarget(key: string, targetId?: string | null, cardIndex?: number): boolean {
@@ -88,7 +89,7 @@ export const useLcdStore = defineStore("lcd", () => {
           ? error.message
           : typeof error === "string"
             ? error
-            : "Failed to set LCD brightness";
+            : tr("lcd.brightnessFailed");
     },
   );
   watch(() => devices.telemetry.lcd_brightness, (statuses) => {
@@ -176,7 +177,7 @@ export const useLcdStore = defineStore("lcd", () => {
   const remainingSeconds = computed(() => firstActiveCleaner.value?.remainingSeconds ?? 0);
   const currentSessionId = computed(() => firstActiveCleaner.value?.sessionId ?? null);
   const formattedRemaining = computed(() => {
-    return firstActiveCleaner.value ? formatSeconds(firstActiveCleaner.value.remainingSeconds) : "0m 00s";
+    return formatSeconds(firstActiveCleaner.value?.remainingSeconds ?? 0);
   });
 
   function isCleaning(targetId?: string | null, cardIndex?: number): boolean {
@@ -193,7 +194,7 @@ export const useLcdStore = defineStore("lcd", () => {
         return formatSeconds(session.remainingSeconds);
       }
     }
-    return "0m 00s";
+    return formatSeconds(0);
   }
 
   function getSession(targetId?: string | null, cardIndex?: number): ActiveCleanerSession | undefined {
@@ -289,10 +290,10 @@ export const useLcdStore = defineStore("lcd", () => {
 
   async function startPixelClean(deviceId?: string | null, durationMinutes: number = 30) {
     if (!PIXEL_CLEANER_DURATION_OPTIONS.some((option) => option.value === durationMinutes)) {
-      throw new Error("Invalid pixel cleaner duration");
+      throw new Error(tr("lcd.cleaner.invalidDuration"));
     }
     const key = deviceId ?? "all";
-    if (preparingCleaner.value) throw new Error("Another cleaner is being prepared");
+    if (preparingCleaner.value) throw new Error(tr("lcd.cleaner.anotherPreparing"));
     const pending = { sessionId: null as number | null, cancelled: false };
     pendingCleaners.value[key] = pending;
     let activated = false;
@@ -300,12 +301,12 @@ export const useLcdStore = defineStore("lcd", () => {
       let response = await ipc.request<{ started: boolean; session_id: number }>("StartPixelClean", {
         device_id: deviceId ?? null, duration_minutes: durationMinutes, preparation_id: null,
       });
-      if (!Number.isSafeInteger(response.session_id)) throw new Error("Daemon did not return a session ID");
+      if (!Number.isSafeInteger(response.session_id)) throw new Error(tr("lcd.cleaner.noSessionId"));
       pending.sessionId = response.session_id;
       activated = response.started === true;
       const deadline = Date.now() + 90_000;
       while (!activated && !pending.cancelled) {
-        if (Date.now() >= deadline) throw new Error("Pixel cleaner preparation timed out");
+        if (Date.now() >= deadline) throw new Error(tr("lcd.cleaner.preparationTimedOut"));
         const status = await ipc.request<{ ready: boolean; error: string | null }>("GetPixelCleanPreparation", {
           session_id: pending.sessionId,
         });
@@ -315,7 +316,7 @@ export const useLcdStore = defineStore("lcd", () => {
           response = await ipc.request("StartPixelClean", {
             device_id: deviceId ?? null, duration_minutes: durationMinutes, preparation_id: pending.sessionId,
           });
-          if (response.started !== true) throw new Error("Daemon did not confirm activation");
+          if (response.started !== true) throw new Error(tr("lcd.cleaner.activationUnconfirmed"));
           activated = true;
           break;
         }

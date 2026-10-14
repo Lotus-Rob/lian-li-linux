@@ -12,9 +12,11 @@ import RgbSyncEditor from "@/components/rgb/RgbSyncEditor.vue";
 import OpenRgbRegionsToggle from "@/components/rgb/OpenRgbRegionsToggle.vue";
 import StatusDot from "@/components/common/StatusDot.vue";
 import { motherboardSyncEnabled, quickSyncControls } from "@/components/rgb/syncSettings";
+import { useTranslate } from "@/i18n";
 
 const QUICK_SYNC = "quick-sync";
 
+const t = useTranslate();
 const daemon = useDaemonStore();
 const config = useConfigStore();
 const names = useDeviceNamesStore();
@@ -39,10 +41,10 @@ const openrgbPort = computed({
 });
 
 const statusText = computed(() => {
-  if (!openrgbEnabled.value) return "Disabled";
-  if (daemon.openrgbError) return `Error: ${daemon.openrgbError}`;
-  if (daemon.openrgbRunning) return `Listening on port ${daemon.openrgbPort ?? rgb.value.openrgb_port}`;
-  return "Starting...";
+  if (!openrgbEnabled.value) return t("common.disabled");
+  if (daemon.openrgbError) return t("rgb.page.openrgbError", { error: daemon.openrgbError });
+  if (daemon.openrgbRunning) return t("rgb.page.openrgbListening", { port: daemon.openrgbPort ?? rgb.value.openrgb_port });
+  return t("rgb.page.openrgbStarting");
 });
 
 const rgbCaps = computed(() => config.rgbCaps.filter((c) => !c.rf_owned));
@@ -53,8 +55,8 @@ function defaultLabel(cap: RgbDeviceCapabilities): string {
 
 const syncedCount = computed(() => rgbCaps.value.filter((cap) => quickSyncControls(cap, rgb.value)).length);
 const syncSummary = computed(() => {
-  if (!rgb.value.merge_lighting?.enabled) return "Off";
-  return `On · ${syncedCount.value} device${syncedCount.value === 1 ? "" : "s"}`;
+  if (!rgb.value.merge_lighting?.enabled) return t("common.off");
+  return t(syncedCount.value === 1 ? "rgb.page.syncOnOne" : "rgb.page.syncOnMany", { count: syncedCount.value });
 });
 
 const selectedRaw = ref<string | null>(null);
@@ -69,12 +71,12 @@ const selectedCap = computed(() => rgbCaps.value.find((cap) => cap.device_id ===
 
 type Tone = "success" | "warning" | "muted" | "info";
 function capState(cap: RgbDeviceCapabilities): { label: string; tone: Tone } {
-  if (!daemon.connected) return { label: "Offline", tone: "muted" };
-  if (cap.deferred_reason) return { label: "Waiting", tone: "warning" };
+  if (!daemon.connected) return { label: t("common.offline"), tone: "muted" };
+  if (cap.deferred_reason) return { label: t("rgb.page.stateWaiting"), tone: "warning" };
   if (openrgbEnabled.value) return { label: "OpenRGB", tone: "info" };
-  if (motherboardSyncEnabled(cap, rgb.value)) return { label: "Motherboard", tone: "info" };
-  if (quickSyncControls(cap, rgb.value)) return { label: "Quick Sync", tone: "info" };
-  return { label: "Online", tone: "success" };
+  if (motherboardSyncEnabled(cap, rgb.value)) return { label: t("rgb.page.stateMotherboard"), tone: "info" };
+  if (quickSyncControls(cap, rgb.value)) return { label: t("rgb.quickSync"), tone: "info" };
+  return { label: t("common.online"), tone: "success" };
 }
 
 function isWireless(cap: RgbDeviceCapabilities): boolean {
@@ -82,8 +84,9 @@ function isWireless(cap: RgbDeviceCapabilities): boolean {
 }
 
 function capSummary(cap: RgbDeviceCapabilities): string {
-  const zones = `${cap.zones.length} zone${cap.zones.length === 1 ? "" : "s"}`;
-  return isWireless(cap) ? `Wireless · ${zones}` : zones;
+  const count = cap.zones.length;
+  if (isWireless(cap)) return t(count === 1 ? "rgb.page.wirelessZoneCountOne" : "rgb.page.wirelessZoneCountMany", { count });
+  return t(count === 1 ? "rgb.page.zoneCountOne" : "rgb.page.zoneCountMany", { count });
 }
 </script>
 
@@ -100,7 +103,7 @@ function capSummary(cap: RgbDeviceCapabilities): string {
         </span>
         <div class="openrgb-controls">
           <label v-if="openrgbEnabled" class="port-row">
-            <span class="muted">Port</span>
+            <span class="muted">{{ t("rgb.page.port") }}</span>
             <n-input-number
               v-model:value="openrgbPort"
               size="small"
@@ -108,14 +111,11 @@ function capSummary(cap: RgbDeviceCapabilities): string {
               :max="65535"
             />
           </label>
-          <n-checkbox v-model:checked="openrgbEnabled">Enable OpenRGB SDK server</n-checkbox>
+          <n-checkbox v-model:checked="openrgbEnabled">{{ t("rgb.page.enableOpenrgb") }}</n-checkbox>
         </div>
       </div>
       <template v-if="openrgbEnabled">
-        <p class="hint">
-          The OpenRGB SDK server binds to a TCP port without authentication. Any local process
-          can control your RGB devices. While enabled, the daemon will not apply its own RGB effects.
-        </p>
+        <p class="hint">{{ t("rgb.page.openrgbWarning") }}</p>
         <OpenRgbRegionsToggle />
       </template>
     </section>
@@ -123,8 +123,8 @@ function capSummary(cap: RgbDeviceCapabilities): string {
     <div class="layout">
       <aside class="card rgb-list">
         <div class="list-head">
-          <span class="list-title">Lighting</span>
-          <span v-if="rgbCaps.length" class="list-count muted">{{ rgbCaps.length }} device{{ rgbCaps.length === 1 ? "" : "s" }}</span>
+          <span class="list-title">{{ t("rgb.page.lighting") }}</span>
+          <span v-if="rgbCaps.length" class="list-count muted">{{ t(rgbCaps.length === 1 ? "rgb.page.deviceCountOne" : "rgb.page.deviceCountMany", { count: rgbCaps.length }) }}</span>
         </div>
 
         <template v-if="rgbCaps.length">
@@ -138,7 +138,7 @@ function capSummary(cap: RgbDeviceCapabilities): string {
           >
             <Layers :size="16" class="item-icon" />
             <span class="item-text">
-              <span class="item-name">Quick Sync</span>
+              <span class="item-name">{{ t("rgb.quickSync") }}</span>
               <span class="item-sub">{{ syncSummary }}</span>
             </span>
           </div>
@@ -170,7 +170,7 @@ function capSummary(cap: RgbDeviceCapabilities): string {
 
         <p v-if="!rgbCaps.length" class="list-empty muted">
           <Palette :size="16" />
-          No RGB devices detected.
+          {{ t("rgb.page.noRgbDevices") }}
         </p>
       </aside>
 
@@ -183,7 +183,7 @@ function capSummary(cap: RgbDeviceCapabilities): string {
         :label="defaultLabel(selectedCap)"
       />
       <div v-else class="card detail empty muted">
-        {{ daemon.connected ? "No RGB-capable devices detected." : "Waiting for the daemon to report RGB devices." }}
+        {{ daemon.connected ? t("rgb.page.noRgbCapableDevices") : t("rgb.page.waitingForDaemon") }}
       </div>
     </div>
   </div>

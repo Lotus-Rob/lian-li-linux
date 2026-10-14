@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { Pencil } from "lucide-vue-next";
 import { MAX_DEVICE_NAME_LENGTH } from "@/stores/deviceNames";
+import { useTranslate } from "@/i18n";
 
 const props = withDefaults(
   defineProps<{
@@ -10,9 +11,11 @@ const props = withDefaults(
     emptyLabel?: string;
     renameTitle?: string;
   }>(),
-  { emptyLabel: "", renameTitle: "Rename this device" },
+  { emptyLabel: "" },
 );
 const emit = defineEmits<{ rename: [name: string] }>();
+const t = useTranslate();
+const renameLabel = computed(() => props.renameTitle ?? t("shell.editableName.renameDevice"));
 
 const editing = ref(false);
 const draft = ref("");
@@ -36,7 +39,7 @@ function commit() {
       v-model:value="draft"
       size="small"
       class="name-input"
-      :placeholder="label || 'Device name'"
+      :placeholder="label || t('shell.editableName.deviceName')"
       :maxlength="MAX_DEVICE_NAME_LENGTH"
       autofocus
       @blur="commit"
@@ -45,7 +48,7 @@ function commit() {
     />
     <template v-else>
       <span class="name">{{ name || label || emptyLabel }}</span>
-      <button type="button" class="rename-btn" :title="renameTitle" :aria-label="renameTitle" @click="start">
+      <button type="button" class="rename-btn" :title="renameLabel" :aria-label="renameLabel" @click="start">
         <Pencil :size="12" />
       </button>
       <span v-if="name && label" class="original">{{ label }}</span>

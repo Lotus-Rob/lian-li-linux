@@ -9,7 +9,9 @@ import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
 import SensorSelect from "@/components/common/SensorSelect.vue";
 import { enumerateSensorsAsOptions, optionForConfig, decodeOption } from "@/stores/sensorOptions";
+import { useTranslate } from "@/i18n";
 
+const t = useTranslate();
 const props = defineProps<{ device: DeviceInfo }>();
 
 const config = useConfigStore();
@@ -39,14 +41,14 @@ const fanOptions = computed(() => buildSpeedOptions(props.device.mb_sync_support
 
 function buildSpeedOptions(mbSync: boolean) {
   const curves = config.config.fan_curves.map((c) => ({
-    label: `Curve: ${c.name}`,
+    label: t("devices.aio.curveOption", { name: c.name }),
     value: `curve:${c.name}`,
   }));
   return [
-    { label: "Off", value: "off" },
+    { label: t("common.off"), value: "off" },
     ...curves,
-    { label: "Constant PWM", value: "constant" },
-    ...(mbSync ? [{ label: "MB Sync", value: "__mb_sync__" }] : []),
+    { label: t("devices.aio.constantPwm"), value: "constant" },
+    ...(mbSync ? [{ label: t("devices.aio.mbSync"), value: "__mb_sync__" }] : []),
   ];
 }
 
@@ -112,10 +114,10 @@ const rotationOptions = [
   { label: "180°", value: 2 },
   { label: "270°", value: 3 },
 ];
-const themeOptions = Array.from({ length: 13 }, (_, i) => ({
-  label: `Theme ${i}`,
+const themeOptions = computed(() => Array.from({ length: 13 }, (_, i) => ({
+  label: t("devices.aio.themeOption", { index: i }),
   value: i,
-}));
+})));
 
 function setColor(key: "str_color" | "val_color" | "unit_color", v: any) {
   aio.value[key] = v;
@@ -137,16 +139,16 @@ const mac = computed(() =>
         <div class="muted mono">{{ mac }}</div>
       </div>
       <div class="telemetry">
-        <span v-for="(rpm, i) in fanRpms" :key="'fan' + i">Fan {{ i + 1 }} {{ rpm }} RPM</span>
-        <span v-if="pumpRpm !== null">Pump {{ pumpRpm }} RPM</span>
-        <span v-if="coolant !== null">Coolant {{ coolant.toFixed(1) }}°C</span>
+        <span v-for="(rpm, i) in fanRpms" :key="'fan' + i">{{ t("devices.aio.fanTelemetry", { index: i + 1, rpm }) }}</span>
+        <span v-if="pumpRpm !== null">{{ t("devices.aio.pumpTelemetry", { rpm: pumpRpm }) }}</span>
+        <span v-if="coolant !== null">{{ t("devices.aio.coolantTelemetry", { temp: coolant.toFixed(1) }) }}</span>
       </div>
     </div>
 
     <div class="grid">
       <!-- Pump -->
       <div class="field">
-        <label class="muted">Pump speed</label>
+        <label class="muted">{{ t("devices.aio.pumpSpeed") }}</label>
         <n-select size="small" :value="pumpMode" :options="pumpOptions" :disabled="!hasPump" @update:value="onPumpMode" />
         <LabeledSlider
           v-if="pumpMode === 'constant'"
@@ -155,13 +157,13 @@ const mac = computed(() =>
           :max="255"
           @update:model-value="setPumpPwm"
         />
-        <span v-if="!hasPump" class="note">Control channel unavailable</span>
-        <span v-else-if="pumpMode === '__mb_sync__' && !device.pump_mb_sync_support" class="note">Saved motherboard sync is unavailable on this device. Choose another mode to control the pump.</span>
+        <span v-if="!hasPump" class="note">{{ t("devices.aio.controlUnavailable") }}</span>
+        <span v-else-if="pumpMode === '__mb_sync__' && !device.pump_mb_sync_support" class="note">{{ t("devices.aio.pumpMbSyncUnavailable") }}</span>
       </div>
 
       <!-- Attached fans -->
       <div v-if="fanCount > 0" class="field" v-for="slot in Math.min(fanCount, 4)" :key="slot - 1">
-        <label class="muted">Fan {{ slot }}</label>
+        <label class="muted">{{ t("devices.aio.fan", { index: slot }) }}</label>
         <n-select
           size="small"
           :value="speedMode(aio.fan_speeds[slot - 1])"
@@ -169,7 +171,7 @@ const mac = computed(() =>
           :disabled="!hasFan"
           @update:value="(v: string) => onFanMode(slot - 1, v)"
         />
-        <span v-if="speedMode(aio.fan_speeds[slot - 1]) === '__mb_sync__' && !device.mb_sync_support" class="note">Saved motherboard sync is unavailable on this device. Choose another mode to control this fan.</span>
+        <span v-if="speedMode(aio.fan_speeds[slot - 1]) === '__mb_sync__' && !device.mb_sync_support" class="note">{{ t("devices.aio.fanMbSyncUnavailable") }}</span>
         <LabeledSlider
           v-if="speedMode(aio.fan_speeds[slot - 1]) === 'constant'"
           :model-value="fanPwm(slot - 1)"
@@ -177,52 +179,52 @@ const mac = computed(() =>
           :max="255"
           @update:model-value="(v: number) => setFanPwm(slot - 1, v)"
         />
-        <span v-if="!hasFan && slot === 1" class="note">Control channel unavailable</span>
+        <span v-if="!hasFan && slot === 1" class="note">{{ t("devices.aio.controlUnavailable") }}</span>
       </div>
 
       <!-- Display sensors -->
-      <div class="field"><label class="muted">CPU Temp</label>
+      <div class="field"><label class="muted">{{ t("devices.aio.cpuTemp") }}</label>
         <SensorSelect size="small" :value="sensorValue('cpu_temp_source')" :options="sensorOptions" @update:value="(v) => onSensor('cpu_temp_source', v)" filterable />
       </div>
-      <div class="field"><label class="muted">CPU Load</label>
+      <div class="field"><label class="muted">{{ t("devices.aio.cpuLoad") }}</label>
         <SensorSelect size="small" :value="sensorValue('cpu_load_source')" :options="sensorOptions" @update:value="(v) => onSensor('cpu_load_source', v)" filterable />
       </div>
-      <div class="field"><label class="muted">GPU Temp</label>
+      <div class="field"><label class="muted">{{ t("devices.aio.gpuTemp") }}</label>
         <SensorSelect size="small" :value="sensorValue('gpu_temp_source')" :options="sensorOptions" @update:value="(v) => onSensor('gpu_temp_source', v)" filterable />
       </div>
-      <div class="field"><label class="muted">GPU Load</label>
+      <div class="field"><label class="muted">{{ t("devices.aio.gpuLoad") }}</label>
         <SensorSelect size="small" :value="sensorValue('gpu_load_source')" :options="sensorOptions" @update:value="(v) => onSensor('gpu_load_source', v)" filterable />
       </div>
 
       <!-- Text colors -->
       <div class="field colors">
-        <label class="muted">Label color</label>
+        <label class="muted">{{ t("devices.aio.labelColor") }}</label>
         <ColorPicker :model-value="aio.str_color" alpha @update:model-value="(v) => setColor('str_color', v)" />
       </div>
       <div class="field colors">
-        <label class="muted">Value color</label>
+        <label class="muted">{{ t("devices.aio.valueColor") }}</label>
         <ColorPicker :model-value="aio.val_color" alpha @update:model-value="(v) => setColor('val_color', v)" />
       </div>
       <div class="field colors">
-        <label class="muted">Unit color</label>
+        <label class="muted">{{ t("devices.aio.unitColor") }}</label>
         <ColorPicker :model-value="aio.unit_color" alpha @update:model-value="(v) => setColor('unit_color', v)" />
       </div>
 
       <!-- Display -->
       <div class="field">
-        <label class="muted">Brightness</label>
+        <label class="muted">{{ t("devices.aio.brightness") }}</label>
         <LabeledSlider :model-value="aio.brightness" :min="0" :max="100" suffix="%" @update:model-value="(v: number) => { aio.brightness = v; config.markDirty(); }" />
       </div>
       <div class="field">
-        <label class="muted">Rotation</label>
+        <label class="muted">{{ t("devices.aio.rotation") }}</label>
         <n-select v-model:value="aio.rotation" size="small" :options="rotationOptions" @update:value="() => config.markDirty()" />
       </div>
       <div class="field">
-        <label class="muted">Theme</label>
+        <label class="muted">{{ t("devices.aio.theme") }}</label>
         <n-select v-model:value="aio.theme_index" size="small" :options="themeOptions" @update:value="() => config.markDirty()" />
       </div>
       <div class="field">
-        <label class="muted">Loop interval</label>
+        <label class="muted">{{ t("devices.aio.loopInterval") }}</label>
         <n-input-number v-model:value="aio.loop_interval" size="small" :min="1" :max="30" @update:value="() => config.markDirty()" />
       </div>
     </div>

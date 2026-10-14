@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useMessage } from "naive-ui";
+import { tr } from "@/i18n";
 
 export function useExternalLink() {
   const message = useMessage();
@@ -11,7 +12,9 @@ export function useExternalLink() {
     } catch (error) {
       const copied = await writeText(url).then(() => true, () => false);
       message.error(
-        `Could not open the link: ${error}. ${copied ? "The link was copied to the clipboard." : url}`,
+        copied
+          ? tr("shell.externalLink.openFailedCopied", { error: String(error) })
+          : tr("shell.externalLink.openFailed", { error: String(error), url }),
         { duration: 8000, closable: true },
       );
     }

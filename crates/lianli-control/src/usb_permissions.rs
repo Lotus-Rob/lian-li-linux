@@ -243,6 +243,7 @@ pub fn inspect(context: &InstallationContext, backend: HidBackend) -> Installati
         title: "USB/HID node permissions".into(), evidence,
         remediation: "Apply host USB rules and group changes, then restart the login or service. For Distrobox, stop and re-enter the box. Missing hidraw nodes need kernel or device-visibility repair. Check daemon logs for open failures.".into(),
         guide: if matches!(context, InstallationContext::Native) { InstallationGuide::UsbPermissions } else { InstallationGuide::Distrobox },
+        message_key: Some("control.usbNodeAccess".into()), message_params: std::collections::BTreeMap::new(),
     }
 }
 

@@ -16,7 +16,9 @@ import RgbEffectControls from "@/components/rgb/RgbEffectControls.vue";
 import { copyEffect, recallSyncEffect, rememberSyncEffect } from "@/components/rgb/effectMemory";
 import { continuousParametersFor, createDefaultSync, matchedParametersFor, MATCHED_MODES } from "@/components/rgb/syncSettings";
 import { modeLabel } from "@/constants";
+import { useTranslate } from "@/i18n";
 
+const t = useTranslate();
 const config = useConfigStore();
 const rgb = computed(() => config.ensureRgb());
 const storedSync = computed(() => rgb.value.merge_lighting ?? null);
@@ -216,29 +218,29 @@ function patchEffect(patch: Partial<RgbEffect>) {
   <section class="card sync-card">
     <div class="sync-head">
       <div class="title-wrap">
-        <span class="title">Quick Sync</span>
-        <span class="sync-description">Run one coordinated effect across multiple devices.</span>
+        <span class="title">{{ t("rgb.quickSync") }}</span>
+        <span class="sync-description">{{ t("rgb.syncEditor.description") }}</span>
       </div>
       <n-switch v-model:value="enabled" :disabled="!enabled && (participantCount < 2 || !modeOptions.some((option) => option.value === sync.effect.mode))" />
     </div>
 
     <div class="sync-options">
       <div class="field">
-        <label class="muted">Sync style</label>
+        <label class="muted">{{ t("rgb.syncEditor.syncStyle") }}</label>
         <n-radio-group v-model:value="kind" size="small">
-          <n-radio-button value="Continuous">Continuous strip</n-radio-button>
-          <n-radio-button value="Matched">Matched effect</n-radio-button>
+          <n-radio-button value="Continuous">{{ t("rgb.syncEditor.continuous") }}</n-radio-button>
+          <n-radio-button value="Matched">{{ t("rgb.syncEditor.matched") }}</n-radio-button>
         </n-radio-group>
       </div>
       <div class="field">
-        <label class="muted">Effect</label>
+        <label class="muted">{{ t("rgb.syncEditor.effect") }}</label>
         <n-select :value="sync.effect.mode" :options="modeOptions" size="small" @update:value="setMode" />
       </div>
     </div>
 
-    <p v-if="participantCount < 2" class="hint">Choose at least two compatible devices to enable Quick Sync.</p>
-    <p v-else-if="!modeOptions.some((option) => option.value === sync.effect.mode)" class="hint">Choose an effect supported by every enabled device.</p>
-    <p v-if="enabled" class="sync-active">Quick Sync controls the enabled devices below. Save to apply changes.</p>
+    <p v-if="participantCount < 2" class="hint">{{ t("rgb.syncEditor.needTwoDevices") }}</p>
+    <p v-else-if="!modeOptions.some((option) => option.value === sync.effect.mode)" class="hint">{{ t("rgb.syncEditor.needSupportedEffect") }}</p>
+    <p v-if="enabled" class="sync-active">{{ t("rgb.syncEditor.active") }}</p>
 
     <div class="devices">
       <div v-for="cap in orderedCandidates" :key="cap.device_id" class="sync-device">
@@ -249,9 +251,9 @@ function patchEffect(patch: Partial<RgbEffect>) {
         >
           {{ names.label(cap.device_id, labels.get(cap.device_id) ?? cap.device_name) }}
         </n-checkbox>
-        <span v-if="motherboardSynced(cap)" class="muted unavailable">Motherboard sync enabled</span>
-        <span v-else-if="!isEligible(cap)" class="muted unavailable">Effect unavailable</span>
-        <span v-else-if="kind === 'Continuous'" class="muted led-count">{{ cap.sync_led_count }} LEDs</span>
+        <span v-if="motherboardSynced(cap)" class="muted unavailable">{{ t("rgb.syncEditor.motherboardSyncEnabled") }}</span>
+        <span v-else-if="!isEligible(cap)" class="muted unavailable">{{ t("rgb.syncEditor.effectUnavailable") }}</span>
+        <span v-else-if="kind === 'Continuous'" class="muted led-count">{{ t("rgb.syncEditor.ledCount", { count: cap.sync_led_count }) }}</span>
         <n-switch
           v-if="kind === 'Continuous' && !['RainbowMorph', 'Twinkle'].includes(sync.effect.mode)"
           :value="deviceReversed(cap.device_id)"
@@ -259,8 +261,8 @@ function patchEffect(patch: Partial<RgbEffect>) {
           size="small"
           @update:value="(value) => setDeviceReversed(cap.device_id, value)"
         >
-          <template #checked>Reverse</template>
-          <template #unchecked>Forward</template>
+          <template #checked>{{ t("rgb.syncEditor.reverse") }}</template>
+          <template #unchecked>{{ t("rgb.syncEditor.forward") }}</template>
         </n-switch>
         <div class="order-buttons">
           <n-button quaternary size="tiny" :disabled="!canMoveDevice(cap, -1)" @click="moveDevice(cap.device_id, -1)">

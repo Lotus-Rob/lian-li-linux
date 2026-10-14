@@ -20,11 +20,11 @@ export const router = createRouter({
 });
 
 export const MAIN_ROUTES = [
-  { name: "devices", label: "Devices", icon: "monitor", to: "/devices" },
-  { name: "lcd", label: "LCD", icon: "image", to: "/lcd" },
-  { name: "fans", label: "Fans", icon: "fan", to: "/fans" },
-  { name: "rgb", label: "RGB", icon: "palette", to: "/rgb" },
-  { name: "aio", label: "AIO", icon: "droplet", to: "/aio" },
-  { name: "settings", label: "Settings", icon: "settings", to: "/settings" },
-  { name: "installation", label: "Installation Health", icon: "health", to: "/installation" },
+  { name: "devices", labelKey: "nav.devices", icon: "monitor", to: "/devices" },
+  { name: "lcd", labelKey: "nav.lcd", icon: "image", to: "/lcd" },
+  { name: "fans", labelKey: "nav.fans", icon: "fan", to: "/fans" },
+  { name: "rgb", labelKey: "nav.rgb", icon: "palette", to: "/rgb" },
+  { name: "aio", labelKey: "nav.aio", icon: "droplet", to: "/aio" },
+  { name: "settings", labelKey: "nav.settings", icon: "settings", to: "/settings" },
+  { name: "installation", labelKey: "nav.installation", icon: "health", to: "/installation" },
 ] as const;

@@ -2,6 +2,7 @@ use anyhow::{ensure, Context, Result};
 use lianli_shared::installation::{
     CheckState, FindingSeverity, InstallationFinding, InstallationGuide,
 };
+use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
@@ -22,6 +23,8 @@ pub fn inspect(path: &Path, temporary: bool) -> InstallationFinding {
         evidence,
         remediation: "Check the daemon account's directory access, mount state, free space and quotas in its filesystem namespace. Create a missing state directory with the intended daemon ownership using the installation guide. Repair storage, Recheck, then retry the failed save or media preparation.".into(),
         guide: InstallationGuide::Troubleshooting,
+        message_key: Some(if temporary { "control.mediaTempStorage" } else { "control.stateStorage" }.into()),
+        message_params: BTreeMap::new(),
     }
 }
 

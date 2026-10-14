@@ -3,6 +3,7 @@ import { emit } from "@tauri-apps/api/event";
 import { LCD_TEMPLATES_CHANGED_EVENT } from "@/stores/lcd";
 import { computed, reactive, ref } from "vue";
 import { useIpc } from "@/composables/useIpc";
+import { tr } from "@/i18n";
 import type {
   AppConfig,
   LcdTemplate,
@@ -104,7 +105,7 @@ export const useConfigStore = defineStore("config", () => {
       const current = await ipc.request<LcdTemplate[]>("GetLcdTemplates", null, staged.instance);
       for (const copy of staged.copies) {
         if (JSON.stringify(current.find((item) => item.id === copy.id)) !== JSON.stringify(staged.originals.find((item) => item.id === copy.id))) {
-          throw new Error("A copied template changed in another window. Reload and review the import before saving.");
+          throw new Error(tr("shell.config.copiedTemplateChanged"));
         }
       }
       await ipc.request("MergeLcdTemplates", { originals: staged.originals, copies: staged.copies }, staged.instance);
@@ -114,7 +115,7 @@ export const useConfigStore = defineStore("config", () => {
     try {
       await ipc.request("SetConfig", { config }, staged?.instance);
     } catch (error) {
-      if (staged?.copies.length) throw new Error(`Copied templates were saved, but LCD settings were not confirmed. Retry Save or reload to inspect settings. ${error}`);
+      if (staged?.copies.length) throw new Error(tr("shell.config.lcdNotConfirmed", { error: String(error) }));
       throw error;
     }
     dirty.value = false;
@@ -122,7 +123,7 @@ export const useConfigStore = defineStore("config", () => {
   }
 
   function stageImportedMedia(lcds: LcdConfig[], copies: LcdTemplate[], instance: string) {
-    if (imported.value) throw new Error("Save or reload the previous copied selection first.");
+    if (imported.value) throw new Error(tr("shell.config.previousImportPending"));
     imported.value = { instance, originals: JSON.parse(JSON.stringify(templates.value)), copies: JSON.parse(JSON.stringify(copies)) };
     const ids = new Set(copies.map((item) => item.id));
     templates.value = [...templates.value.filter((item) => !ids.has(item.id)), ...JSON.parse(JSON.stringify(copies))];

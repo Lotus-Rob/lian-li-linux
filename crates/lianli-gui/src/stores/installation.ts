@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { InstallationReport } from "@/types/installation";
 import { useDaemonStore } from "@/stores/daemon";
+import { tr } from "@/i18n";
 
 export const useInstallationStore = defineStore("installation", () => {
   const report = ref<InstallationReport | null>(null);
@@ -15,11 +16,11 @@ export const useInstallationStore = defineStore("installation", () => {
   ) ?? []);
   const contextLabel = computed(() => {
     const label = (context?: InstallationReport["context"] | null) => {
-      if (!context) return "Unverified";
-      if (context.kind === "distrobox") return `Distrobox (${context.name})`;
-      return context.kind === "native" ? "Native" : "Unsupported container";
+      if (!context) return tr("service.installation.contextUnverified");
+      if (context.kind === "distrobox") return tr("service.installation.contextDistrobox", { name: context.name });
+      return tr(context.kind === "native" ? "service.installation.contextNative" : "service.installation.contextUnsupported");
     };
-    return `GUI: ${label(report.value?.context)} · Daemon: ${label(report.value?.daemon_context)}`;
+    return tr("service.installation.contextLine", { gui: label(report.value?.context), daemon: label(report.value?.daemon_context) });
   });
   let pending: Promise<void> | null = null;
   let started = false;

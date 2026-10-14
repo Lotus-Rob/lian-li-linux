@@ -129,12 +129,14 @@ async fn diagnostic_preview_file(
     window: WebviewWindow,
     app: tauri::AppHandle,
     input: diagnostic_export::Input,
+    title: Option<String>,
 ) -> Result<Option<diagnostic_export::Preview>, String> {
     if window.label() != "main" {
         return Err("Choose daemon logs from the main window".into());
     }
+    let title = ui_text(title, "Choose saved daemon logs");
     tauri::async_runtime::spawn_blocking(move || {
-        diagnostic_export::preview_file(&app, input).map_err(|error| format!("{error:#}"))
+        diagnostic_export::preview_file(&app, input, &title).map_err(|error| format!("{error:#}"))
     })
     .await
     .map_err(|error| error.to_string())?
@@ -290,6 +292,7 @@ fn list_system_fonts() -> Vec<SystemFont> {
 async fn open_editor_window(
     app: tauri::AppHandle,
     template_id: Option<String>,
+    title: Option<String>,
 ) -> Result<(), String> {
     if service_operations::active() {
         return Err(
@@ -305,13 +308,22 @@ async fn open_editor_window(
         let _ = existing.set_focus();
         return Ok(());
     }
-    open_secondary_window(&app, "editor", "Template Editor", &hash, 1280, 800)
+    let title = ui_text(title, "Template Editor");
+    open_secondary_window(&app, "editor", &title, &hash, 1280, 800)
 }
 
 /// Open (or focus) the template browser as a separate webview window.
 #[tauri::command]
-async fn open_browser_window(app: tauri::AppHandle) -> Result<(), String> {
-    open_secondary_window(&app, "browser", "Template Browser", "#/browser", 1000, 720)
+async fn open_browser_window(app: tauri::AppHandle, title: Option<String>) -> Result<(), String> {
+    let title = ui_text(title, "Template Browser");
+    open_secondary_window(&app, "browser", &title, "#/browser", 1000, 720)
+}
+
+/// Text the frontend translated, with the English fallback for older callers.
+pub(crate) fn ui_text(translated: Option<String>, fallback: &str) -> String {
+    translated
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or_else(|| fallback.to_string())
 }
 
 fn open_secondary_window(

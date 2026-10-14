@@ -11,9 +11,11 @@ import EditableName from "@/components/common/EditableName.vue";
 import RgbZoneEditor from "@/components/rgb/RgbZoneEditor.vue";
 import RgbRegionEditor from "@/components/rgb/RgbRegionEditor.vue";
 import { motherboardSyncEnabled, quickSyncControls } from "@/components/rgb/syncSettings";
+import { useTranslate } from "@/i18n";
 
 const props = defineProps<{ cap: RgbDeviceCapabilities; label: string }>();
 
+const t = useTranslate();
 const rgb = useRgbStore();
 const config = useConfigStore();
 const names = useDeviceNamesStore();
@@ -25,9 +27,9 @@ async function ping() {
     await ipc.request("PingDevice", { device_id: props.cap.device_id, zone: 0 });
   } catch (e) {
     dialog.error({
-      title: "Ping failed",
+      title: t("rgb.deviceCard.pingFailed"),
       content: String(e),
-      positiveText: "OK",
+      positiveText: t("common.ok"),
     });
   }
 }
@@ -125,10 +127,10 @@ async function applyPreset(name: string) {
 }
 async function deletePreset(name: string) {
   dialog.error({
-    title: "Delete preset?",
-    content: `"${name}" will be permanently deleted.`,
-    positiveText: "Delete",
-    negativeText: "Cancel",
+    title: t("rgb.deviceCard.deletePresetTitle"),
+    content: t("rgb.deviceCard.deletePresetContent", { name }),
+    positiveText: t("common.delete"),
+    negativeText: t("common.cancel"),
     onPositiveClick: () => void rgb.deletePreset(name, props.cap.device_id),
   });
 }
@@ -148,7 +150,7 @@ const totalLedCount = computed(() => {
   return props.cap.total_led_count - reported + (devConfig.value.fan_led_count ?? control.default);
 });
 const summary = computed(() =>
-  `${props.cap.zones.length} zone(s) \u00B7 ${totalLedCount.value} LEDs`,
+  t("rgb.deviceCard.summary", { zones: props.cap.zones.length, leds: totalLedCount.value }),
 );
 </script>
 
@@ -163,19 +165,19 @@ const summary = computed(() =>
         />
         <span class="device-label">{{ summary }}</span>
       </div>
-      <button class="ping-btn" title="Identify device" @click="ping">
+      <button class="ping-btn" :title="t('rgb.deviceCard.identifyDevice')" @click="ping">
         <Locate :size="14" />
       </button>
     </div>
 
     <p v-if="cap.deferred_reason" class="notice warning">{{ cap.deferred_reason }}</p>
-    <p v-if="syncActive" class="notice">Quick Sync controls lighting effects.<template v-if="cap.fan_led_count_control"> LED count is still editable.</template></p>
+    <p v-if="syncActive" class="notice">{{ t(cap.fan_led_count_control ? "rgb.deviceCard.quickSyncNoticeLedCount" : "rgb.deviceCard.quickSyncNotice") }}</p>
 
     <div class="device-controls">
       <div v-if="cap.supports_mb_rgb_sync || (!mbSync && (regional || portGroups))" class="toolbar">
         <div v-if="!mbSync && (regional || portGroups)" class="control-tabs" :inert="syncActive || undefined">
-          <n-button size="small" :type="controlTab === 'regions' ? 'primary' : 'default'" @click="controlTab = 'regions'">Group effects</n-button>
-          <n-button v-if="cap.supports_direct || portGroups" size="small" :type="controlTab === 'direct' ? 'primary' : 'default'" @click="controlTab = 'direct'">Direct / zones</n-button>
+          <n-button size="small" :type="controlTab === 'regions' ? 'primary' : 'default'" @click="controlTab = 'regions'">{{ t("rgb.deviceCard.groupEffects") }}</n-button>
+          <n-button v-if="cap.supports_direct || portGroups" size="small" :type="controlTab === 'direct' ? 'primary' : 'default'" @click="controlTab = 'direct'">{{ t("rgb.deviceCard.directZones") }}</n-button>
         </div>
         <n-checkbox
           v-if="cap.supports_mb_rgb_sync"
@@ -183,13 +185,13 @@ const summary = computed(() =>
           class="mb-sync"
           :class="{ 'sync-locked': syncActive }"
           :inert="syncActive || undefined"
-        >Motherboard ARGB Sync</n-checkbox>
+        >{{ t("rgb.deviceCard.motherboardSync") }}</n-checkbox>
       </div>
 
-      <p v-if="mbSync" class="hint">The motherboard controls this device's lighting.</p>
+      <p v-if="mbSync" class="hint">{{ t("rgb.deviceCard.motherboardControls") }}</p>
       <template v-else>
-        <p v-if="cap.hardware_group_effects" class="hint">Mode, speed, brightness and direction apply to the whole group or ring. Static and Breathing support a separate color for each fan.</p>
-        <p v-if="cap.hardware_group_effects && !devConfig.regions" class="hint">Fan settings stay saved. Conflicting effects use the last fan's group settings. Compatible Static and Breathing colors combine. Use group effects below to set each group and ring.</p>
+        <p v-if="cap.hardware_group_effects" class="hint">{{ t("rgb.deviceCard.hardwareGroupHint") }}</p>
+        <p v-if="cap.hardware_group_effects && !devConfig.regions" class="hint">{{ t("rgb.deviceCard.hardwareGroupFanHint") }}</p>
         <RgbRegionEditor v-if="regional && controlTab === 'regions'" :device-id="cap.device_id" :cap="cap" :inert="syncActive || undefined" :class="{ 'sync-locked': syncActive }" />
         <RgbZoneEditor v-else-if="portGroups && controlTab === 'regions' && visibleZones[0]" :device-id="cap.device_id" :cap="cap" :zone-index="0" :zone="visibleZones[0]" :lighting-locked="syncActive" group-effects />
         <div v-if="(!regional && !portGroups) || controlTab === 'direct'" class="zones">
@@ -207,13 +209,13 @@ const summary = computed(() =>
         </div>
 
         <div class="preset-bar" :class="{ 'sync-locked': syncActive }" :inert="syncActive || undefined">
-          <n-button v-if="!regional && !portGroups" size="small" @click="applyToAllZones">Apply to All Zones</n-button>
-          <span class="preset-label muted">Preset</span>
+          <n-button v-if="!regional && !portGroups" size="small" @click="applyToAllZones">{{ t("rgb.deviceCard.applyToAllZones") }}</n-button>
+          <span class="preset-label muted">{{ t("rgb.deviceCard.preset") }}</span>
           <n-select
             :value="activePreset"
             size="small"
             :options="presetOptions"
-            placeholder="(none)"
+            :placeholder="t('rgb.deviceCard.noPreset')"
             @update:value="applyPreset"
             style="width: 180px"
           />
@@ -222,22 +224,22 @@ const summary = computed(() =>
             size="small"
             @click="activePreset && applyPreset(activePreset)"
           >
-            Apply
+            {{ t("common.apply") }}
           </n-button>
           <n-button
             size="small"
             quaternary
             type="error"
-            title="Delete preset"
+            :title="t('rgb.deviceCard.deletePreset')"
             :disabled="!activePreset"
             @click="activePreset && deletePreset(activePreset)"
           >
             <template #icon><Trash2 :size="14" /></template>
           </n-button>
-          <n-input v-model:value="presetName" size="small" placeholder="Preset name" style="width: 140px" />
+          <n-input v-model:value="presetName" size="small" :placeholder="t('rgb.deviceCard.presetName')" style="width: 140px" />
           <n-button size="small" @click="savePreset">
             <template #icon><Save :size="14" /></template>
-            Save As
+            {{ t("rgb.deviceCard.saveAs") }}
           </n-button>
         </div>
       </template>

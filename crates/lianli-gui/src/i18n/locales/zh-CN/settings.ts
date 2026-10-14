@@ -1,0 +1,59 @@
+import type en from "../en/settings";
+
+const messages: typeof en = {
+  configuration: {
+    title: "配置",
+    hidBackend: "HID 后端",
+    hidraw: "HIDRAW（推荐）",
+    libusb: "LibUSB（直连）",
+    turnOffLcds: "守护进程停止时关闭 LCD 屏幕",
+    lcdCount: "LCD 数量",
+    fanCurveCount: "风扇曲线数量",
+    maxFps: "fps 上限",
+    hardwareVideo: "硬件视频加速",
+    hardwareVideoHint: "使用可用的 GPU 视频编码器和解码器，不可用时回退到软件处理。保存后应用到正在进行的串流。",
+    hardwareVideoUpdate: "更新守护进程后才能在设置中管理硬件视频加速。",
+  },
+  daemon: {
+    title: "守护进程状态",
+    connected: "已连接",
+    socket: "套接字",
+    version: "守护进程版本",
+    mode: "配置模式",
+    file: "配置文件",
+  },
+  thermal: {
+    title: "温度警报",
+    active: "已触发",
+    monitoring: "监控中",
+    hint: "当 CPU/GPU 温度超过阈值时，所有 RGB 设备将切换为警报颜色，直到温度降至阈值以下。",
+    enable: "启用",
+    threshold: "阈值（°C）",
+    alertColor: "警报颜色",
+  },
+  openrgb: {
+    disconnected: "已断开",
+    running: "运行中",
+    port: "端口 {port}",
+    starting: "正在启动…",
+    enableServer: "启用 OpenRGB SDK 服务器",
+    retry: "重试 OpenRGB",
+    retryHint: "重试将使用已保存的端口。保存后编辑内容才会生效。",
+    retryQueued: "已按保存的 OpenRGB 设置排队重试。请查看服务器状态了解结果。",
+    portLabel: "端口",
+    authWarning: "该服务器绑定的 TCP 端口没有身份验证。启用期间，守护进程不会应用自身的 RGB 灯效。",
+  },
+  drift: {
+    title: "RGB 漂移检测",
+    active: "生效中",
+    hint: "当无线设备的固件重置其灯效时，重新应用已保存的 RGB 设置。仅限无线设备。",
+    enable: "启用漂移检测",
+    interval: "检测间隔（毫秒）",
+  },
+  about: {
+    title: "关于",
+    tagline: "L-Connect 3 的开源 Linux 替代品",
+  },
+};
+
+export default messages;

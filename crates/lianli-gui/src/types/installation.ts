@@ -11,6 +11,8 @@ export interface InstallationFinding {
   evidence: string;
   remediation: string;
   guide: InstallationGuide;
+  message_key?: string | null;
+  message_params?: Record<string, string>;
 }
 
 export interface InstallationReport {

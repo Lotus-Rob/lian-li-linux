@@ -1,6 +1,7 @@
 use lianli_shared::installation::{
     CheckState, FindingSeverity, InstallationFinding, InstallationGuide,
 };
+use std::collections::BTreeMap;
 
 #[derive(Default)]
 pub struct StateHealth {
@@ -18,7 +19,7 @@ pub struct StateHealth {
 impl StateHealth {
     pub fn wired_identity_save_error(&mut self, error: Option<&str>) {
         self.wired_identity_save = error.map(|error| {
-            let mut finding = failed("configuration.wired_identity_save", "Wired identity migration could not be saved", error);
+            let mut finding = failed("configuration.wired_identity_save", "daemon.wiredIdentitySave", "Wired identity migration could not be saved", error);
             finding.evidence.push_str(" Migrated settings are active in memory. Save settings again when storage is writable.");
             finding
         });
@@ -28,6 +29,7 @@ impl StateHealth {
         self.wired_identity = (!warnings.is_empty()).then(|| {
             loaded(
                 "configuration.wired_identity",
+                "daemon.wiredIdentity",
                 "Wired device settings need attention",
                 warnings,
             )
@@ -70,6 +72,8 @@ impl StateHealth {
             evidence: bounded(error, 2048),
             remediation: "Check the transmitter and receiver connections, daemon logs and USB permissions. Wireless fans and pumps keep their last speed until the link recovers. The daemon retries and resets unresponsive dongles automatically. Recheck only reads status.".into(),
             guide: InstallationGuide::Troubleshooting,
+            message_key: Some("daemon.wirelessInitialization".into()),
+            message_params: BTreeMap::new(),
         });
     }
 
@@ -96,7 +100,12 @@ impl StateHealth {
     }
 
     pub fn config_loaded(&mut self, warnings: &[String], applied: bool) {
-        let mut finding = loaded("configuration.load", "Configuration load", warnings);
+        let mut finding = loaded(
+            "configuration.load",
+            "daemon.configurationLoad",
+            "Configuration load",
+            warnings,
+        );
         if !applied {
             finding.state = CheckState::Unavailable;
             finding.severity = FindingSeverity::Warning;
@@ -106,7 +115,12 @@ impl StateHealth {
     }
 
     pub fn config_failed(&mut self, error: &str, retained: bool) {
-        let mut finding = failed("configuration.load", "Configuration load", error);
+        let mut finding = failed(
+            "configuration.load",
+            "daemon.configurationLoad",
+            "Configuration load",
+            error,
+        );
         finding.evidence.push_str(if retained {
             " The last successfully loaded configuration remains active."
         } else {
@@ -118,6 +132,7 @@ impl StateHealth {
     pub fn templates_loaded(&mut self, warnings: &[String]) {
         self.templates = Some(loaded(
             "configuration.templates",
+            "daemon.templateLoad",
             "Custom template load",
             warnings,
         ));
@@ -126,6 +141,7 @@ impl StateHealth {
     pub fn templates_failed(&mut self, error: &str) {
         self.templates = Some(failed(
             "configuration.templates",
+            "daemon.templateLoad",
             "Custom template load",
             error,
         ));
@@ -146,6 +162,7 @@ impl StateHealth {
             feature: "Device initialization".into(), context: id.clone(), title: "Device could not open".into(),
             evidence: error.clone(), remediation: "Check the connection, USB permissions and daemon logs. After repairs, reconnect the device or restart its service if retries have stopped. Recheck reads status only.".into(),
             guide: InstallationGuide::Troubleshooting,
+            message_key: Some("daemon.deviceOpenFailed".into()), message_params: BTreeMap::new(),
         }));
         if self.device_open_overflow {
             findings.push(InstallationFinding {
@@ -158,6 +175,8 @@ impl StateHealth {
                 evidence: "Only the first 64 device failures are retained.".into(),
                 remediation: "Inspect daemon logs for the remaining failures.".into(),
                 guide: InstallationGuide::Troubleshooting,
+                message_key: Some("daemon.deviceOpenMore".into()),
+                message_params: BTreeMap::new(),
             });
         }
         findings.extend(self.lcd_errors.iter().map(|(id, error)| InstallationFinding {
@@ -167,6 +186,7 @@ impl StateHealth {
             title: "LCD initialization failed".into(), evidence: error.clone(),
             remediation: "Check USB access and daemon logs. Reconnect the LCD or restart the service after repairs. Recheck only reads status.".into(),
             guide: InstallationGuide::Troubleshooting,
+            message_key: Some("daemon.lcdInitializationFailed".into()), message_params: BTreeMap::new(),
         }));
         if self.lcd_overflow {
             findings.push(InstallationFinding {
@@ -179,24 +199,27 @@ impl StateHealth {
                 evidence: "Only the first 32 LCD initialization failures are retained.".into(),
                 remediation: "Inspect daemon logs for the remaining failures.".into(),
                 guide: InstallationGuide::Troubleshooting,
+                message_key: Some("daemon.lcdInitializationMore".into()),
+                message_params: BTreeMap::new(),
             });
         }
         findings
     }
 }
 
-fn base(code: &str, title: &str) -> InstallationFinding {
+fn base(code: &str, key: &str, title: &str) -> InstallationFinding {
     InstallationFinding {
         code: code.into(), state: CheckState::Passed, severity: FindingSeverity::Info,
         feature: "Saved configuration".into(), context: "Daemon's last load attempt".into(),
         title: title.into(), evidence: String::new(),
         remediation: "Repair the settings or restore a backup, then save or restart the service. Recheck shows the last load result.".into(),
         guide: InstallationGuide::Troubleshooting,
+        message_key: Some(key.into()), message_params: BTreeMap::new(),
     }
 }
 
-fn loaded(code: &str, title: &str, warnings: &[String]) -> InstallationFinding {
-    let mut finding = base(code, title);
+fn loaded(code: &str, key: &str, title: &str, warnings: &[String]) -> InstallationFinding {
+    let mut finding = base(code, key, title);
     if warnings.is_empty() {
         finding.evidence = "The last load completed without validation warnings.".into();
     } else {
@@ -213,8 +236,8 @@ fn loaded(code: &str, title: &str, warnings: &[String]) -> InstallationFinding {
     finding
 }
 
-fn failed(code: &str, title: &str, error: &str) -> InstallationFinding {
-    let mut finding = base(code, title);
+fn failed(code: &str, key: &str, title: &str, error: &str) -> InstallationFinding {
+    let mut finding = base(code, key, title);
     finding.state = CheckState::Failed;
     finding.severity = FindingSeverity::Error;
     finding.evidence = bounded(error, 3200);

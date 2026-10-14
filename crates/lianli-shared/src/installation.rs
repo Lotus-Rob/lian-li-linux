@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub const DAEMON_LOCK_PATH: &str = "/run/lianli-daemon.lock";
@@ -41,6 +42,18 @@ pub struct InstallationFinding {
     pub evidence: String,
     pub remediation: String,
     pub guide: InstallationGuide,
+    /// GUI message for `title` and `remediation`, which stay the English fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_key: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub message_params: BTreeMap<String, String>,
+}
+
+pub fn message_params<const N: usize>(pairs: [(&str, String); N]) -> BTreeMap<String, String> {
+    pairs
+        .into_iter()
+        .map(|(name, value)| (name.to_string(), value))
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

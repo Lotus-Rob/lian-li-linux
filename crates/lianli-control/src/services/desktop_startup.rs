@@ -20,9 +20,10 @@ pub fn check_distrobox_desktop_startup(name: &str) -> InstallationFinding {
 }
 
 fn finding(name: &str, inspected: Result<(UnitState, Option<String>)>) -> InstallationFinding {
-    let (state, title, evidence) = match inspected {
+    let (state, message_key, title, evidence) = match inspected {
         Err(error) => (
             CheckState::Unavailable,
+            "loginStartupUnavailable",
             "Desktop login startup could not be inspected",
             format!("Host service inspection failed: {error:#}"),
         ),
@@ -34,6 +35,7 @@ fn finding(name: &str, inspected: Result<(UnitState, Option<String>)>) -> Instal
             if unit.load_state == "not-found" {
                 (
                     CheckState::NotApplicable,
+                    "loginStartupNotInstalled",
                     "Optional desktop login service is not installed",
                     detail,
                 )
@@ -43,31 +45,46 @@ fn finding(name: &str, inspected: Result<(UnitState, Option<String>)>) -> Instal
             {
                 (
                     CheckState::NotApplicable,
+                    "loginStartupDisabled",
                     "Optional desktop login startup is disabled",
                     detail,
                 )
             } else if unit.load_state != "loaded" {
                 (
                     CheckState::Failed,
+                    "loginStartupMissing",
                     "Desktop login service is missing or unavailable",
                     detail,
                 )
             } else if recipe.as_deref() != Some(name) {
-                (CheckState::Failed, "Desktop login service needs the current recipe",
+                (CheckState::Failed, "loginStartupOutdatedRecipe", "Desktop login service needs the current recipe",
                     format!("{detail} Start and guarded stop commands must identify the same capture service invocation in box '{name}'."))
             } else if unit.unit_file_state != "enabled" {
                 (
                     CheckState::Failed,
+                    "loginStartupNotEnabled",
                     "Desktop login service is not enabled persistently",
                     detail,
                 )
             } else if unit.active_state == "failed" {
-                (CheckState::Failed, "Desktop login service failed", detail)
+                (
+                    CheckState::Failed,
+                    "loginStartupFailed",
+                    "Desktop login service failed",
+                    detail,
+                )
             } else {
-                (CheckState::Passed, "Desktop login startup is configured",
+                (CheckState::Passed, "loginStartupConfigured", "Desktop login startup is configured",
                     format!("{detail} The host service targets box '{name}' and is enabled for future logins. Runtime state does not establish successful capture or panel playback."))
             }
         }
+    };
+    let (guidance, key_suffix) = match crate::distrobox_unit::session_guidance(name) {
+        Ok(guidance) => (guidance, ""),
+        Err(error) => (
+            format!("{error:#}. Follow the Distrobox desktop startup guide."),
+            "InvalidBox",
+        ),
     };
     InstallationFinding {
         code: "desktop.login_startup".into(),
@@ -77,9 +94,10 @@ fn finding(name: &str, inspected: Result<(UnitState, Option<String>)>) -> Instal
         context: "Host user service. Capture inside Distrobox".into(),
         title: title.into(),
         evidence,
-        remediation: format!("{} Inspect host logs with journalctl --user -u {UNIT} -b -n 100 --no-pager. This check does not start or change services.",
-            crate::distrobox_unit::session_guidance(name).unwrap_or_else(|error| format!("{error:#}. Follow the Distrobox desktop startup guide."))),
+        remediation: format!("{guidance} Inspect host logs with journalctl --user -u {UNIT} -b -n 100 --no-pager. This check does not start or change services."),
         guide: InstallationGuide::Distrobox,
+        message_key: Some(format!("control.{message_key}{key_suffix}")),
+        message_params: message_params([("name", name.into())]),
     }
 }
 

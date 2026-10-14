@@ -2,8 +2,10 @@
 import { computed } from "vue";
 import { useDevicesStore } from "@/stores/devices";
 import AioCard from "@/components/aio/AioCard.vue";
+import { useTranslate } from "@/i18n";
 
 const devices = useDevicesStore();
+const t = useTranslate();
 const aios = computed(() => devices.aioDevices);
 </script>
 
@@ -11,7 +13,7 @@ const aios = computed(() => devices.aioDevices);
   <div class="page aio-page">
     <AioCard v-for="d in aios" :key="d.device_id" :device="d" />
     <div v-if="!aios.length" class="card empty-state muted">
-      No AIO devices detected.
+      {{ t("devices.aio.empty") }}
     </div>
   </div>
 </template>

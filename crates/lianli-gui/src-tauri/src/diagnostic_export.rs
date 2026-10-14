@@ -217,13 +217,8 @@ pub fn preview(input: Input) -> Result<Preview> {
     start(input, None)
 }
 
-pub fn preview_file(app: &tauri::AppHandle, input: Input) -> Result<Option<Preview>> {
-    let Some(selected) = app
-        .dialog()
-        .file()
-        .set_title("Choose saved daemon logs")
-        .blocking_pick_file()
-    else {
+pub fn preview_file(app: &tauri::AppHandle, input: Input, title: &str) -> Result<Option<Preview>> {
+    let Some(selected) = app.dialog().file().set_title(title).blocking_pick_file() else {
         return Ok(None);
     };
     let path = selected

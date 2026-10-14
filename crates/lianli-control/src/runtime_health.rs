@@ -1,8 +1,10 @@
 use anyhow::{ensure, Context, Result};
 use lianli_shared::config::HidBackend;
 use lianli_shared::installation::{
-    CheckState, FindingSeverity, InstallationContext, InstallationFinding, InstallationGuide,
+    message_params, CheckState, FindingSeverity, InstallationContext, InstallationFinding,
+    InstallationGuide,
 };
+use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
@@ -85,10 +87,18 @@ fn findings(
     } else {
         InstallationGuide::Distrobox
     };
-    let repair = if matches!(context, InstallationContext::Distrobox { .. }) {
+    let boxed = matches!(context, InstallationContext::Distrobox { .. });
+    let repair = if boxed {
         "Apply the host tmpfiles/group setup, log out and back in, then stop and re-enter the existing box and restart its user service. Compare numeric group IDs visible inside the box. Matching names alone are insufficient. Do not create a private lock or install host rules only inside the box."
     } else {
         "Install the supplied host tmpfiles rule and run sudo systemd-tmpfiles --create lianli.conf. For user service setup, add your user to the host lianli group, log out and back in, then restart the selected service. A system service must use the packaged lianli account/group. Do not replace an active lock."
+    };
+    let message_key = |key: &str| {
+        Some(if boxed {
+            format!("{key}Distrobox")
+        } else {
+            key.into()
+        })
     };
     let mut lock = InstallationFinding {
         code: "runtime.lock_access".into(),
@@ -100,6 +110,8 @@ fn findings(
         evidence: String::new(),
         remediation: repair.into(),
         guide,
+        message_key: message_key("control.lockAccess"),
+        message_params: BTreeMap::new(),
     };
     let mut result = Vec::new();
     match access {
@@ -110,19 +122,22 @@ fn findings(
             let mut group = InstallationFinding { code:"runtime.groups".into(), state:CheckState::Passed,
                 severity:FindingSeverity::Info, feature:"Process credentials".into(), context:label,
                 title:"Numeric group credentials".into(), evidence:format!("Effective process groups: {}. The required lock GID is {required}.", group_summary(groups)),
-                remediation:repair.into(), guide };
+                remediation:repair.into(), guide, message_key: message_key("control.groupCredentials"),
+                message_params: BTreeMap::new() };
             if !groups.contains(&required) {
                 match configured {
                     Ok(configured) if configured.contains(&required) => {
                         group.state = CheckState::Failed;
                         group.severity = FindingSeverity::Warning;
                         group.title = "Group membership changed after this process started".into();
+                        group.message_key = message_key("control.groupMembershipStale");
                         group.evidence.push_str(" This process has not picked up the account's group membership. Restart the login and service. For Distrobox, stop and re-enter the box too.");
                     }
                     Ok(_) if !allowed => {
                         group.state = CheckState::Failed;
                         group.severity = FindingSeverity::Warning;
                         group.title = "The process lacks the host lock's numeric group".into();
+                        group.message_key = message_key("control.groupMissing");
                         group.evidence.push_str(" Its account database does not include this visible GID either. Check host group setup and container group mappings.");
                     }
                     Err(error) if !allowed => {
@@ -194,22 +209,37 @@ fn evdi_library(
     if !module_loaded {
         return None;
     }
-    let (state, severity, evidence, remediation) = match probe() {
+    let (state, severity, evidence, message_key, params, remediation) = match probe() {
         Ok((major, minor, patch)) => (
             CheckState::Passed,
             FindingSeverity::Info,
             format!("The daemon environment loads libevdi {major}.{minor}.{patch}."),
+            "control.evdiLibraryLoaded",
+            BTreeMap::new(),
             String::new(),
         ),
-        Err(error) => (
-            CheckState::Failed,
-            FindingSeverity::Warning,
-            format!("The host has loaded the evdi module, but the daemon environment cannot load its userspace library: {error:#}"),
-            match context {
-                InstallationContext::Distrobox { name } => format!("Install the library inside the box with distrobox-enter --name {name} -- sudo dnf install --setopt=install_weak_deps=False lian-li-linux-evdi, or libevdi0 on a Debian or Ubuntu box, then restart the daemon service. The host library is not visible inside the box."),
-                _ => "Install libevdi 1.14 or 1.15 where the daemon runs: lian-li-linux-evdi on Fedora, libevdi0 on Debian or Ubuntu, or evdi-dkms on Arch. Then restart the daemon service.".into(),
-            },
-        ),
+        Err(error) => {
+            let (message_key, params, remediation) = match context {
+                InstallationContext::Distrobox { name } => (
+                    "control.evdiLibraryMissingDistrobox",
+                    message_params([("name", name.clone())]),
+                    format!("Install the library inside the box with distrobox-enter --name {name} -- sudo dnf install --setopt=install_weak_deps=False lian-li-linux-evdi, or libevdi0 on a Debian or Ubuntu box, then restart the daemon service. The host library is not visible inside the box."),
+                ),
+                _ => (
+                    "control.evdiLibraryMissing",
+                    BTreeMap::new(),
+                    "Install libevdi 1.14 or 1.15 where the daemon runs: lian-li-linux-evdi on Fedora, libevdi0 on Debian or Ubuntu, or evdi-dkms on Arch. Then restart the daemon service.".into(),
+                ),
+            };
+            (
+                CheckState::Failed,
+                FindingSeverity::Warning,
+                format!("The host has loaded the evdi module, but the daemon environment cannot load its userspace library: {error:#}"),
+                message_key,
+                params,
+                remediation,
+            )
+        }
     };
     let (label, guide) = match context {
         InstallationContext::Native => ("Native daemon".into(), InstallationGuide::Troubleshooting),
@@ -231,6 +261,8 @@ fn evdi_library(
         evidence,
         remediation,
         guide,
+        message_key: Some(message_key.into()),
+        message_params: params,
     })
 }
 
@@ -304,6 +336,11 @@ fn hermes_access_at(sysfs: &Path, nodes: &Path, uid: u32) -> Option<Installation
     } else {
         (CheckState::Passed, format!("Read/write permission granted for {checked} host render node(s). Capture compatibility is checked at startup."))
     };
+    let (message_key, remediation) = if state == CheckState::Passed {
+        ("control.hermesAccessGranted", String::new())
+    } else {
+        ("control.hermesAccess", "Install the current 60-lianli.rules on the host, run sudo udevadm control --reload-rules, then reboot. It includes the Hermes host ACL fix. Distrobox-only installation is insufficient. If access still fails, follow the Hermes permissions section in the setup guide.".into())
+    };
     Some(InstallationFinding {
         code: "runtime.hermes_access".into(),
         state,
@@ -316,12 +353,10 @@ fn hermes_access_at(sysfs: &Path, nodes: &Path, uid: u32) -> Option<Installation
         context: format!("Process UID {uid}"),
         title: "Hermes host render access".into(),
         evidence,
-        remediation: if state == CheckState::Passed {
-            String::new()
-        } else {
-            "Install the current 60-lianli.rules on the host, run sudo udevadm control --reload-rules, then reboot. It includes the Hermes host ACL fix. Distrobox-only installation is insufficient. If access still fails, follow the Hermes permissions section in the setup guide.".into()
-        },
+        remediation,
         guide: InstallationGuide::Troubleshooting,
+        message_key: Some(message_key.into()),
+        message_params: BTreeMap::new(),
     })
 }
 

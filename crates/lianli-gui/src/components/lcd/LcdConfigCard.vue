@@ -26,6 +26,7 @@ import { enumerateSensorsAsOptions, optionForConfig, decodeOption, gaugeTextForS
 import { screenSupportsH264, aio512FrameDefault } from "@/constants/screen";
 import StartupImageDialog from "./StartupImageDialog.vue";
 import { PIXEL_CLEANER_DURATION_OPTIONS } from "@/constants";
+import { useTranslate, type MessageKey } from "@/i18n";
 
 const props = defineProps<{
   entry: LcdConfig;
@@ -38,6 +39,7 @@ const lcd = useLcdStore();
 const ipc = useIpc();
 const dialog = useDialog();
 const message = useMessage();
+const t = useTranslate();
 
 const lcdDevices = computed(() => devices.lcdDevices);
 
@@ -50,7 +52,7 @@ const deviceLabel = computed(() => {
   const device = deviceForEntry();
   return device ? labels.value.get(device.device_id) ?? device.name : "";
 });
-const displayName = computed(() => customName.value || deviceLabel.value || "Screen offline");
+const displayName = computed(() => customName.value || deviceLabel.value || t("lcd.screenOffline"));
 const sharesDevice = computed(() => {
   const device = deviceForEntry();
   if (!device) return false;
@@ -87,14 +89,14 @@ function onSelectDevice(id: string) {
   config.markDirty();
 }
 
-const mediaTypeOptions = [
-  { label: "Image", value: "image" },
-  { label: "Video", value: "video" },
-  { label: "GIF", value: "gif" },
-  { label: "Solid Color", value: "color" },
-  { label: "Sensor Gauge", value: "sensor" },
-  { label: "Custom Template", value: "custom" },
-] as const;
+const mediaTypeOptions = computed(() => [
+  { label: t("lcd.mediaTypes.image"), value: "image" },
+  { label: t("lcd.mediaTypes.video"), value: "video" },
+  { label: t("lcd.mediaTypes.gif"), value: "gif" },
+  { label: t("lcd.configCard.mediaTypeOptions.solidColor"), value: "color" },
+  { label: t("lcd.configCard.mediaTypeOptions.sensorGauge"), value: "sensor" },
+  { label: t("lcd.configCard.mediaTypeOptions.customTemplate"), value: "custom" },
+]);
 
 function onMediaType(v: MediaType) {
   const pathKind = v === "sensor" ? "image" : v;
@@ -215,19 +217,19 @@ async function applyChanges() {
   applying.value = true;
   try {
     await config.save();
-    message.success("Saved and sent to the LCD");
+    message.success(t("lcd.configCard.saved"));
   } catch (error) {
-    message.error(`Save failed: ${error instanceof Error ? error.message : String(error)}`, { duration: 10000 });
+    message.error(t("lcd.configCard.saveFailed", { error: error instanceof Error ? error.message : String(error) }), { duration: 10000 });
   } finally {
     applying.value = false;
   }
 }
 
-const FIT_OPTIONS = [
-  { label: "Stretch", value: "stretch" },
-  { label: "Fit", value: "contain" },
-  { label: "Fill", value: "cover" },
-];
+const FIT_OPTIONS = computed(() => [
+  { label: t("lcd.configCard.fitOptions.stretch"), value: "stretch" },
+  { label: t("lcd.configCard.fitOptions.contain"), value: "contain" },
+  { label: t("lcd.configCard.fitOptions.cover"), value: "cover" },
+]);
 const framing = computed(() => props.entry.framing ?? defaultFraming());
 function setFraming(next: MediaFraming, commit = true) {
   const value = clampFraming(next);
@@ -345,13 +347,13 @@ const previewError = computed(() => {
 });
 const previewCaption = computed(() => {
   const size = previewSize.value ? `${previewSize.value.width}×${previewSize.value.height}` : "";
-  if (previewError.value) return "Preview unavailable";
-  if (props.entry.type === "sensor") return `${size} · live, unsaved`;
+  if (previewError.value) return t("lcd.configCard.previewUnavailable");
+  if (props.entry.type === "sensor") return t("lcd.configCard.captionLive", { size });
   if (isFileMedia.value) {
-    if (!props.entry.path) return `${size} · no file selected`;
-    const fit = FIT_OPTIONS.find((option) => option.value === framing.value.fit)?.label ?? "";
-    const zoom = framing.value.zoom > 1 ? ` · ${framing.value.zoom.toFixed(1)}×` : "";
-    return `${size} · ${fit}${zoom}`;
+    if (!props.entry.path) return t("lcd.configCard.captionNoFile", { size });
+    const fit = FIT_OPTIONS.value.find((option) => option.value === framing.value.fit)?.label ?? "";
+    if (framing.value.zoom > 1) return t("lcd.configCard.captionFitZoom", { size, fit, zoom: framing.value.zoom.toFixed(1) });
+    return t("lcd.configCard.captionFit", { size, fit });
   }
   return size;
 });
@@ -519,10 +521,10 @@ async function deleteTemplate() {
   const id = props.entry.template_id;
   if (!id) return;
   dialog.error({
-    title: "Delete template?",
-    content: "This template will be permanently deleted and removed from all LCD entries.",
-    positiveText: "Delete",
-    negativeText: "Cancel",
+    title: t("lcd.configCard.deleteTemplateTitle"),
+    content: t("lcd.configCard.deleteTemplateContent"),
+    positiveText: t("common.delete"),
+    negativeText: t("common.cancel"),
     onPositiveClick: async () => {
       config.templates = config.templates.filter((t) => t.id !== id);
       for (const e of config.config.lcds) {
@@ -546,10 +548,10 @@ async function openBrowser() {
 
 function removeEntry() {
   dialog.error({
-    title: "Remove LCD entry?",
-    content: `Settings for ${displayName.value} will be removed from the configuration.`,
-    positiveText: "Remove",
-    negativeText: "Cancel",
+    title: t("lcd.configCard.removeEntryTitle"),
+    content: t("lcd.configCard.removeEntryContent", { name: displayName.value }),
+    positiveText: t("common.remove"),
+    negativeText: t("common.cancel"),
     onPositiveClick: () => {
       config.config.lcds.splice(props.index, 1);
       config.markDirty();
@@ -589,10 +591,10 @@ const currentBrightnessError = computed(() => brightnessError(
   lcd.brightnessRequests[selectedDeviceId.value],
 ));
 
-const cleanerDurationOptions = PIXEL_CLEANER_DURATION_OPTIONS.map((opt) => ({
-  label: opt.label,
+const cleanerDurationOptions = computed(() => PIXEL_CLEANER_DURATION_OPTIONS.map((opt) => ({
+  label: t(opt.labelKey),
   key: opt.value,
-}));
+})));
 
 const cleanerTargetId = computed(() => {
   const devId = selectedDeviceId.value || props.entry.serial || "";
@@ -607,6 +609,7 @@ const remainingFormatted = computed(() => {
   return lcd.formattedRemainingFor(cleanerTargetId.value, props.index);
 });
 
+const cleanerProgressKey: MessageKey = "lcd.cleaner.inProgress";
 const isPreparingThis = computed(() => lcd.isPreparing(cleanerTargetId.value));
 const stopPending = ref(false);
 const settingsLocked = computed(() => isCleaningThis.value || isPreparingThis.value || stopPending.value);
@@ -615,10 +618,10 @@ async function handleStartClean(key: string | number) {
   const minutes = Number(key);
   try {
     const result = await lcd.startPixelClean(cleanerTargetId.value, minutes);
-    if (result.started) message.success(`Pixel cleaner started for ${minutes} minutes at 75% brightness`);
-    else if (result.cancelled) message.info("Pixel cleaner preparation cancelled");
+    if (result.started) message.success(t("lcd.cleaner.started", { minutes }));
+    else if (result.cancelled) message.info(t("lcd.cleaner.cancelled"));
   } catch (err) {
-    message.error(`Failed to start pixel cleaner: ${err}`);
+    message.error(t("lcd.cleaner.startFailed", { error: String(err) }));
   }
 }
 
@@ -626,10 +629,10 @@ async function handleStopClean() {
   stopPending.value = true;
   try {
     const result = await lcd.stopPixelClean(cleanerTargetId.value);
-    if (result.stopped) message.info("Pixel cleaner stopped. Previous display restoration requested");
-    else message.warning("This session was not stopped. Refreshed its status from the daemon");
+    if (result.stopped) message.info(t("lcd.cleaner.stopped"));
+    else message.warning(t("lcd.cleaner.notStopped"));
   } catch (err) {
-    message.error(`Failed to stop pixel cleaner: ${err}`);
+    message.error(t("lcd.cleaner.stopFailed", { error: String(err) }));
   } finally {
     stopPending.value = false;
   }
@@ -643,30 +646,30 @@ async function handleStopClean() {
       <EditableName
         :name="customName"
         :label="deviceLabel"
-        empty-label="Screen offline"
-        rename-title="Rename this screen"
+        :empty-label="t('lcd.screenOffline')"
+        :rename-title="t('lcd.configCard.renameTitle')"
         @rename="(name) => names.setLcdEntryName(entry, name)"
       />
       <div class="head-actions">
         <template v-if="entryChanged">
-          <span class="unsaved">Unsaved changes</span>
+          <span class="unsaved">{{ t("lcd.configCard.unsaved") }}</span>
           <n-button
             size="small"
             type="primary"
             :loading="applying"
             :disabled="!daemon.canWrite || settingsLocked"
-            title="Saves every pending change in the app, including other pages, and sends this LCD its new settings"
+            :title="t('lcd.configCard.saveAllTitle')"
             @click="applyChanges"
-          >Save all</n-button>
+          >{{ t("lcd.configCard.saveAll") }}</n-button>
         </template>
         <StartupImageDialog v-if="selectedDevice?.startup_image" :device="selectedDevice" />
         <n-button
           v-if="isPreparingThis"
           size="small"
           quaternary
-          title="Cancel pixel cleaner preparation"
+          :title="t('lcd.cleaner.cancelPreparationTitle')"
           @click="lcd.cancelPixelPreparation(cleanerTargetId)"
-        >Cancel</n-button>
+        >{{ t("common.cancel") }}</n-button>
         <n-button
           v-else-if="isCleaningThis"
           :loading="stopPending"
@@ -675,7 +678,7 @@ async function handleStopClean() {
           type="warning"
           class="cleaner-btn cleaner-btn-running"
           @click="handleStopClean"
-          :title="`Stop pixel conditioning (${remainingFormatted} remaining)`"
+          :title="t('lcd.cleaner.stopTitle', { remaining: remainingFormatted })"
         >
           <template #icon><Sparkles :size="14" /></template>
         </n-button>
@@ -693,7 +696,7 @@ async function handleStopClean() {
             type="warning"
             class="cleaner-btn"
             :disabled="!selectedDeviceId || lcd.preparingCleaner || stopPending"
-            title="Run pixel conditioning to clear image retention"
+            :title="t('lcd.cleaner.runTitle')"
           >
             <template #icon><Sparkles :size="14" /></template>
           </n-button>
@@ -704,56 +707,56 @@ async function handleStopClean() {
           type="error"
           @click="removeEntry"
           :disabled="settingsLocked"
-          title="Delete LCD configuration"
+          :title="t('lcd.configCard.deleteTitle')"
         >
           <template #icon><Trash2 :size="14" /></template>
         </n-button>
       </div>
     </div>
 
-    <div v-if="isPreparingThis" class="card-cleaner-notice">Preparing pixel cleaner…</div>
+    <div v-if="isPreparingThis" class="card-cleaner-notice">{{ t("lcd.cleaner.preparing") }}</div>
     <div v-if="isCleaningThis" class="card-cleaner-notice">
       <Info :size="14" class="cleaner-notice-icon" />
-      <span>
-        Pixel conditioning in progress (<strong>{{ remainingFormatted }}</strong> remaining at 75% brightness). Display settings locked during conditioning.
-      </span>
+      <i18n-t :keypath="cleanerProgressKey" tag="span" scope="global">
+        <template #remaining><strong>{{ remainingFormatted }}</strong></template>
+      </i18n-t>
     </div>
 
     <div class="card-content" :inert="settingsLocked" :class="{ 'card-body-locked': settingsLocked }">
       <n-alert v-if="needsDeviceChoice" type="warning" :show-icon="false" class="assign-alert">
         <div class="field">
-          <label>{{ selectedDevice ? "Another entry also drives this screen. Pick the screen this entry belongs to." : "This screen is not connected. Assign the entry to a connected screen." }}</label>
+          <label>{{ selectedDevice ? t("lcd.configCard.assignShared") : t("lcd.configCard.assignOffline") }}</label>
           <n-select
             :value="selectedDeviceId || null"
             :options="deviceOptions"
             size="small"
-            placeholder="Assign to screen"
+            :placeholder="t('lcd.configCard.assignPlaceholder')"
             @update:value="onSelectDevice"
           />
         </div>
       </n-alert>
       <div class="grid">
       <div class="field">
-        <label class="muted">Media type</label>
+        <label class="muted">{{ t("lcd.configCard.mediaType") }}</label>
         <n-select :value="entry.type" :options="mediaTypeOptions" size="small" @update:value="onMediaType" />
       </div>
       <div v-if="['video', 'gif'].includes(entry.type)" class="field">
-        <label class="muted">FPS</label>
+        <label class="muted">{{ t("lcd.configCard.fps") }}</label>
         <n-input-number :value="entry.fps ?? 30" size="small" :min="1" :max="120" @update:value="onFps" />
       </div>
       <div v-if="entry.type === 'sensor'" class="field">
-        <label class="muted">Update interval (ms)</label>
+        <label class="muted">{{ t("lcd.configCard.updateInterval") }}</label>
         <n-input-number :value="entry.update_interval_ms ?? 1000" size="small" :min="100" :max="10000" :step="100" @update:value="onUpdateInterval" />
       </div>
     </div>
 
     <div class="screen-row">
       <div class="field">
-        <label class="muted">Orientation</label>
+        <label class="muted">{{ t("lcd.configCard.orientation") }}</label>
         <OrientationPicker :model-value="entry.orientation" @update:model-value="onOrientation" />
       </div>
       <div class="field brightness">
-        <label class="muted">Brightness</label>
+        <label class="muted">{{ t("lcd.configCard.brightness") }}</label>
         <LabeledSlider
           :model-value="brightness"
           :min="0"
@@ -764,10 +767,10 @@ async function handleStopClean() {
       </div>
     </div>
     <n-alert v-if="currentBrightnessError" type="error">
-      Could not change screen brightness: {{ currentBrightnessError }}
+      {{ t("lcd.configCard.brightnessError", { error: currentBrightnessError }) }}
     </n-alert>
     <p v-if="selectedDeviceId && !brightnessConfigured" class="hint">
-      Save this LCD configuration to apply brightness.
+      {{ t("lcd.configCard.saveForBrightness") }}
     </p>
 
     <div class="divider" />
@@ -775,7 +778,7 @@ async function handleStopClean() {
     <div v-if="entry.type !== 'custom'" class="media-layout" :class="{ 'with-preview': showPreview }">
       <div class="media-settings">
         <div v-if="isFileMedia" class="field">
-          <label class="muted">Path</label>
+          <label class="muted">{{ t("lcd.configCard.path") }}</label>
           <div class="path-row">
             <n-input v-model:value="localPath" @blur="commitPath" size="small" placeholder="/path/to/media" />
             <n-button size="small" @click="browsePath"><template #icon><FolderOpen :size="14" /></template></n-button>
@@ -783,13 +786,13 @@ async function handleStopClean() {
         </div>
         <div v-if="isFileMedia" class="framing-row">
           <div class="field">
-            <label class="muted">Fit</label>
+            <label class="muted">{{ t("lcd.configCard.fit") }}</label>
             <n-radio-group :value="framing.fit" size="small" @update:value="(fit) => setFraming({ ...framing, fit })">
               <n-radio-button v-for="option in FIT_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</n-radio-button>
             </n-radio-group>
           </div>
           <div class="field zoom">
-            <label class="muted">Zoom</label>
+            <label class="muted">{{ t("lcd.configCard.zoom") }}</label>
             <LabeledSlider
               :model-value="framing.zoom"
               :min="1"
@@ -799,31 +802,31 @@ async function handleStopClean() {
               @update:model-value="(zoom: number) => setFraming({ ...framing, zoom })"
             />
           </div>
-          <n-button size="small" quaternary :disabled="isDefaultFraming(entry.framing)" @click="setFraming(defaultFraming())">Reset</n-button>
+          <n-button size="small" quaternary :disabled="isDefaultFraming(entry.framing)" @click="setFraming(defaultFraming())">{{ t("common.reset") }}</n-button>
         </div>
-        <p v-if="isFileMedia && mediaPreviewUrl" class="hint">Drag the preview to move the image, scroll on it to zoom.</p>
+        <p v-if="isFileMedia && mediaPreviewUrl" class="hint">{{ t("lcd.configCard.dragHint") }}</p>
 
         <div v-if="entry.type === 'color'" class="field">
-          <label class="muted">Color</label>
+          <label class="muted">{{ t("lcd.configCard.color") }}</label>
           <ColorPicker :model-value="entry.rgb ?? [0,0,0]" @update:model-value="(v: any) => { entry.rgb = v; config.markDirty(); }" />
         </div>
 
         <template v-if="entry.type === 'sensor'">
           <div class="grid">
             <div class="field">
-              <label class="muted">Sensor source</label>
+              <label class="muted">{{ t("lcd.configCard.sensorSource") }}</label>
               <SensorSelect :value="sensorSourceValue()" :options="sensorOptions" size="small" filterable @update:value="onSensorSource" />
             </div>
             <div class="field">
-              <label class="muted">Background image</label>
+              <label class="muted">{{ t("lcd.configCard.backgroundImage") }}</label>
               <div class="path-row">
-                <n-input v-model:value="localPath" @blur="commitPath" size="small" placeholder="None (solid color)" clearable @clear="localPath = ''; commitPath()" />
+                <n-input v-model:value="localPath" @blur="commitPath" size="small" :placeholder="t('lcd.configCard.backgroundPlaceholder')" clearable @clear="localPath = ''; commitPath()" />
                 <n-button size="small" @click="browsePath"><template #icon><FolderOpen :size="14" /></template></n-button>
               </div>
             </div>
           </div>
           <div v-if="entry.sensor?.source?.type === 'command'" class="field">
-            <label class="muted">Custom command</label>
+            <label class="muted">{{ t("lcd.configCard.customCommand") }}</label>
             <n-input v-model:value="localCommand" @blur="commitCommand" size="small" />
           </div>
           <SensorGaugeEditor v-if="entry.sensor" :sensor="entry.sensor" />
@@ -841,7 +844,7 @@ async function handleStopClean() {
           @pointercancel="onPreviewPointerUp"
           @wheel="onPreviewWheel"
         >
-          <img v-if="entry.type === 'sensor' && sensorPreview" :src="`data:image/jpeg;base64,${sensorPreview}`" alt="Sensor gauge preview" />
+          <img v-if="entry.type === 'sensor' && sensorPreview" :src="`data:image/jpeg;base64,${sensorPreview}`" :alt="t('lcd.configCard.sensorPreviewAlt')" />
           <div v-else-if="isFileMedia && mediaPreviewUrl" class="framing-box" :style="placement ? percentRect(placement.box) : undefined">
             <video
               v-if="entry.type === 'video'"
@@ -856,14 +859,14 @@ async function handleStopClean() {
               @play="previewPlaying = true"
               @pause="previewPlaying = false"
               @loadedmetadata="onMediaLoaded"
-              @error="mediaPreviewError = 'This video format cannot be previewed here'"
+              @error="mediaPreviewError = t('lcd.configCard.videoUnsupported')"
             />
             <img
               v-else
               class="framed-media"
               :src="mediaPreviewUrl"
               :style="placement ? percentRect(placement.media) : undefined"
-              alt="Media preview"
+              :alt="t('lcd.configCard.mediaPreviewAlt')"
               draggable="false"
               @load="onMediaLoaded"
             />
@@ -876,7 +879,7 @@ async function handleStopClean() {
           <button
             v-if="entry.type === 'video' && mediaPreviewUrl"
             class="preview-play"
-            :title="previewPlaying ? 'Pause preview' : 'Play preview'"
+            :title="previewPlaying ? t('lcd.configCard.pausePreview') : t('lcd.configCard.playPreview')"
             @click="togglePreviewPlayback"
           >
             <Pause v-if="previewPlaying" :size="12" />
@@ -889,11 +892,11 @@ async function handleStopClean() {
     <!-- Custom template -->
     <template v-if="entry.type === 'custom'">
       <div class="template-section">
-        <label class="muted">Template</label>
+        <label class="muted">{{ t("lcd.configCard.template") }}</label>
         <!-- Preview thumbnail + dropdown/buttons on the same row (mirrors Slint). -->
         <div class="template-row">
           <div class="template-preview" :style="{ '--preview-brightness': brightness / 100 }">
-            <img v-if="previewJpeg" :src="`data:image/jpeg;base64,${previewJpeg}`" alt="template preview" />
+            <img v-if="previewJpeg" :src="`data:image/jpeg;base64,${previewJpeg}`" :alt="t('lcd.configCard.templatePreviewAlt')" />
             <div v-else class="preview-ph muted">{{ previewLoading ? "…" : "—" }}</div>
           </div>
           <div class="template-controls">
@@ -905,23 +908,23 @@ async function handleStopClean() {
               @update:value="onTemplateId"
             />
             <div class="template-buttons">
-              <n-button size="small" @click="openEditor()">New</n-button>
-              <n-button size="small" :disabled="!entry.template_id" @click="entry.template_id && openEditor(entry.template_id)">Edit</n-button>
-              <n-button size="small" :disabled="!entry.template_id" @click="duplicateTemplate">Duplicate</n-button>
-              <n-button size="small" class="btn-danger" :disabled="!entry.template_id" @click="deleteTemplate">Delete</n-button>
-              <n-button size="small" @click="openBrowser">Browse Online</n-button>
+              <n-button size="small" @click="openEditor()">{{ t("lcd.configCard.newTemplate") }}</n-button>
+              <n-button size="small" :disabled="!entry.template_id" @click="entry.template_id && openEditor(entry.template_id)">{{ t("common.edit") }}</n-button>
+              <n-button size="small" :disabled="!entry.template_id" @click="duplicateTemplate">{{ t("lcd.configCard.duplicate") }}</n-button>
+              <n-button size="small" class="btn-danger" :disabled="!entry.template_id" @click="deleteTemplate">{{ t("common.delete") }}</n-button>
+              <n-button size="small" @click="openBrowser">{{ t("lcd.configCard.browseOnline") }}</n-button>
             </div>
           </div>
         </div>
         <div class="checkboxes">
-          <n-checkbox :checked="entry.smooth_edges ?? false" @update:checked="(v) => { entry.smooth_edges = v; config.markDirty(); }">Smooth edges</n-checkbox>
-          <n-checkbox v-if="deviceSupportsH264" :checked="entry.custom_h264 ?? true" @update:checked="(v) => { entry.custom_h264 = v; config.markDirty(); }">H264 streaming</n-checkbox>
+          <n-checkbox :checked="entry.smooth_edges ?? false" @update:checked="(v) => { entry.smooth_edges = v; config.markDirty(); }">{{ t("lcd.configCard.smoothEdges") }}</n-checkbox>
+          <n-checkbox v-if="deviceSupportsH264" :checked="entry.custom_h264 ?? true" @update:checked="(v) => { entry.custom_h264 = v; config.markDirty(); }">{{ t("lcd.configCard.h264Streaming") }}</n-checkbox>
         </div>
       </div>
     </template>
 
     <div v-if="supportsCCommand" class="checkboxes">
-      <n-checkbox :checked="entry.aio_512_frame ?? aio512Default" @update:checked="(v) => { entry.aio_512_frame = v; config.markDirty(); }">512-byte HID frame</n-checkbox>
+      <n-checkbox :checked="entry.aio_512_frame ?? aio512Default" @update:checked="(v) => { entry.aio_512_frame = v; config.markDirty(); }">{{ t("lcd.configCard.hidFrame512") }}</n-checkbox>
     </div>
 
     </div>

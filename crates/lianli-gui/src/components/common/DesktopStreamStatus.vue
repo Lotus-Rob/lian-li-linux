@@ -4,7 +4,9 @@ import type { DesktopStreamStatus } from "@/types";
 import { ref } from "vue";
 import { useMessage } from "naive-ui";
 import { useIpc } from "@/composables/useIpc";
+import { useTranslate, type MessageKey } from "@/i18n";
 
+const t = useTranslate();
 const daemon = useDaemonStore();
 const ipc = useIpc();
 const message = useMessage();
@@ -14,44 +16,44 @@ async function retry(stream: DesktopStreamStatus) {
   retrying.value = true;
   try {
     await ipc.request("RetryDesktopDisplay", { bus: stream.bus, address: stream.address, product_id: stream.product_id });
-    message.info("Retry requested. The daemon will retry after worker cleanup and when the desktop session is ready.");
+    message.info(t("service.desktopStream.retryRequested"));
     await daemon.refresh();
   } catch (error) {
     message.error(String(error));
   } finally { retrying.value = false; }
 }
-const labels: Record<DesktopStreamStatus["state"], string> = {
-  waiting_for_session: "Waiting for desktop session",
-  starting: "Starting capture",
-  streaming: "Delivering frames",
-  paused: "Paused",
-  failed: "Failed",
+const labels: Record<DesktopStreamStatus["state"], MessageKey> = {
+  waiting_for_session: "service.desktopStream.state.waitingForSession",
+  starting: "service.desktopStream.state.starting",
+  streaming: "service.desktopStream.state.streaming",
+  paused: "service.desktopStream.state.paused",
+  failed: "service.desktopStream.state.failed",
 };
 </script>
 
 <template>
   <div v-if="daemon.desktopStreams.length" class="stream-grid">
     <n-card v-for="stream in daemon.desktopStreams" :key="`${stream.bus}:${stream.address}`" size="small"
-      :title="`Desktop · TURZX ${stream.product_id.toString(16)}`">
-      <template #header-extra><n-tag size="small" :type="stream.state === 'failed' ? 'error' : stream.state === 'streaming' ? 'success' : 'warning'">{{ labels[stream.state] }}</n-tag></template>
+      :title="t('service.desktopStream.title', { product: stream.product_id.toString(16) })">
+      <template #header-extra><n-tag size="small" :type="stream.state === 'failed' ? 'error' : stream.state === 'streaming' ? 'success' : 'warning'">{{ t(labels[stream.state]) }}</n-tag></template>
       <dl>
         <div><dt>USB</dt><dd>{{ stream.bus }}:{{ stream.address }}</dd></div>
-        <div><dt>Backend</dt><dd>{{ stream.backend ?? 'Pending' }}</dd></div>
-        <div><dt>Transfer</dt><dd>{{ !stream.encoding || stream.encoding.encoder === 'unknown' ? '—' : stream.encoding.encoder === 'turbojpeg' ? 'JPEG' : 'H.264' }}</dd></div>
-        <div><dt>FPS limit</dt><dd>{{ stream.applied_policy?.fps_limit ?? '—' }}</dd></div>
-        <div><dt>Encoder</dt><dd>{{ stream.encoding?.encoder ?? '—' }}</dd></div>
-        <div><dt>Input</dt><dd>{{ !stream.encoding ? '—' : stream.encoding.gpu_input ? 'GPU' : 'CPU' }}</dd></div>
-        <div><dt>Hardware video</dt><dd>{{ !stream.applied_policy ? '—' : stream.applied_policy.hardware_video ? 'Enabled' : 'Disabled' }}</dd></div>
+        <div><dt>{{ t("service.desktopStream.backend") }}</dt><dd>{{ stream.backend ?? t("service.desktopStream.pending") }}</dd></div>
+        <div><dt>{{ t("service.desktopStream.transfer") }}</dt><dd>{{ !stream.encoding || stream.encoding.encoder === 'unknown' ? '—' : stream.encoding.encoder === 'turbojpeg' ? 'JPEG' : 'H.264' }}</dd></div>
+        <div><dt>{{ t("service.desktopStream.fpsLimit") }}</dt><dd>{{ stream.applied_policy?.fps_limit ?? '—' }}</dd></div>
+        <div><dt>{{ t("service.desktopStream.encoder") }}</dt><dd>{{ stream.encoding?.encoder ?? '—' }}</dd></div>
+        <div><dt>{{ t("service.desktopStream.input") }}</dt><dd>{{ !stream.encoding ? '—' : stream.encoding.gpu_input ? 'GPU' : 'CPU' }}</dd></div>
+        <div><dt>{{ t("service.desktopStream.hardwareVideo") }}</dt><dd>{{ !stream.applied_policy ? '—' : t(stream.applied_policy.hardware_video ? 'common.enabled' : 'common.disabled') }}</dd></div>
       </dl>
       <p v-if="stream.error" class="failure">{{ stream.error }}</p>
       <details v-if="stream.fallback_reason || stream.encoding?.cpu_readback_reason || stream.encoding?.software_reason">
-        <summary>Fallback details</summary>
-        <p v-if="stream.encoding?.cpu_readback_reason">{{ stream.encoding.cpu_readback_reason === 'no_dma_buf' ? 'This capture backend supports CPU buffers only.' : 'GPU import or encoding failed. Using CPU buffers.' }}</p>
-        <p v-if="stream.encoding?.software_reason">{{ stream.encoding.software_reason === 'hardware_failed' ? 'Hardware encoder failed during playback.' : 'No usable hardware encoder.' }}</p>
+        <summary>{{ t("service.desktopStream.fallbackDetails") }}</summary>
+        <p v-if="stream.encoding?.cpu_readback_reason">{{ t(stream.encoding.cpu_readback_reason === 'no_dma_buf' ? 'service.desktopStream.cpuOnlyBackend' : 'service.desktopStream.gpuFailed') }}</p>
+        <p v-if="stream.encoding?.software_reason">{{ t(stream.encoding.software_reason === 'hardware_failed' ? 'service.desktopStream.hardwareEncoderFailed' : 'service.desktopStream.noHardwareEncoder') }}</p>
         <p v-if="stream.fallback_reason">{{ stream.fallback_reason }}</p>
       </details>
       <n-button v-if="stream.state === 'failed' && daemon.info?.capabilities.includes('desktop_retry')" size="small"
-        :disabled="!daemon.canWrite || retrying" :loading="retrying" @click="retry(stream)">Retry</n-button>
+        :disabled="!daemon.canWrite || retrying" :loading="retrying" @click="retry(stream)">{{ t("common.retry") }}</n-button>
     </n-card>
   </div>
 </template>

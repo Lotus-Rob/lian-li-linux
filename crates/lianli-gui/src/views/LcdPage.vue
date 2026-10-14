@@ -7,6 +7,7 @@ import { useDevicesStore } from "@/stores/devices";
 import { useLcdScreensStore } from "@/stores/lcdScreens";
 import { useDeviceNamesStore } from "@/stores/deviceNames";
 import { lcdEntryKey, orderedLcdIndices, resolveLcdDevice } from "@/utils/lcdSelection";
+import { useTranslate, type MessageKey } from "@/i18n";
 import LcdConfigCard from "@/components/lcd/LcdConfigCard.vue";
 import MediaAccessNotice from "@/components/lcd/MediaAccessNotice.vue";
 import ManagedMediaImport from "@/components/lcd/ManagedMediaImport.vue";
@@ -16,6 +17,7 @@ const config = useConfigStore();
 const devices = useDevicesStore();
 const screens = useLcdScreensStore();
 const names = useDeviceNamesStore();
+const t = useTranslate();
 
 const entries = computed(() => config.config.lcds);
 const ordered = computed(() => orderedLcdIndices(entries.value, screens.order));
@@ -38,19 +40,20 @@ const selectedRaw = ref(ordered.value[0] ?? 0);
 const selected = computed(() => Math.min(selectedRaw.value, Math.max(0, entries.value.length - 1)));
 const current = computed(() => entries.value[selected.value]);
 
-const MEDIA_META: Record<MediaType, { label: string; icon: typeof Image }> = {
-  image: { label: "Image", icon: Image },
-  video: { label: "Video", icon: Film },
-  gif: { label: "GIF", icon: Film },
-  color: { label: "Solid color", icon: Palette },
-  sensor: { label: "Sensor gauge", icon: Gauge },
-  custom: { label: "Template", icon: LayoutTemplate },
-  doublegauge: { label: "Legacy", icon: Gauge },
-  cooler: { label: "Legacy", icon: Gauge },
+const MEDIA_META: Record<MediaType, { label: MessageKey; icon: typeof Image }> = {
+  image: { label: "lcd.mediaTypes.image", icon: Image },
+  video: { label: "lcd.mediaTypes.video", icon: Film },
+  gif: { label: "lcd.mediaTypes.gif", icon: Film },
+  color: { label: "lcd.mediaTypes.color", icon: Palette },
+  sensor: { label: "lcd.mediaTypes.sensor", icon: Gauge },
+  custom: { label: "lcd.mediaTypes.custom", icon: LayoutTemplate },
+  doublegauge: { label: "lcd.mediaTypes.legacy", icon: Gauge },
+  cooler: { label: "lcd.mediaTypes.legacy", icon: Gauge },
 };
 
 function mediaMeta(entry: LcdConfig) {
-  return MEDIA_META[entry.type] ?? { label: entry.type, icon: Image };
+  const meta = MEDIA_META[entry.type];
+  return meta ? { label: t(meta.label), icon: meta.icon } : { label: entry.type, icon: Image };
 }
 
 const labels = computed(() => devices.labels);
@@ -123,13 +126,13 @@ function summary(entry: LcdConfig): string {
     case "sensor":
       return entry.sensor ? `${entry.sensor.label} ${entry.sensor.unit}`.trim() : "";
     case "custom":
-      return config.templates.find((t) => t.id === entry.template_id)?.name ?? "No template";
+      return config.templates.find((t) => t.id === entry.template_id)?.name ?? t("lcd.page.noTemplate");
     case "color": {
       const [r, g, b] = entry.rgb ?? [0, 0, 0];
       return `rgb(${r}, ${g}, ${b})`;
     }
     default:
-      return entry.path?.split("/").pop() ?? "No file";
+      return entry.path?.split("/").pop() ?? t("lcd.page.noFile");
   }
 }
 
@@ -151,7 +154,7 @@ function addLcd(deviceId: string) {
     <MediaAccessNotice :lcds="entries" :templates="selectedTemplates" @issues="(v) => accessIssues = v">
       <template #actions>
         <n-button v-if="!accessIssues && !importActive" size="tiny" quaternary @click="copiesOpen = !copiesOpen">
-          {{ copiesOpen ? "Hide copies" : "Manage copies" }}
+          {{ copiesOpen ? t("lcd.page.hideCopies") : t("lcd.page.manageCopies") }}
         </n-button>
       </template>
     </MediaAccessNotice>
@@ -163,23 +166,23 @@ function addLcd(deviceId: string) {
     />
 
     <div v-for="device in wirelessImageDevices" :key="device.device_id" class="card wireless-row">
-      <span>{{ names.label(device.device_id, device.name) }} · Wireless</span>
+      <span>{{ t("lcd.page.wirelessDevice", { name: names.label(device.device_id, device.name) }) }}</span>
       <StartupImageDialog :device="device" />
     </div>
 
     <div class="layout">
       <aside class="card lcd-list">
         <div class="list-head">
-          <span class="list-title">Screens</span>
+          <span class="list-title">{{ t("lcd.page.screens") }}</span>
           <n-dropdown trigger="click" :options="addOptions" :disabled="!addOptions.length" @select="(key: string | number) => addLcd(String(key))">
             <n-button
               size="tiny"
               type="primary"
               :disabled="!addOptions.length"
-              :title="devices.lcdDevices.length && !addOptions.length ? 'Every connected screen is already configured' : undefined"
+              :title="devices.lcdDevices.length && !addOptions.length ? t('lcd.page.allConfigured') : undefined"
             >
               <template #icon><Plus :size="13" /></template>
-              Add
+              {{ t("common.add") }}
             </n-button>
           </n-dropdown>
         </div>
@@ -206,8 +209,8 @@ function addLcd(deviceId: string) {
             class="drag-handle"
             role="button"
             tabindex="0"
-            aria-label="Reorder screen"
-            title="Drag, or use the arrow keys, to match the order in your case"
+            :aria-label="t('lcd.page.reorder')"
+            :title="t('lcd.page.reorderHint')"
             @keydown.up.prevent.stop="onHandleKey(position, -1)"
             @keydown.down.prevent.stop="onHandleKey(position, 1)"
             @keydown.enter.stop
@@ -221,17 +224,17 @@ function addLcd(deviceId: string) {
           </span>
           <component :is="mediaMeta(entries[index]).icon" :size="16" class="item-icon" />
           <span class="item-text">
-            <span class="item-name">{{ deviceLabel(entries[index]) ?? "Screen offline" }}</span>
+            <span class="item-name">{{ deviceLabel(entries[index]) ?? t("lcd.screenOffline") }}</span>
             <span class="item-sub">{{ mediaMeta(entries[index]).label }}<template v-if="summary(entries[index])"> · {{ summary(entries[index]) }}</template></span>
           </span>
         </div>
 
         <p v-if="!devices.lcdDevices.length" class="list-empty muted">
           <MonitorOff :size="16" />
-          No LCD devices detected.
+          {{ t("lcd.page.noDevices") }}
         </p>
         <p v-else-if="!entries.length" class="list-empty muted">
-          Click "Add" to configure a screen.
+          {{ t("lcd.page.addHint") }}
         </p>
       </aside>
 
@@ -243,7 +246,7 @@ function addLcd(deviceId: string) {
         :index="selected"
       />
       <div v-else class="card detail empty muted">
-        Select or add a screen to configure it.
+        {{ t("lcd.page.selectHint") }}
       </div>
     </div>
   </div>

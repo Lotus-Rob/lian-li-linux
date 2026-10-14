@@ -13,6 +13,17 @@ import ServiceStatus from "@/components/common/ServiceStatus.vue";
 import StateBackups from "@/components/common/StateBackups.vue";
 import CatalogStorage from "@/components/common/CatalogStorage.vue";
 import { useIpc } from "@/composables/useIpc";
+import { DAEMON_MODE_LABELS } from "@/utils/serviceSetup";
+import { useTranslate } from "@/i18n";
+import { useLanguageStore, type LanguagePreference } from "@/stores/language";
+
+const t = useTranslate();
+const language = useLanguageStore();
+const languageOptions = computed(() => [
+  { label: t("language.system"), value: "system" },
+  { label: "English", value: "en" },
+  { label: "简体中文", value: "zh-CN" },
+]);
 
 const REPO_URL = "https://github.com/sgtaziz/lian-li-linux";
 const daemon = useDaemonStore();
@@ -21,17 +32,19 @@ const thermal = useThermalStore();
 const ipc = useIpc();
 const openExternal = useExternalLink();
 const retryingOpenRgb = ref(false);
+const openrgbRetryQueued = ref(false);
 const openrgbFeedback = ref("");
-watch(() => daemon.info?.instance_id, () => { openrgbFeedback.value = ""; });
+watch(() => daemon.info?.instance_id, () => { openrgbFeedback.value = ""; openrgbRetryQueued.value = false; });
 async function retryOpenRgb() {
   if (retryingOpenRgb.value || !daemon.canWrite) return;
   const instance = daemon.info?.instance_id;
   retryingOpenRgb.value = true;
   openrgbFeedback.value = "";
+  openrgbRetryQueued.value = false;
   try {
     await ipc.request("RetryOpenRgb");
     if (daemon.info?.instance_id !== instance) return;
-    openrgbFeedback.value = "Retry queued using the saved OpenRGB settings. Check the server status for the result.";
+    openrgbRetryQueued.value = true;
     await daemon.refresh();
   } catch (error) { if (daemon.info?.instance_id === instance) openrgbFeedback.value = String(error); }
   finally { retryingOpenRgb.value = false; }
@@ -60,11 +73,13 @@ const openrgbPort = computed({
   },
 });
 const openrgbStatus = computed(() => {
-  if (!daemon.connected) return "Disconnected";
-  if (!daemon.openrgbEnabled) return "Disabled";
-  if (daemon.openrgbError) return "Error";
-  if (daemon.openrgbRunning) return daemon.openrgbPort === null ? "Running" : `Port ${daemon.openrgbPort}`;
-  return "Starting…";
+  if (!daemon.connected) return t("settings.openrgb.disconnected");
+  if (!daemon.openrgbEnabled) return t("common.disabled");
+  if (daemon.openrgbError) return t("common.error");
+  if (daemon.openrgbRunning) {
+    return daemon.openrgbPort === null ? t("settings.openrgb.running") : t("settings.openrgb.port", { port: daemon.openrgbPort });
+  }
+  return t("settings.openrgb.starting");
 });
 const openrgbDot = computed<"danger" | "success" | "warning" | "muted">(() =>
   !daemon.connected || !daemon.openrgbEnabled
@@ -82,11 +97,11 @@ const gpu = computed(() => config.config.thermal_alert.gpu);
 const thermalStatusText = computed(() => {
   switch (thermal.status) {
     case "active":
-      return "Active";
+      return t("settings.thermal.active");
     case "monitoring":
-      return "Monitoring";
+      return t("settings.thermal.monitoring");
     default:
-      return "Disabled";
+      return t("common.disabled");
   }
 });
 const thermalStatusColor = computed<"danger" | "success" | "muted">(() =>
@@ -108,10 +123,10 @@ function onDefaultFps(v: number | null) {
   config.markDirty();
 }
 
-const hidBackendOptions = [
-  { label: "HIDRAW (recommended)", value: "hidraw" },
-  { label: "LibUSB (direct)", value: "rusb" },
-];
+const hidBackendOptions = computed(() => [
+  { label: t("settings.configuration.hidraw"), value: "hidraw" },
+  { label: t("settings.configuration.libusb"), value: "rusb" },
+]);
 
 function onHidBackend(v: "hidraw" | "rusb") {
   config.config.hid_backend = v;
@@ -123,9 +138,25 @@ function onHidBackend(v: "hidraw" | "rusb") {
   <div class="page settings-page">
     <section class="card">
       <div class="section-head">
-        <h2 class="section-title">Configuration</h2>
+        <h2 class="section-title">{{ t("language.title") }}</h2>
       </div>
-      <div class="kv"><span class="muted">HID Backend</span>
+      <div class="kv"><span class="muted">{{ t("language.label") }}</span>
+        <n-select
+          :value="language.preference"
+          :options="languageOptions"
+          size="small"
+          style="width: 220px"
+          @update:value="(v: LanguagePreference) => language.set(v)"
+        />
+      </div>
+      <p class="hint">{{ t("language.hint") }}</p>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h2 class="section-title">{{ t("settings.configuration.title") }}</h2>
+      </div>
+      <div class="kv"><span class="muted">{{ t("settings.configuration.hidBackend") }}</span>
         <n-select
           :value="config.config.hid_backend"
           :options="hidBackendOptions"
@@ -135,29 +166,29 @@ function onHidBackend(v: "hidraw" | "rusb") {
         />
       </div>
       <div class="kv">
-        <span class="muted">Turn off LCDs on shutdown</span>
+        <span class="muted">{{ t("settings.configuration.turnOffLcds") }}</span>
         <n-switch
           :value="config.config.turn_off_lcds_on_shutdown"
-          aria-label="Turn off LCDs on shutdown"
+          :aria-label="t('settings.configuration.turnOffLcds')"
           @update:value="(v: boolean) => { config.config.turn_off_lcds_on_shutdown = v; config.markDirty(); }"
         />
       </div>
-      <div class="kv"><span class="muted">LCD count</span><span>{{ config.config.lcds.length }}</span></div>
-      <div class="kv"><span class="muted">Fan curve count</span><span>{{ config.config.fan_curves.length }}</span></div>
-      <div class="kv"><span class="muted">Max FPS Limit</span>
+      <div class="kv"><span class="muted">{{ t("settings.configuration.lcdCount") }}</span><span>{{ config.config.lcds.length }}</span></div>
+      <div class="kv"><span class="muted">{{ t("settings.configuration.fanCurveCount") }}</span><span>{{ config.config.fan_curves.length }}</span></div>
+      <div class="kv"><span class="muted">{{ t("settings.configuration.maxFps") }}</span>
         <n-input-number :value="config.config.default_fps" :min="1" :max="120" size="small" @update:value="onDefaultFps" />
       </div>
       <div class="kv">
-        <span class="muted">Hardware video acceleration</span>
+        <span class="muted">{{ t("settings.configuration.hardwareVideo") }}</span>
         <n-switch
           :value="config.config.hardware_video"
           :disabled="!daemon.info?.capabilities.includes('hardware_video')"
-          aria-label="Hardware video acceleration"
+          :aria-label="t('settings.configuration.hardwareVideo')"
           @update:value="(v: boolean) => { config.config.hardware_video = v; config.markDirty(); }"
         />
       </div>
-      <p class="hint">Uses available GPU video encoders and decoders, with software fallback. Save to apply to active streams.</p>
-      <p v-if="daemon.connected && !daemon.info?.capabilities.includes('hardware_video')" class="hint">Update the daemon to manage hardware video from Settings.</p>
+      <p class="hint">{{ t("settings.configuration.hardwareVideoHint") }}</p>
+      <p v-if="daemon.connected && !daemon.info?.capabilities.includes('hardware_video')" class="hint">{{ t("settings.configuration.hardwareVideoUpdate") }}</p>
     </section>
 
     <ServiceStatus />
@@ -167,52 +198,49 @@ function onHidBackend(v: "hidraw" | "rusb") {
 
     <section class="card">
       <div class="section-head">
-        <h2 class="section-title">Daemon Status</h2>
+        <h2 class="section-title">{{ t("settings.daemon.title") }}</h2>
         <span class="status-tag">
           <StatusDot :color="daemon.connected ? 'success' : 'danger'" />
-          {{ daemon.connected ? "Connected" : "Offline" }}
+          {{ daemon.connected ? t("settings.daemon.connected") : t("common.offline") }}
         </span>
       </div>
-      <div class="kv"><span class="muted">Socket</span><span class="mono">{{ daemon.socketPath || "—" }}</span></div>
-      <div class="kv"><span class="muted">Daemon version</span><span>{{ daemon.version || "Unavailable" }}</span></div>
+      <div class="kv"><span class="muted">{{ t("settings.daemon.socket") }}</span><span class="mono">{{ daemon.socketPath || "—" }}</span></div>
+      <div class="kv"><span class="muted">{{ t("settings.daemon.version") }}</span><span>{{ daemon.version || t("common.unavailable") }}</span></div>
       <template v-if="daemon.info">
-        <div class="kv"><span class="muted">Configuration mode</span><span>{{ daemon.info.mode }}</span></div>
-        <div class="kv"><span class="muted">Configuration file</span><span class="mono">{{ daemon.info.config_path }}</span></div>
+        <div class="kv"><span class="muted">{{ t("settings.daemon.mode") }}</span><span>{{ t(DAEMON_MODE_LABELS[daemon.info.mode]) }}</span></div>
+        <div class="kv"><span class="muted">{{ t("settings.daemon.file") }}</span><span class="mono">{{ daemon.info.config_path }}</span></div>
       </template>
     </section>
 
     <!-- Thermal alert -->
     <section class="card">
       <div class="section-head">
-        <h2 class="section-title">Thermal Alert</h2>
+        <h2 class="section-title">{{ t("settings.thermal.title") }}</h2>
         <span class="status-tag" :class="{ 'pulse-danger': thermal.status === 'active' }">
           <StatusDot :color="thermalStatusColor" :pulse="thermal.status === 'active'" />
           {{ thermalStatusText }}
         </span>
       </div>
-      <p class="hint">
-        When CPU/GPU temperature exceeds the threshold, all RGB devices switch to the alert color
-        until temperature drops below the threshold.
-      </p>
+      <p class="hint">{{ t("settings.thermal.hint") }}</p>
 
       <div class="thermal-grid">
         <div class="source">
           <div class="source-head">CPU</div>
-          <n-checkbox :checked="cpu.enabled" @update:checked="(v) => patchCpu({ enabled: v })">Enable</n-checkbox>
+          <n-checkbox :checked="cpu.enabled" @update:checked="(v) => patchCpu({ enabled: v })">{{ t("settings.thermal.enable") }}</n-checkbox>
           <div class="field">
-            <label class="muted">Threshold (°C)</label>
+            <label class="muted">{{ t("settings.thermal.threshold") }}</label>
             <n-input-number :value="cpu.threshold" :min="20" :max="120" size="small" :disabled="!cpu.enabled" @update:value="(v) => patchCpu({ threshold: v ?? 80 })" />
           </div>
-          <ColorPicker label="Alert color" :model-value="cpu.alert_color" :disabled="!cpu.enabled" @update:model-value="(v: any) => patchCpu({ alert_color: v })" />
+          <ColorPicker :label="t('settings.thermal.alertColor')" :model-value="cpu.alert_color" :disabled="!cpu.enabled" @update:model-value="(v: any) => patchCpu({ alert_color: v })" />
         </div>
         <div class="source">
           <div class="source-head">GPU</div>
-          <n-checkbox :checked="gpu.enabled" @update:checked="(v) => patchGpu({ enabled: v })">Enable</n-checkbox>
+          <n-checkbox :checked="gpu.enabled" @update:checked="(v) => patchGpu({ enabled: v })">{{ t("settings.thermal.enable") }}</n-checkbox>
           <div class="field">
-            <label class="muted">Threshold (°C)</label>
+            <label class="muted">{{ t("settings.thermal.threshold") }}</label>
             <n-input-number :value="gpu.threshold" :min="20" :max="120" size="small" :disabled="!gpu.enabled" @update:value="(v) => patchGpu({ threshold: v ?? 80 })" />
           </div>
-          <ColorPicker label="Alert color" :model-value="gpu.alert_color" :disabled="!gpu.enabled" @update:model-value="(v: any) => patchGpu({ alert_color: v })" />
+          <ColorPicker :label="t('settings.thermal.alertColor')" :model-value="gpu.alert_color" :disabled="!gpu.enabled" @update:model-value="(v: any) => patchGpu({ alert_color: v })" />
         </div>
       </div>
     </section>
@@ -223,40 +251,37 @@ function onHidBackend(v: "hidraw" | "rusb") {
         <h2 class="section-title">OpenRGB</h2>
         <span class="status-tag"><StatusDot :color="openrgbDot" />{{ openrgbStatus }}</span>
       </div>
-      <n-checkbox v-model:checked="openrgbEnabled" style="margin-top: 1rem;">Enable OpenRGB SDK server</n-checkbox>
+      <n-checkbox v-model:checked="openrgbEnabled" style="margin-top: 1rem;">{{ t("settings.openrgb.enableServer") }}</n-checkbox>
       <OpenRgbRegionsToggle v-if="openrgbEnabled" />
       <n-alert v-if="daemon.connected && daemon.openrgbEnabled && daemon.openrgbError" type="error" style="margin-top: 1rem;">{{ daemon.openrgbError }}</n-alert>
-      <n-button v-if="daemon.connected && daemon.openrgbEnabled && daemon.openrgbError && !daemon.openrgbRunning" :loading="retryingOpenRgb" :disabled="retryingOpenRgb || !daemon.canWrite || !daemon.info?.capabilities.includes('openrgb_retry')" @click="retryOpenRgb">Retry OpenRGB</n-button>
-      <p v-if="daemon.openrgbError && daemon.connected" class="hint">Retry uses the saved port. Save to apply edits.</p>
+      <n-button v-if="daemon.connected && daemon.openrgbEnabled && daemon.openrgbError && !daemon.openrgbRunning" :loading="retryingOpenRgb" :disabled="retryingOpenRgb || !daemon.canWrite || !daemon.info?.capabilities.includes('openrgb_retry')" @click="retryOpenRgb">{{ t("settings.openrgb.retry") }}</n-button>
+      <p v-if="daemon.openrgbError && daemon.connected" class="hint">{{ t("settings.openrgb.retryHint") }}</p>
+      <p v-if="openrgbRetryQueued" class="hint">{{ t("settings.openrgb.retryQueued") }}</p>
       <p v-if="openrgbFeedback" class="hint">{{ openrgbFeedback }}</p>
       <div class="field" v-if="openrgbEnabled">
-        <label class="muted">Port</label>
+        <label class="muted">{{ t("settings.openrgb.portLabel") }}</label>
         <n-input-number v-model:value="openrgbPort" :min="1" :max="65535" size="small" />
       </div>
-      <p class="hint" v-if="openrgbEnabled">
-        The server binds to a TCP port without authentication. While enabled, the daemon will not apply its own RGB effects.
-      </p>
+      <p class="hint" v-if="openrgbEnabled">{{ t("settings.openrgb.authWarning") }}</p>
     </section>
 
     <!-- RGB Drift Detection -->
     <section class="card">
       <div class="section-head">
-        <h2 class="section-title">RGB Drift Detection</h2>
+        <h2 class="section-title">{{ t("settings.drift.title") }}</h2>
         <span class="status-tag">
           <StatusDot :color="config.config.rgb_drift_detection_enabled ? 'success' : 'muted'" />
-          {{ config.config.rgb_drift_detection_enabled ? "Active" : "Disabled" }}
+          {{ config.config.rgb_drift_detection_enabled ? t("settings.drift.active") : t("common.disabled") }}
         </span>
       </div>
-      <p class="hint">
-        Re-applies saved RGB when a wireless device's firmware resets its lighting. Wireless devices only.
-      </p>
+      <p class="hint">{{ t("settings.drift.hint") }}</p>
       <n-checkbox
         style="margin-top: 1rem;"
         :checked="config.config.rgb_drift_detection_enabled"
         @update:checked="(v: boolean) => { config.config.rgb_drift_detection_enabled = v; config.markDirty(); }"
-      >Enable drift detection</n-checkbox>
+      >{{ t("settings.drift.enable") }}</n-checkbox>
       <div class="field" v-if="config.config.rgb_drift_detection_enabled">
-        <label class="muted">Check interval (ms)</label>
+        <label class="muted">{{ t("settings.drift.interval") }}</label>
         <n-input-number
           :value="config.config.rgb_drift_detection_interval_ms"
           :min="100"
@@ -271,10 +296,10 @@ function onHidBackend(v: "hidraw" | "rusb") {
     <!-- About -->
     <section class="card">
       <div class="section-head">
-        <h2 class="section-title">About</h2>
+        <h2 class="section-title">{{ t("settings.about.title") }}</h2>
       </div>
       <p class="about-line">
-        Open-source Linux replacement for L-Connect 3
+        {{ t("settings.about.tagline") }}
         <span class="muted"> · v{{ appVersion }}</span>
       </p>
       <button class="repo-link" @click="openExternal(REPO_URL)">

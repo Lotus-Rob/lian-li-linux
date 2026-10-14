@@ -1,4 +1,5 @@
 import type { SensorInfo, SensorSource, SensorSourceConfig } from "@/types";
+import { tr } from "@/i18n";
 
 export interface SelectOption {
   label: string;
@@ -25,7 +26,7 @@ export function enumerateSensorsAsOptions(
     value: JSON.stringify(s.source),
   }));
   if (includeCommand) {
-    opts.push({ label: "Custom command", value: "command" });
+    opts.push({ label: tr("fans.sensorOptions.customCommand"), value: "command" });
   }
   return opts;
 }
@@ -38,7 +39,7 @@ export function sourceConfigsAsOptions(
     label: formatSensorLabel(s),
     value: JSON.stringify(sourceToConfig(s.source)),
   }));
-  if (includeCommand) options.push({ label: "Custom command", value: "command" });
+  if (includeCommand) options.push({ label: tr("fans.sensorOptions.customCommand"), value: "command" });
   return options;
 }
 
@@ -58,7 +59,7 @@ function formatSensorLabel(s: SensorInfo): string {
   if (s.display_name) {
     return unit ? `${s.display_name} (${unit})` : s.display_name;
   }
-  const sensor = s.sensor_name?.sensor_name ?? "sensor";
+  const sensor = s.sensor_name?.sensor_name ?? tr("fans.sensorOptions.sensorFallback");
   const device = s.sensor_name?.device_name;
   let name = device && device !== sensor ? `${device}: ${sensor}` : sensor;
   if (s.source?.type === "hwmon" && s.source.name && !name.includes(s.source.name)) {

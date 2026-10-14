@@ -9,10 +9,12 @@ import { useConfigStore } from "@/stores/config";
 import { useLcdStore, LCD_TEMPLATES_CHANGED_EVENT, type CatalogInstallStatus } from "@/stores/lcd";
 import { emit } from "@tauri-apps/api/event";
 import { boundedFetch } from "@/utils/boundedFetch";
+import { useTranslate } from "@/i18n";
 
 const config = useConfigStore();
 const lcd = useLcdStore();
 const openExternal = useExternalLink();
+const t = useTranslate();
 
 const CATALOG_URL =
   "https://raw.githubusercontent.com/sgtaziz/lian-li-linux/main/templates/default_templates.json";
@@ -58,12 +60,12 @@ async function fetchCatalog() {
     const blob = await boundedFetch(CATALOG_URL, 1024 * 1024, controller.signal);
     const manifest: CatalogManifest = JSON.parse(await blob.text());
     if (manifest.schema_version !== 1) {
-      throw new Error(`unsupported catalog schema version ${manifest.schema_version}`);
+      throw new Error(t("editor.browser.unsupportedSchema", { version: manifest.schema_version }));
     }
     if (!Array.isArray(manifest.templates) || manifest.templates.length > 128
       || manifest.templates.some((t) => !t || [t.id, t.name, t.folder, t.preview, t.min_daemon_version].some((value) => typeof value !== "string" || value.length > 512))
       || new Set(manifest.templates.map((t) => t.id)).size !== manifest.templates.length) {
-      throw new Error("Catalog must contain at most 128 templates with unique IDs and valid metadata");
+      throw new Error(t("editor.browser.invalidCatalog"));
     }
     const ver = await getVersion().catch(() => null);
     if (controller.signal.aborted) return;
@@ -72,7 +74,7 @@ async function fetchCatalog() {
       : manifest.templates;
     void loadPreviews(templates.value, controller);
   } catch (e) {
-    if (!controller.signal.aborted) error.value = `${e}. Use Refresh to retry.`;
+    if (!controller.signal.aborted) error.value = t("editor.browser.catalogError", { error: String(e) });
   } finally {
     loading.value = false;
   }
@@ -94,30 +96,30 @@ async function loadPreviews(items: CatalogTemplate[], controller: AbortControlle
   let cachedBytes = 0;
   await Promise.all(Array.from({ length: 4 }, async () => {
     while (!controller.signal.aborted && next < items.length) {
-      const t = items[next++];
+      const item = items[next++];
       try {
-        if (cachedBytes >= 16 * 1024 * 1024) throw new Error("Preview cache limit reached");
-        const blob = await boundedFetch(`${ASSET_BASE}/${t.folder}/${t.preview}`, 1024 * 1024, controller.signal);
+        if (cachedBytes >= 16 * 1024 * 1024) throw new Error(t("editor.browser.previewCacheFull"));
+        const blob = await boundedFetch(`${ASSET_BASE}/${item.folder}/${item.preview}`, 1024 * 1024, controller.signal);
         if (controller.signal.aborted) return;
-        if (cachedBytes + blob.size > 16 * 1024 * 1024) throw new Error("Preview cache limit reached");
+        if (cachedBytes + blob.size > 16 * 1024 * 1024) throw new Error(t("editor.browser.previewCacheFull"));
         cachedBytes += blob.size;
-        previewCache.value[t.id] = URL.createObjectURL(blob);
+        previewCache.value[item.id] = URL.createObjectURL(blob);
       } catch (e) {
-        if (!controller.signal.aborted) previewErrors.value[t.id] = `${e}. Use Refresh to retry previews.`;
+        if (!controller.signal.aborted) previewErrors.value[item.id] = t("editor.browser.previewError", { error: String(e) });
       }
     }
   }));
 }
 
-async function install(t: CatalogTemplate) {
-  if (startingInstall.value || monitoringInstall.value || installState.value[t.id] === "installing") return;
+async function install(entry: CatalogTemplate) {
+  if (startingInstall.value || monitoringInstall.value || installState.value[entry.id] === "installing") return;
   startingInstall.value = true;
-  installState.value[t.id] = "installing";
+  installState.value[entry.id] = "installing";
   try {
-    await monitorInstall(await lcd.installTemplate(t));
+    await monitorInstall(await lcd.installTemplate(entry));
   } catch (e) {
-    installState.value[t.id] = "error";
-    error.value = `Installation could not be confirmed: ${e}. Use Check install before retrying; daemon work may still finish.`;
+    installState.value[entry.id] = "error";
+    error.value = t("editor.browser.installUnconfirmedMayFinish", { error: String(e) });
   } finally {
     startingInstall.value = false;
   }
@@ -128,9 +130,9 @@ async function checkInstall() {
   try {
     const status = await lcd.catalogInstallStatus();
     if (status) await monitorInstall(status);
-    else installProgress.value = "No catalog installation recorded by this daemon.";
+    else installProgress.value = t("editor.browser.noInstallRecorded");
   } catch (e) {
-    installProgress.value = `Install status unavailable: ${e}. Use Check install to retry.`;
+    installProgress.value = t("editor.browser.statusUnavailable", { error: String(e) });
   }
 }
 
@@ -144,24 +146,24 @@ async function monitorInstall(initial: CatalogInstallStatus) {
         ? (status.error ? "error" : "installed") : "installing";
       if (status.finished) {
         if (status.error) throw new Error(status.error);
-        installProgress.value = `Saved ${status.template_id}.`;
+        installProgress.value = t("editor.browser.installSaved", { id: status.template_id });
         await emit(LCD_TEMPLATES_CHANGED_EVENT);
         await config.load();
         installedIds.value = new Set(config.templates.map((template) => template.id));
         return;
       }
-      installProgress.value = `Installing ${status.template_id}… Closing this window leaves daemon installation running.`;
+      installProgress.value = t("editor.browser.installing", { id: status.template_id });
       await new Promise((resolve) => setTimeout(resolve, 1000));
       if (disposed) return;
       const next = await lcd.catalogInstallStatus();
       if (!next || next.operation_id !== initial.operation_id) {
-        throw new Error("Daemon or installation changed. Reload templates and check the latest install status");
+        throw new Error(t("editor.browser.installChanged"));
       }
       status = next;
     }
   } catch (e) {
     installState.value[initial.template_id] = "error";
-    installProgress.value = `Installation could not be confirmed: ${e}. Use Check install before retrying.`;
+    installProgress.value = t("editor.browser.installUnconfirmed", { error: String(e) });
   } finally {
     monitoringInstall.value = false;
   }
@@ -184,24 +186,24 @@ function previewAspect(t: CatalogTemplate): string {
 <template>
   <div class="browser-window">
     <div class="topbar">
-      <span class="title">Template Browser</span>
-      <button class="guide" title="Open publishing guide in your browser" @click="openExternal(PUBLISHING_URL)">
-        <ExternalLink :size="13" /> Publishing Guide
+      <span class="title">{{ t("editor.browser.title") }}</span>
+      <button class="guide" :title="t('editor.browser.publishingGuideTooltip')" @click="openExternal(PUBLISHING_URL)">
+        <ExternalLink :size="13" /> {{ t("editor.browser.publishingGuide") }}
       </button>
       <div class="spacer" />
-      <n-button size="small" quaternary :disabled="monitoringInstall" @click="checkInstall">Check install</n-button>
+      <n-button size="small" quaternary :disabled="monitoringInstall" @click="checkInstall">{{ t("editor.browser.checkInstall") }}</n-button>
       <n-button size="small" quaternary :loading="loading" @click="fetchCatalog">
         <template #icon><RefreshCw :size="14" /></template>
-        Refresh
+        {{ t("common.refresh") }}
       </n-button>
-      <n-button size="small" quaternary @click="closeWindow"><template #icon><X :size="14" /></template>Close</n-button>
+      <n-button size="small" quaternary @click="closeWindow"><template #icon><X :size="14" /></template>{{ t("common.close") }}</n-button>
     </div>
 
     <div class="content">
       <p v-if="installProgress" role="status">{{ installProgress }}</p>
       <div v-if="loading" class="state">
         <Loader2 :size="28" class="spin" />
-        <span>Loading catalog…</span>
+        <span>{{ t("editor.browser.loadingCatalog") }}</span>
       </div>
 
       <div v-else-if="error" class="state error">
@@ -210,34 +212,34 @@ function previewAspect(t: CatalogTemplate): string {
       </div>
 
       <div v-else-if="!templates.length" class="state muted">
-        No templates available.
+        {{ t("editor.browser.noTemplates") }}
       </div>
 
       <div v-else class="grid">
-        <div v-for="t in templates" :key="t.id" class="card tpl-card">
-          <div class="preview" :style="{ aspectRatio: previewAspect(t) }">
-            <img v-if="previewCache[t.id]" :src="previewCache[t.id]" alt="" />
-            <div v-else class="preview-ph" :title="previewErrors[t.id]">{{ previewErrors[t.id] ? 'Preview unavailable — Refresh to retry' : '' }}</div>
+        <div v-for="tpl in templates" :key="tpl.id" class="card tpl-card">
+          <div class="preview" :style="{ aspectRatio: previewAspect(tpl) }">
+            <img v-if="previewCache[tpl.id]" :src="previewCache[tpl.id]" alt="" />
+            <div v-else class="preview-ph" :title="previewErrors[tpl.id]">{{ previewErrors[tpl.id] ? t("editor.browser.previewUnavailable") : "" }}</div>
           </div>
           <div class="info">
-            <div class="name">{{ t.name }}</div>
-            <div class="author muted" v-if="t.author">by {{ t.author }}</div>
+            <div class="name">{{ tpl.name }}</div>
+            <div class="author muted" v-if="tpl.author">{{ t("editor.browser.byAuthor", { author: tpl.author }) }}</div>
             <div class="badges">
-              <span class="badge" v-if="t.base_width">{{ t.base_width }}×{{ t.base_height }}</span>
-              <span class="badge" v-if="t.rotated">Rotated</span>
+              <span class="badge" v-if="tpl.base_width">{{ tpl.base_width }}×{{ tpl.base_height }}</span>
+              <span class="badge" v-if="tpl.rotated">{{ t("editor.browser.rotated") }}</span>
             </div>
-            <div class="desc muted">{{ t.description }}</div>
+            <div class="desc muted">{{ tpl.description }}</div>
             <n-button
               size="small"
               type="primary"
-              :disabled="installedIds.has(t.id) || startingInstall || monitoringInstall"
-              :loading="installState[t.id] === 'installing'"
-              @click="install(t)"
+              :disabled="installedIds.has(tpl.id) || startingInstall || monitoringInstall"
+              :loading="installState[tpl.id] === 'installing'"
+              @click="install(tpl)"
             >
-              <template v-if="installState[t.id] === 'installing'" #icon><Loader2 :size="14" class="spin" /></template>
-              <template v-else-if="installState[t.id] === 'installed' || installedIds.has(t.id)" #icon><CheckCircle :size="14" /></template>
+              <template v-if="installState[tpl.id] === 'installing'" #icon><Loader2 :size="14" class="spin" /></template>
+              <template v-else-if="installState[tpl.id] === 'installed' || installedIds.has(tpl.id)" #icon><CheckCircle :size="14" /></template>
               <template v-else #icon><Download :size="14" /></template>
-              {{ installedIds.has(t.id) ? "Installed" : "Install" }}
+              {{ installedIds.has(tpl.id) ? t("editor.browser.installed") : t("editor.browser.install") }}
             </n-button>
           </div>
         </div>

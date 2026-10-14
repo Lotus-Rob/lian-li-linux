@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from "vue";
 import { useRoute } from "vue-router";
-import { darkTheme, type GlobalTheme, type GlobalThemeOverrides } from "naive-ui";
+import { darkTheme, dateZhCN, zhCN, type GlobalTheme, type GlobalThemeOverrides } from "naive-ui";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useDaemonStore } from "@/stores/daemon";
 import { useConfigStore } from "@/stores/config";
 import { useThemeStore } from "@/stores/theme";
+import { useLanguageStore } from "@/stores/language";
 import { LCD_TEMPLATES_CHANGED_EVENT } from "@/stores/lcd";
 import AppSidebar from "@/components/layout/AppSidebar.vue";
 import AppHeader from "@/components/layout/AppHeader.vue";
@@ -15,7 +16,10 @@ import CompatibilityNotice from "@/components/common/CompatibilityNotice.vue";
 const daemon = useDaemonStore();
 const config = useConfigStore();
 const theme = useThemeStore();
+const language = useLanguageStore();
 const route = useRoute();
+const naiveLocale = computed(() => (language.locale === "zh-CN" ? zhCN : null));
+const naiveDateLocale = computed(() => (language.locale === "zh-CN" ? dateZhCN : null));
 
 // Secondary windows (editor/browser) render standalone, without the shell.
 const isSecondaryWindow = computed(
@@ -109,7 +113,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <n-config-provider :theme="naiveTheme" :theme-overrides="themeOverrides">
+  <n-config-provider
+    :theme="naiveTheme"
+    :theme-overrides="themeOverrides"
+    :locale="naiveLocale"
+    :date-locale="naiveDateLocale"
+  >
     <n-message-provider>
       <n-dialog-provider>
         <n-notification-provider>

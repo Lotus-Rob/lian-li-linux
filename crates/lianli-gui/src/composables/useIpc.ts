@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { PollResult } from "@/types";
+import { tr } from "@/i18n";
 
 /**
  * Thin wrapper around the Rust `ipc_request` command.
@@ -27,10 +28,11 @@ export function useIpc() {
     async openEditorWindow(templateId?: string): Promise<void> {
       return invoke<void>("open_editor_window", {
         templateId: templateId ?? null,
+        title: tr("editor.window.editorTitle"),
       });
     },
     async openBrowserWindow(): Promise<void> {
-      return invoke<void>("open_browser_window");
+      return invoke<void>("open_browser_window", { title: tr("editor.window.browserTitle") });
     },
   };
 }

@@ -1,19 +1,21 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useMessage } from "naive-ui";
 import { useInstallationStore } from "@/stores/installation";
 import { useDaemonStore } from "@/stores/daemon";
+import { useTranslate } from "@/i18n";
 
+const t = useTranslate();
 const installation = useInstallationStore();
 const daemon = useDaemonStore();
 const message = useMessage();
 const logSource = ref<string | null>(null);
-const options = [
-  { label: "Connected daemon (automatic)", value: "auto" },
-  { label: "User daemon", value: "user_daemon" },
-  { label: "System daemon", value: "system_daemon" },
-];
+const options = computed(() => [
+  { label: t("service.diagnostics.sourceAuto"), value: "auto" },
+  { label: t("service.diagnostics.sourceUser"), value: "user_daemon" },
+  { label: t("service.diagnostics.sourceSystem"), value: "system_daemon" },
+]);
 const preview = ref<{ id: number; text: string; can_save: boolean } | null>(null);
 const loading = ref(false);
 const saving = ref(false);
@@ -31,7 +33,7 @@ async function prepare(savedFile = false) {
       media: daemon.mediaPreparation,
       desktop_streams: daemon.desktopStreams,
       log_source: logSource.value === "auto" ? null : logSource.value,
-    } });
+    }, ...(savedFile ? { title: t("service.diagnostics.pickLogsTitle") } : {}) });
     if (result) {
       preview.value = result;
       show.value = true;
@@ -48,7 +50,7 @@ async function save() {
   saving.value = true;
   try {
     if (await invoke<boolean>("diagnostic_save", { id: preview.value.id })) {
-      message.success("Diagnostic report saved locally");
+      message.success(t("service.diagnostics.saved"));
     }
   } catch (reason) {
     message.error(String(reason));
@@ -59,25 +61,25 @@ async function save() {
 </script>
 
 <template>
-  <n-card title="Diagnostic export">
-    <p>Preview a report from the displayed installation results. Redaction is enabled: configuration, environment, container names and capture-credential fields are excluded, and private details in log text are filtered. Nothing is uploaded.</p>
-    <n-form-item label="Required daemon logs">
+  <n-card :title="t('service.diagnostics.title')">
+    <p>{{ t("service.diagnostics.intro") }}</p>
+    <n-form-item :label="t('service.diagnostics.logSource')">
       <n-select :value="logSource ?? 'auto'" :options="options" :disabled="loading || saving" @update:value="logSource = $event" />
     </n-form-item>
-    <p>Includes up to 100 messages from the latest daemon startup. Paths and possible secrets are omitted. For manual launches, choose a saved log. Review the preview before sharing.</p>
+    <p>{{ t("service.diagnostics.logsHint") }}</p>
     <n-alert v-if="error" type="error">{{ error }}</n-alert>
     <n-space>
-      <n-button :loading="loading" :disabled="!installation.report || installation.checking || saving" @click="prepare()">Preview export</n-button>
-      <n-button :disabled="loading || saving || !installation.report" @click="prepare(true)">Choose saved daemon log…</n-button>
+      <n-button :loading="loading" :disabled="!installation.report || installation.checking || saving" @click="prepare()">{{ t("service.diagnostics.previewExport") }}</n-button>
+      <n-button :disabled="loading || saving || !installation.report" @click="prepare(true)">{{ t("service.diagnostics.chooseSavedLog") }}</n-button>
     </n-space>
-    <n-modal v-model:show="show" preset="card" title="Review diagnostic report" class="diagnostic-preview" :mask-closable="!saving" :closable="!saving">
-      <p>This is the exact snapshot that will be saved. Recheck Installation Health and generate another preview for newer results.</p>
+    <n-modal v-model:show="show" preset="card" :title="t('service.diagnostics.reviewTitle')" class="diagnostic-preview" :mask-closable="!saving" :closable="!saving">
+      <p>{{ t("service.diagnostics.snapshotNote") }}</p>
       <n-alert v-if="preview && !preview.can_save" type="error">
-        No usable daemon logs were found. Check the log source and journal access, or choose a saved log. Logs are required to save.
+        {{ t("service.diagnostics.noLogs") }}
       </n-alert>
-      <n-button v-if="preview && !preview.can_save" type="primary" class="saved-log-button" :disabled="loading || saving" @click="prepare(true)">Choose saved daemon log…</n-button>
+      <n-button v-if="preview && !preview.can_save" type="primary" class="saved-log-button" :disabled="loading || saving" @click="prepare(true)">{{ t("service.diagnostics.chooseSavedLog") }}</n-button>
       <n-input :value="preview?.text ?? ''" type="textarea" readonly :autosize="{ minRows: 12, maxRows: 24 }" />
-      <template #footer><n-button type="primary" :loading="saving" :disabled="!preview?.can_save" @click="save">Save JSON…</n-button></template>
+      <template #footer><n-button type="primary" :loading="saving" :disabled="!preview?.can_save" @click="save">{{ t("service.diagnostics.saveJson") }}</n-button></template>
     </n-modal>
   </n-card>
 </template>

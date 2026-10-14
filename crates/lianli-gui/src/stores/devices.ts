@@ -5,6 +5,9 @@ import { DONGLE_FAMILIES } from "@/constants";
 import { usePendingAction } from "@/composables/usePendingAction";
 import { DISPLAY_SWITCH_TIMEOUT_MS, displaySwitchComplete } from "@/utils/displaySwitch";
 import { deviceLabels } from "@/utils/deviceNames";
+import { tr } from "@/i18n";
+
+export type DisplaySwitchError = { message: string } | { timedOutDevice: string };
 
 /// Dev-only mock device flags. Activated via `npm run dev:mock` (mode: "mock") or manual toggle.
 const MOCK_MODE = import.meta.env.MODE === "mock";
@@ -81,10 +84,10 @@ export const useDevicesStore = defineStore("devices", () => {
   });
   const pending = usePendingAction();
   const displaySwitches = ref<Record<string, DeviceInfo>>({});
-  const displaySwitchErrors = ref<Record<string, string>>({});
+  const displaySwitchErrors = ref<Record<string, DisplaySwitchError>>({});
   const switchTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  function finishDisplaySwitch(id: string, error?: string) {
+  function finishDisplaySwitch(id: string, error?: DisplaySwitchError) {
     clearTimeout(switchTimers.get(id));
     switchTimers.delete(id);
     delete displaySwitches.value[id];
@@ -98,7 +101,7 @@ export const useDevicesStore = defineStore("devices", () => {
     displaySwitches.value[device.device_id] = { ...device };
     pending.set(device.device_id, "switch", true);
     switchTimers.set(device.device_id, setTimeout(() => {
-      finishDisplaySwitch(device.device_id, `${device.name}: the daemon did not detect the panel in its new mode. Check the daemon log for USB hotplug warnings before retrying.`);
+      finishDisplaySwitch(device.device_id, { timedOutDevice: device.name });
     }, DISPLAY_SWITCH_TIMEOUT_MS));
     return true;
   }
@@ -140,11 +143,11 @@ export const useDevicesStore = defineStore("devices", () => {
       else other++;
     }
     const parts = [
-      fanGroups && `${fanGroups} fan group${fanGroups === 1 ? "" : "s"}`,
-      screens && `${screens} LCD${screens === 1 ? "" : "s"}`,
-      other && `${other} other`,
+      fanGroups && tr(fanGroups === 1 ? "devices.summary.fanGroupOne" : "devices.summary.fanGroupMany", { count: fanGroups }),
+      screens && tr(screens === 1 ? "devices.summary.lcdOne" : "devices.summary.lcdMany", { count: screens }),
+      other && tr("devices.summary.other", { count: other }),
     ].filter(Boolean);
-    return parts.length ? parts.join(" · ") : "No devices";
+    return parts.length ? parts.join(" · ") : tr("devices.summary.none");
   });
 
   /** Device lookup by id. */

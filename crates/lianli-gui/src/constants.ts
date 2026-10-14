@@ -1,4 +1,5 @@
-import type { DeviceFamily, RgbMode } from "@/types";
+import type { DeviceFamily, RgbDirection, RgbMode, RgbScope } from "@/types";
+import { tr, type MessageKey } from "@/i18n";
 
 export const FAMILY_DISPLAY: Record<DeviceFamily, string> = {
   EdgeHub: "Edge Hub Advanced",
@@ -8,8 +9,12 @@ export const FAMILY_DISPLAY: Record<DeviceFamily, string> = {
   Galahad2Trinity: "Galahad II Trinity",
   HydroShiftLcd: "HydroShift LCD",
   Galahad2Lcd: "Galahad II LCD",
-  WirelessTx: "Wireless TX Dongle",
-  WirelessRx: "Wireless RX Dongle",
+  get WirelessTx() {
+    return tr("devices.family.wirelessTx");
+  },
+  get WirelessRx() {
+    return tr("devices.family.wirelessRx");
+  },
   Slv3Lcd: "UNI FAN SL Wireless LCD",
   Slv3Led: "UNI FAN SL Wireless",
   Tlv2Lcd: "UNI FAN TL Wireless LCD",
@@ -19,9 +24,15 @@ export const FAMILY_DISPLAY: Record<DeviceFamily, string> = {
   HydroShift2Lcd: "HydroShift II LCD",
   Lancool207: "Lancool 207 Digital",
   UniversalScreen: 'Universal Screen 8.8"',
-  HydroShift2LcdDesktop: "HydroShift II LCD (Desktop Mode)",
-  Lancool207Desktop: "Lancool 207 Digital (Desktop Mode)",
-  UniversalScreenDesktop: 'Universal Screen 8.8" (Desktop Mode)',
+  get HydroShift2LcdDesktop() {
+    return tr("devices.family.desktopMode", { name: "HydroShift II LCD" });
+  },
+  get Lancool207Desktop() {
+    return tr("devices.family.desktopMode", { name: "Lancool 207 Digital" });
+  },
+  get UniversalScreenDesktop() {
+    return tr("devices.family.desktopMode", { name: 'Universal Screen 8.8"' });
+  },
   WirelessAio: "HydroShift Wireless AIO",
   WirelessStrimer: "Strimer Plus Wireless",
   WirelessLc217: "Lancool 217 Wireless",
@@ -30,10 +41,14 @@ export const FAMILY_DISPLAY: Record<DeviceFamily, string> = {
   StrimerPlus: "Strimer Plus",
   UniversalScreenLighting: 'Universal Screen 8.8" LED Ring',
   Vision9p2: "Vision 9.2\"",
-  Vision9p2Desktop: 'Vision 9.2" (Desktop Mode)',
+  get Vision9p2Desktop() {
+    return tr("devices.family.desktopMode", { name: 'Vision 9.2"' });
+  },
   TlFlexLcd: "TL Flex LCD",
   SlInfFlexLcd: "SL Infinity Flex LCD",
-  WiredReceiver: "Wired Controller",
+  get WiredReceiver() {
+    return tr("devices.family.wiredReceiver");
+  },
   HydroShift2OledCurveLcd: "HydroShift II OLED Curve",
   HydroShift2OledCurveLed: "HydroShift II OLED Curve LED",
 };
@@ -103,138 +118,179 @@ const FAMILY_CAPS: Record<DeviceFamily, string[]> = {
 };
 
 // All RGB modes with display labels (mirrors RgbMode::display_name()).
-export const RGB_MODES: { mode: RgbMode; label: string }[] = [
-  { mode: "Off", label: "Off" },
-  { mode: "Direct", label: "Direct" },
-  { mode: "Static", label: "Static" },
-  { mode: "Rainbow", label: "Rainbow" },
-  { mode: "RainbowMorph", label: "Rainbow Morph" },
-  { mode: "Breathing", label: "Breathing" },
-  { mode: "Runway", label: "Runway" },
-  { mode: "Meteor", label: "Meteor" },
-  { mode: "ColorCycle", label: "Color Cycle" },
-  { mode: "Staggered", label: "Staggered" },
-  { mode: "Tide", label: "Tide" },
-  { mode: "Mixing", label: "Mixing" },
-  { mode: "Voice", label: "Voice" },
-  { mode: "Door", label: "Door" },
-  { mode: "Render", label: "Render" },
-  { mode: "Ripple", label: "Ripple" },
-  { mode: "Reflect", label: "Reflect" },
-  { mode: "TailChasing", label: "Tail Chasing" },
-  { mode: "Paint", label: "Paint" },
-  { mode: "PingPong", label: "Ping Pong" },
-  { mode: "Stack", label: "Stack" },
-  { mode: "StackMulti", label: "Stack Multi" },
-  { mode: "Neon", label: "Neon" },
-  { mode: "CoverCycle", label: "Cover Cycle" },
-  { mode: "Wave", label: "Wave" },
-  { mode: "Racing", label: "Racing" },
-  { mode: "Lottery", label: "Lottery" },
-  { mode: "Intertwine", label: "Intertwine" },
-  { mode: "MeteorShower", label: "Meteor Shower" },
-  { mode: "Collide", label: "Collide" },
-  { mode: "ElectricCurrent", label: "Electric Current" },
-  { mode: "Kaleidoscope", label: "Kaleidoscope" },
-  { mode: "BigBang", label: "Big Bang" },
-  { mode: "Vortex", label: "Vortex" },
-  { mode: "Pump", label: "Pump" },
-  { mode: "ColorsMorph", label: "Colors Morph" },
-  { mode: "TaiChi", label: "Tai Chi" },
-  { mode: "CrossingOver", label: "Crossing Over" },
-  { mode: "ColorfulStarryNight", label: "Colorful Starry Night" },
-  { mode: "StaticStarryNight", label: "Static Starry Night" },
-  { mode: "Bounce", label: "Bounce" },
-  { mode: "TickerTape", label: "Ticker Tape" },
-  { mode: "Fluctuation", label: "Fluctuation" },
-  { mode: "Transmit", label: "Transmit" },
-  { mode: "Burst", label: "Burst" },
-  { mode: "MopUp", label: "Mop Up" },
-  { mode: "PacMan", label: "PacMan" },
-  { mode: "MeteorRainbow", label: "Meteor Rainbow" },
-  { mode: "Spring", label: "Spring" },
-  { mode: "Scan", label: "Scan" },
-  { mode: "Contest", label: "Contest" },
-  { mode: "Warning", label: "Warning" },
-  { mode: "SpanningTeacups", label: "Spanning Teacups" },
-  { mode: "Tornado", label: "Tornado" },
-  { mode: "DoubleMeteor", label: "Double Meteor" },
-  { mode: "MeteorContest", label: "Meteor Contest" },
-  { mode: "MeteorMix", label: "Meteor Mix" },
-  { mode: "ReturnArc", label: "Return Arc" },
-  { mode: "DoubleArc", label: "Double Arc" },
-  { mode: "HeartBeat", label: "Heart Beat" },
-  { mode: "HeartBeatRunway", label: "Heart Beat Runway" },
-  { mode: "Disco", label: "Disco" },
-  { mode: "ColorfulCity", label: "Colorful City" },
-  { mode: "Twinkle", label: "Twinkle" },
-  { mode: "Endless", label: "Endless" },
-  { mode: "River", label: "River" },
-  { mode: "Duel", label: "Duel" },
-  { mode: "Hourglass", label: "Hourglass" },
-  { mode: "Pioneer", label: "Pioneer" },
-  { mode: "ShuttleRun", label: "Shuttle Run" },
-  { mode: "GradientRibbon", label: "Gradient Ribbon" },
-  { mode: "RainbowWave", label: "Rainbow Wave" },
-  { mode: "ColorfulMeteor", label: "Colorful Meteor" },
-  { mode: "Wing", label: "Wing" },
-  { mode: "Drumming", label: "Drumming" },
-  { mode: "Boomerang", label: "Boomerang" },
-  { mode: "CandyBox", label: "Candy Box" },
-  { mode: "Transformation", label: "Transformation" },
-  { mode: "Groove", label: "Groove" },
-  { mode: "Tunnel", label: "Tunnel" },
-  { mode: "BreathingRainbow", label: "Breathing Rainbow" },
-  { mode: "StaticColorful", label: "Static corner colors" },
-  { mode: "BreathingColorful", label: "Breathing corner colors" },
-  { mode: "Snooker", label: "Snooker" },
-  { mode: "BlowUp", label: "Blow Up" },
-  { mode: "ShockWave", label: "Shock Wave" },
-  { mode: "BulletStack", label: "Bullet Stack" },
-  { mode: "Drizzling", label: "Drizzling" },
-  { mode: "FadeOut", label: "Fade Out" },
-  { mode: "ColorTransfer", label: "Color Transfer" },
-  { mode: "CrossOver", label: "Cross Over" },
-  { mode: "Parallel", label: "Parallel" },
-  { mode: "SeaFlow", label: "Sea Flow" },
-  { mode: "Echo", label: "Echo" },
-];
+const RGB_MODE_KEYS: Record<RgbMode, MessageKey> = {
+  Off: "rgb.modes.off",
+  Direct: "rgb.modes.direct",
+  Static: "rgb.modes.static",
+  Rainbow: "rgb.modes.rainbow",
+  RainbowMorph: "rgb.modes.rainbowMorph",
+  Breathing: "rgb.modes.breathing",
+  Runway: "rgb.modes.runway",
+  Meteor: "rgb.modes.meteor",
+  ColorCycle: "rgb.modes.colorCycle",
+  Staggered: "rgb.modes.staggered",
+  Tide: "rgb.modes.tide",
+  Mixing: "rgb.modes.mixing",
+  Voice: "rgb.modes.voice",
+  Door: "rgb.modes.door",
+  Render: "rgb.modes.render",
+  Ripple: "rgb.modes.ripple",
+  Reflect: "rgb.modes.reflect",
+  TailChasing: "rgb.modes.tailChasing",
+  Paint: "rgb.modes.paint",
+  PingPong: "rgb.modes.pingPong",
+  Stack: "rgb.modes.stack",
+  StackMulti: "rgb.modes.stackMulti",
+  Neon: "rgb.modes.neon",
+  CoverCycle: "rgb.modes.coverCycle",
+  Wave: "rgb.modes.wave",
+  Racing: "rgb.modes.racing",
+  Lottery: "rgb.modes.lottery",
+  Intertwine: "rgb.modes.intertwine",
+  MeteorShower: "rgb.modes.meteorShower",
+  Collide: "rgb.modes.collide",
+  ElectricCurrent: "rgb.modes.electricCurrent",
+  Kaleidoscope: "rgb.modes.kaleidoscope",
+  BigBang: "rgb.modes.bigBang",
+  Vortex: "rgb.modes.vortex",
+  Pump: "rgb.modes.pump",
+  ColorsMorph: "rgb.modes.colorsMorph",
+  TaiChi: "rgb.modes.taiChi",
+  CrossingOver: "rgb.modes.crossingOver",
+  ColorfulStarryNight: "rgb.modes.colorfulStarryNight",
+  StaticStarryNight: "rgb.modes.staticStarryNight",
+  Bounce: "rgb.modes.bounce",
+  TickerTape: "rgb.modes.tickerTape",
+  Fluctuation: "rgb.modes.fluctuation",
+  Transmit: "rgb.modes.transmit",
+  Burst: "rgb.modes.burst",
+  MopUp: "rgb.modes.mopUp",
+  PacMan: "rgb.modes.pacMan",
+  MeteorRainbow: "rgb.modes.meteorRainbow",
+  Spring: "rgb.modes.spring",
+  Scan: "rgb.modes.scan",
+  Contest: "rgb.modes.contest",
+  Warning: "rgb.modes.warning",
+  SpanningTeacups: "rgb.modes.spanningTeacups",
+  Tornado: "rgb.modes.tornado",
+  DoubleMeteor: "rgb.modes.doubleMeteor",
+  MeteorContest: "rgb.modes.meteorContest",
+  MeteorMix: "rgb.modes.meteorMix",
+  ReturnArc: "rgb.modes.returnArc",
+  DoubleArc: "rgb.modes.doubleArc",
+  HeartBeat: "rgb.modes.heartBeat",
+  HeartBeatRunway: "rgb.modes.heartBeatRunway",
+  Disco: "rgb.modes.disco",
+  ColorfulCity: "rgb.modes.colorfulCity",
+  Twinkle: "rgb.modes.twinkle",
+  Endless: "rgb.modes.endless",
+  River: "rgb.modes.river",
+  Duel: "rgb.modes.duel",
+  Hourglass: "rgb.modes.hourglass",
+  Pioneer: "rgb.modes.pioneer",
+  ShuttleRun: "rgb.modes.shuttleRun",
+  GradientRibbon: "rgb.modes.gradientRibbon",
+  RainbowWave: "rgb.modes.rainbowWave",
+  ColorfulMeteor: "rgb.modes.colorfulMeteor",
+  Wing: "rgb.modes.wing",
+  Drumming: "rgb.modes.drumming",
+  Boomerang: "rgb.modes.boomerang",
+  CandyBox: "rgb.modes.candyBox",
+  Transformation: "rgb.modes.transformation",
+  Groove: "rgb.modes.groove",
+  Tunnel: "rgb.modes.tunnel",
+  BreathingRainbow: "rgb.modes.breathingRainbow",
+  StaticColorful: "rgb.modes.staticColorful",
+  BreathingColorful: "rgb.modes.breathingColorful",
+  Snooker: "rgb.modes.snooker",
+  BlowUp: "rgb.modes.blowUp",
+  ShockWave: "rgb.modes.shockWave",
+  BulletStack: "rgb.modes.bulletStack",
+  Drizzling: "rgb.modes.drizzling",
+  FadeOut: "rgb.modes.fadeOut",
+  ColorTransfer: "rgb.modes.colorTransfer",
+  CrossOver: "rgb.modes.crossOver",
+  Parallel: "rgb.modes.parallel",
+  SeaFlow: "rgb.modes.seaFlow",
+  Echo: "rgb.modes.echo",
+};
 
-export function modeLabel(mode: RgbMode): string {
-  return RGB_MODES.find((m) => m.mode === mode)?.label ?? mode;
+function translatedOptions<T>(keys: [T, MessageKey][]): { value: T; readonly label: string }[] {
+  return keys.map(([value, key]) => ({
+    value,
+    get label() {
+      return tr(key);
+    },
+  }));
 }
 
-export const RGB_DIRECTIONS: { value: import("@/types").RgbDirection; label: string }[] = [
-  { value: "Clockwise", label: "CW" },
-  { value: "CounterClockwise", label: "CCW" },
-  { value: "Up", label: "Up" },
-  { value: "Down", label: "Down" },
-  { value: "Spread", label: "Spread" },
-  { value: "Gather", label: "Gather" },
-];
+export const RGB_MODES: { mode: RgbMode; readonly label: string }[] = Object.entries(RGB_MODE_KEYS).map(([mode, key]) => ({
+  mode,
+  get label() {
+    return tr(key);
+  },
+}));
 
-export const RGB_SCOPES: { value: import("@/types").RgbScope; label: string }[] = [
-  { value: "All", label: "All" },
-  { value: "Top", label: "Top" },
-  { value: "Bottom", label: "Bottom" },
-  { value: "Inner", label: "Inner" },
-  { value: "Outer", label: "Outer" },
-];
+export function modeLabel(mode: RgbMode): string {
+  const key = RGB_MODE_KEYS[mode];
+  return key ? tr(key) : mode;
+}
+
+export const RGB_DIRECTIONS = translatedOptions<RgbDirection>([
+  ["Clockwise", "rgb.directions.clockwise"],
+  ["CounterClockwise", "rgb.directions.counterClockwise"],
+  ["Up", "rgb.directions.up"],
+  ["Down", "rgb.directions.down"],
+  ["Spread", "rgb.directions.spread"],
+  ["Gather", "rgb.directions.gather"],
+]);
+
+const RGB_SCOPE_KEYS: Record<RgbScope, MessageKey> = {
+  All: "rgb.scopes.all",
+  Fan: "rgb.scopes.fan",
+  Top: "rgb.scopes.top",
+  Bottom: "rgb.scopes.bottom",
+  Inner: "rgb.scopes.inner",
+  Outer: "rgb.scopes.outer",
+  Center: "rgb.scopes.center",
+  Pump: "rgb.scopes.pump",
+  Front: "rgb.scopes.front",
+  Rear: "rgb.scopes.rear",
+  Segment1: "rgb.scopes.segment1",
+  Segment2: "rgb.scopes.segment2",
+  Segment3: "rgb.scopes.segment3",
+  Segment4: "rgb.scopes.segment4",
+  Segment5: "rgb.scopes.segment5",
+  Segment6: "rgb.scopes.segment6",
+};
+
+export function scopeLabel(scope: RgbScope): string {
+  const key = RGB_SCOPE_KEYS[scope];
+  return key ? tr(key) : scope;
+}
+
+export const RGB_SCOPES = translatedOptions<RgbScope>([
+  ["All", RGB_SCOPE_KEYS.All],
+  ["Top", RGB_SCOPE_KEYS.Top],
+  ["Bottom", RGB_SCOPE_KEYS.Bottom],
+  ["Inner", RGB_SCOPE_KEYS.Inner],
+  ["Outer", RGB_SCOPE_KEYS.Outer],
+]);
 
 export const BRIGHTNESS_OFF = 255;
 
-export const RGB_BRIGHTNESS: { value: number; label: string }[] = [
-  { value: BRIGHTNESS_OFF, label: "Off" },
-  { value: 0, label: "Lowest" },
-  { value: 1, label: "Lower" },
-  { value: 2, label: "Normal" },
-  { value: 3, label: "Higher" },
-  { value: 4, label: "Highest" },
-];
+export const RGB_BRIGHTNESS = translatedOptions<number>([
+  [BRIGHTNESS_OFF, "common.off"],
+  [0, "rgb.brightness.lowest"],
+  [1, "rgb.brightness.lower"],
+  [2, "rgb.brightness.normal"],
+  [3, "rgb.brightness.higher"],
+  [4, "rgb.brightness.highest"],
+]);
 
-export const PIXEL_CLEANER_DURATION_OPTIONS: { value: number; label: string }[] = [
-  { label: "15 Minutes (Quick Refresh)", value: 15 },
-  { label: "30 Minutes (Recommended)", value: 30 },
-  { label: "60 Minutes (Deep Conditioning)", value: 60 },
-  { label: "120 Minutes (Heavy Burn-in Recovery)", value: 120 },
+export const PIXEL_CLEANER_DURATION_OPTIONS: { value: number; labelKey: MessageKey }[] = [
+  { labelKey: "lcd.cleaner.durations.quick", value: 15 },
+  { labelKey: "lcd.cleaner.durations.recommended", value: 30 },
+  { labelKey: "lcd.cleaner.durations.deep", value: 60 },
+  { labelKey: "lcd.cleaner.durations.heavy", value: 120 },
 ];

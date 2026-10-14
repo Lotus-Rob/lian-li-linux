@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { useTranslate } from "@/i18n";
 
 const props = defineProps<{
   modelValue: [number, number][];
@@ -9,6 +10,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   "update:modelValue": [value: [number, number][]];
 }>();
+
+const t = useTranslate();
 
 // X axis: 20–100 °C. Y axis: 0–100 %.
 const X_MIN = 20;
@@ -176,7 +179,7 @@ function pointPx(pt: [number, number]) {
         <text v-for="y in yGrid" :key="'yl' + y" :x="PAD - 6" :y="yToPx(y) + 3" text-anchor="end">
           {{ y }}
         </text>
-        <text :x="W / 2" :y="H - 4" text-anchor="middle" class="axis-title">Temperature (°C)</text>
+        <text :x="W / 2" :y="H - 4" text-anchor="middle" class="axis-title">{{ t("fans.curveEditor.temperatureAxis") }}</text>
         <text
           :x="12"
           :y="H / 2"
@@ -184,7 +187,7 @@ function pointPx(pt: [number, number]) {
           class="axis-title"
           :transform="`rotate(-90 12 ${H / 2})`"
         >
-          Speed (%)
+          {{ t("fans.curveEditor.speedAxis") }}
         </text>
       </g>
       <!-- curve -->
@@ -223,7 +226,7 @@ function pointPx(pt: [number, number]) {
         </g>
       </g>
     </svg>
-    <div class="hint">Click to add points. Drag to move. Double-click to remove.</div>
+    <div class="hint">{{ t("fans.curveEditor.hint") }}</div>
   </div>
 </template>
 

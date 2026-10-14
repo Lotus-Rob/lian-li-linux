@@ -1,11 +1,12 @@
 use crate::services::Route;
 use anyhow::{ensure, Result};
 use lianli_shared::installation::{
-    CheckState, FindingSeverity, InstallationFinding, InstallationGuide,
+    message_params, CheckState, FindingSeverity, InstallationFinding, InstallationGuide,
 };
 use lianli_shared::services::{
     ServiceProbe, ServiceReport, ServiceScope, ServiceSelection, UnitState,
 };
+use std::collections::BTreeMap;
 
 pub fn guidance(uid: u32) -> String {
     format!("On the host, run sudo loginctl enable-linger {uid}, then Recheck. Lingering allows this account's user services to run before login and after logout. Lian Li Linux does not change it automatically.")
@@ -106,6 +107,19 @@ fn checked_finding(
         state = CheckState::NotApplicable;
         evidence = format!("Lingering is only required for Distrobox system mode. The system service is unused; no change is needed for user mode. {evidence}");
     }
+    let (message_key, params, remediation) = match owner_uid {
+        Some(uid) => (
+            "control.lingeringGuidance",
+            message_params([("uid", uid.to_string())]),
+            guidance(uid),
+        ),
+        None => (
+            "control.lingeringAccountUnknown",
+            BTreeMap::new(),
+            "Verify the host system unit's account, then follow the Distrobox lingering guide."
+                .into(),
+        ),
+    };
     InstallationFinding {
         code: "services.distrobox_lingering".into(),
         state,
@@ -121,14 +135,10 @@ fn checked_finding(
         ),
         title: "Distrobox system startup".into(),
         evidence,
-        remediation: owner_uid.map_or_else(
-            || {
-                "Verify the host system unit's account, then follow the Distrobox lingering guide."
-                    .into()
-            },
-            guidance,
-        ),
+        remediation,
         guide: InstallationGuide::Distrobox,
+        message_key: Some(message_key.into()),
+        message_params: params,
     }
 }
 

@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { useDevicesStore } from "@/stores/devices";
+import { useDevicesStore, type DisplaySwitchError } from "@/stores/devices";
 import DeviceCard from "@/components/devices/DeviceCard.vue";
 import { PlugZap, RefreshCw } from "lucide-vue-next";
 import { useDaemonStore } from "@/stores/daemon";
+import { useTranslate } from "@/i18n";
 
 const devices = useDevicesStore();
 const daemon = useDaemonStore();
+const t = useTranslate();
 
 const empty = computed(() => devices.displayCards.length === 0);
+
+function switchErrorText(error: DisplaySwitchError): string {
+  return "message" in error ? error.message : t("devices.page.switchTimeout", { name: error.timedOutDevice });
+}
 
 async function refresh() {
   await daemon.refresh();
@@ -24,13 +30,13 @@ async function refresh() {
       </n-button>
     </div>
 
-    <n-alert v-for="(error, id) in devices.displaySwitchErrors" :key="id" type="error" closable @close="delete devices.displaySwitchErrors[id]">{{ error }}</n-alert>
+    <n-alert v-for="(error, id) in devices.displaySwitchErrors" :key="id" type="error" closable @close="delete devices.displaySwitchErrors[id]">{{ switchErrorText(error) }}</n-alert>
 
     <div v-if="empty" class="empty-state">
       <PlugZap :size="48" :stroke-width="1.4" />
-      <div class="empty-title">No devices found</div>
-      <div class="empty-sub">Is the daemon running?</div>
-      <n-button size="small" @click="refresh">Retry</n-button>
+      <div class="empty-title">{{ t("devices.page.noDevicesFound") }}</div>
+      <div class="empty-sub">{{ t("devices.page.daemonRunning") }}</div>
+      <n-button size="small" @click="refresh">{{ t("common.retry") }}</n-button>
     </div>
 
     <div v-else class="card device-list">

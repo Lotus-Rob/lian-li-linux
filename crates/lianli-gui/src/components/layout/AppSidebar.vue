@@ -3,12 +3,14 @@ import { ref, onMounted } from "vue";
 import { RouterLink } from "vue-router";
 import { invoke } from "@tauri-apps/api/core";
 import * as icons from "lucide-vue-next";
+import { useTranslate } from "@/i18n";
 import { MAIN_ROUTES } from "@/router";
 import { useDaemonStore } from "@/stores/daemon";
 import { useDevicesStore } from "@/stores/devices";
 
 const daemon = useDaemonStore();
 const devices = useDevicesStore();
+const t = useTranslate();
 const APP_VERSION = ref("...");
 
 onMounted(async () => {
@@ -48,16 +50,16 @@ function iconFor(name: string) {
         active-class="active"
       >
         <component :is="iconFor(r.icon)" :size="18" :stroke-width="2" />
-        <span>{{ r.label }}</span>
+        <span>{{ t(r.labelKey) }}</span>
       </RouterLink>
     </nav>
 
     <div class="footer">
       <div class="conn" :class="{ ok: daemon.connected, bad: !daemon.connected }">
         <span class="dot" />
-        {{ daemon.connected ? "Connected" : "Offline" }}
+        {{ daemon.connected ? t("shell.sidebar.connected") : t("common.offline") }}
       </div>
-      <div class="device-count">{{ daemon.connected ? devices.summary : `Last seen: ${devices.summary}` }}</div>
+      <div class="device-count">{{ daemon.connected ? devices.summary : t("shell.sidebar.lastSeen", { summary: devices.summary }) }}</div>
     </div>
   </aside>
 </template>

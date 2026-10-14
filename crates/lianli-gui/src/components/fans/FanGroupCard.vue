@@ -8,6 +8,7 @@ import { useDevicesStore } from "@/stores/devices";
 import { useDeviceNamesStore } from "@/stores/deviceNames";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
 import { FAMILY_DISPLAY } from "@/constants";
+import { useTranslate } from "@/i18n";
 
 const props = defineProps<{
   device: DeviceInfo;
@@ -17,6 +18,7 @@ const props = defineProps<{
 }>();
 
 const config = useConfigStore();
+const t = useTranslate();
 
 const expanded = ref(true);
 
@@ -92,11 +94,11 @@ function decodeMode(value: string): FanSpeed {
 // Speed mode dropdown options: Off / curve names / Constant PWM / MB Sync.
 const modeOptions = computed(() => {
   const opts: { label: string; value: string; disabled?: boolean }[] = [
-    { label: "Off", value: "off" },
-    ...props.curveNames.map((n) => ({ label: `Curve: ${n}`, value: `curve:${n}` })),
-    { label: "Constant PWM", value: "constant" },
+    { label: t("common.off"), value: "off" },
+    ...props.curveNames.map((n) => ({ label: t("fans.speedMode.curve", { name: n }), value: `curve:${n}` })),
+    { label: t("fans.speedMode.constantPwm"), value: "constant" },
     {
-      label: "MB Sync",
+      label: t("fans.speedMode.mbSync"),
       value: MB_SYNC_KEY,
       disabled: !props.device.mb_sync_support && !props.pwmHeaders.length,
     },
@@ -177,15 +179,15 @@ function setPwm(slot: number, v: number) {
         <component :is="expanded ? ChevronDown : ChevronRight" :size="16" />
         <span class="title">{{ title }}</span>
         <span v-if="family" class="muted">{{ family }}</span>
-        <span class="muted">· {{ visibleSlots }} {{ perFan ? "fans" : "ports" }}</span>
+        <span class="muted">· {{ t(perFan ? "fans.groupCard.fanCount" : "fans.groupCard.portCount", { count: visibleSlots }) }}</span>
       </button>
       <div v-if="visibleSlots > 1" class="all">
-        <span class="muted">All</span>
+        <span class="muted">{{ t("fans.groupCard.all") }}</span>
         <n-select
           size="small"
           :value="commonMode"
           :options="modeOptions"
-          placeholder="Mixed"
+          :placeholder="t('fans.groupCard.mixed')"
           @update:value="onAllModes"
         />
       </div>
@@ -193,7 +195,7 @@ function setPwm(slot: number, v: number) {
 
     <div v-if="expanded" class="slots">
       <div v-for="slot in visibleSlots" :key="slot - 1" class="slot">
-        <span class="slot-label">{{ perFan ? `Fan ${slot}` : `Port ${slot}` }}</span>
+        <span class="slot-label">{{ t(perFan ? "fans.groupCard.fanSlot" : "fans.groupCard.portSlot", { index: slot }) }}</span>
         <n-select
           class="slot-mode"
           size="small"
@@ -212,7 +214,7 @@ function setPwm(slot: number, v: number) {
             @update:model-value="(v: number) => setPwm(slot - 1, Math.round(v))"
           />
         </div>
-        <span class="rpm" :title="`Fan ${slot} speed`">
+        <span class="rpm" :title="t('fans.groupCard.fanSpeedTooltip', { index: slot })">
           <Fan :size="12" />
           <span class="mono">{{ rpms[slot - 1] != null ? `${rpms[slot - 1]} rpm` : "—" }}</span>
         </span>
@@ -220,15 +222,15 @@ function setPwm(slot: number, v: number) {
     </div>
 
     <div v-if="groupIsMbSync() && !device.mb_sync_support" class="pwm-source-row">
-      <label class="muted">PWM source</label>
+      <label class="muted">{{ t("fans.groupCard.pwmSource") }}</label>
       <n-select
         size="small"
         :value="currentPwmSource"
         :options="pwmHeaderOptions"
-        placeholder="Select motherboard PWM header"
+        :placeholder="t('fans.groupCard.pwmSourcePlaceholder')"
         @update:value="onPwmSource"
       />
-      <span class="hint">Fans run at full speed if the selected source is unavailable.</span>
+      <span class="hint">{{ t("fans.groupCard.pwmSourceHint") }}</span>
     </div>
   </div>
 </template>

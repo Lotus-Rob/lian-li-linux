@@ -1,5 +1,6 @@
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { tr } from "@/i18n";
 
 export interface SystemFont {
   family: string;
@@ -35,7 +36,7 @@ export function useFonts() {
   /** Build NSelect options: a "(Default)" sentinel + one entry per family. */
   function fontOptions(): { label: string; value: string }[] {
     return [
-      { label: "(Default)", value: "" },
+      { label: tr("editor.fonts.default"), value: "" },
       ...fonts.value.map((f) => ({ label: f.family, value: f.path })),
     ];
   }

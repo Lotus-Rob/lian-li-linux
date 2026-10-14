@@ -4,11 +4,13 @@ import { invoke } from "@tauri-apps/api/core";
 import type { DeviceInfo } from "@/types";
 import { useIpc } from "@/composables/useIpc";
 import { useDaemonStore } from "@/stores/daemon";
+import { useTranslate } from "@/i18n";
 
 type Job = { id: number; device_id: string; status: { state: string; message?: string; response_received?: boolean } };
 const props = defineProps<{ device: DeviceInfo }>();
 const ipc = useIpc();
 const daemon = useDaemonStore();
+const t = useTranslate();
 const jobInstance = ref<string>();
 const show = ref(false);
 const canvas = ref<HTMLCanvasElement | null>(null);
@@ -69,7 +71,7 @@ function draw() {
     preview.drawImage(output, -caps.width / 2, -caps.height / 2);
   }
   const bytes = Math.floor(payload.value.length * 3 / 4);
-  error.value = bytes > caps.max_jpeg_bytes ? `This crop exceeds the ${caps.max_jpeg_bytes.toLocaleString()}-byte limit. Choose a simpler image or crop.` : "";
+  error.value = bytes > caps.max_jpeg_bytes ? t("lcd.startupImage.cropTooLarge", { bytes: caps.max_jpeg_bytes.toLocaleString() }) : "";
 }
 
 async function chooseFile() {
@@ -77,7 +79,10 @@ async function chooseFile() {
   const current = ++selection;
   picking.value = true;
   try {
-    const bytes = await invoke<ArrayBuffer>("pick_startup_image");
+    const bytes = await invoke<ArrayBuffer>("pick_startup_image", {
+      title: t("lcd.startupImage.pickerTitle"),
+      filter: t("lcd.startupImage.pickerFilter"),
+    });
     if (current !== selection || disposed || bytes.byteLength === 0) return;
     payload.value = "";
     image.value = null;
@@ -88,7 +93,7 @@ async function chooseFile() {
     source.src = imageUrl;
     await source.decode();
     if (current !== selection || disposed) return;
-    if (source.naturalWidth * source.naturalHeight > 16_777_216) throw new Error("Image exceeds 16 megapixels.");
+    if (source.naturalWidth * source.naturalHeight > 16_777_216) throw new Error(t("lcd.startupImage.imageTooLarge"));
     image.value = source;
     rotation.value = 0; zoom.value = 100; panX.value = 0; panY.value = 0;
     await nextTick();
@@ -103,18 +108,18 @@ async function poll() {
     const current = await ipc.request<Job | null>("GetStartupImageStatus");
     if (disposed || !show.value || instance !== daemon.info?.instance_id) return;
     if (current?.device_id === props.device.device_id) job.value = current;
-    else if (job.value && busy.value) { job.value = null; error.value = "Upload status changed. Check the device before attempting another upload."; return; }
+    else if (job.value && busy.value) { job.value = null; error.value = t("lcd.startupImage.statusChanged"); return; }
     if (show.value && (current?.status.state === "pending" || current?.status.state === "transferring")) timer = setTimeout(poll, 800);
   } catch (e) {
     if (disposed || !show.value) return;
-    error.value = `Could not read upload status: ${String(e)}`;
+    error.value = t("lcd.startupImage.statusFailed", { error: String(e) });
     if (busy.value && instance === daemon.info?.instance_id) timer = setTimeout(poll, 2000);
   }
 }
 
 async function upload() {
   if (busy.value || previewPending.value || error.value || !payload.value) return;
-  if (!daemon.info?.instance_id) { error.value = "Refresh the daemon connection before uploading."; return; }
+  if (!daemon.info?.instance_id) { error.value = t("lcd.startupImage.refreshDaemon"); return; }
   jobInstance.value = daemon.info.instance_id;
   const instance = jobInstance.value;
   submitting.value = true;
@@ -145,36 +150,36 @@ watch(show, async (visible) => {
 });
 watch(() => daemon.info?.instance_id, (instance) => {
   if (jobInstance.value && instance !== jobInstance.value && busy.value) {
-    clearTimeout(timer); job.value = null; error.value = "Daemon disconnected. Check the startup image before retrying.";
+    clearTimeout(timer); job.value = null; error.value = t("lcd.startupImage.daemonDisconnected");
   }
 });
 onBeforeUnmount(() => { disposed = true; selection++; clearTimeout(timer); clearTimeout(previewTimer); if (imageUrl) URL.revokeObjectURL(imageUrl); });
 </script>
 
 <template>
-  <n-button v-if="capabilities" size="small" @click="show = true">Startup Image</n-button>
-  <n-modal v-model:show="show" preset="card" title="Startup Image" style="width: min(760px, 95vw)" :mask-closable="!busy" :closable="!busy" :close-on-esc="!busy">
+  <n-button v-if="capabilities" size="small" @click="show = true">{{ t("lcd.startupImage.title") }}</n-button>
+  <n-modal v-model:show="show" preset="card" :title="t('lcd.startupImage.title')" style="width: min(760px, 95vw)" :mask-closable="!busy" :closable="!busy" :close-on-esc="!busy">
     <div class="startup-editor">
       <p><strong>{{ device.name }}</strong> · {{ capabilities?.width }} × {{ capabilities?.height }}</p>
-      <p v-if="wirelessH2" class="hint">Experimental H2 wireless upload. USB playback pauses during transfer and resumes afterward. Boot persistence is not verified.</p>
-      <p v-else class="hint">Save an image to show at startup. Playback pauses during upload.</p>
-      <p v-if="capabilities?.jpeg_target_bytes" class="hint">JPEG quality is adjusted automatically to fit the panel's {{ capabilities.jpeg_target_bytes.toLocaleString() }}-byte image budget.</p>
-      <n-button :disabled="busy || picking" :loading="picking" @click="chooseFile">Choose image…</n-button>
-      <div class="preview"><canvas ref="canvas" v-show="image" aria-label="Native-size startup image crop preview" /></div>
+      <p v-if="wirelessH2" class="hint">{{ t("lcd.startupImage.wirelessHint") }}</p>
+      <p v-else class="hint">{{ t("lcd.startupImage.hint") }}</p>
+      <p v-if="capabilities?.jpeg_target_bytes" class="hint">{{ t("lcd.startupImage.jpegBudget", { bytes: capabilities.jpeg_target_bytes.toLocaleString() }) }}</p>
+      <n-button :disabled="busy || picking" :loading="picking" @click="chooseFile">{{ t("lcd.startupImage.chooseImage") }}</n-button>
+      <div class="preview"><canvas ref="canvas" v-show="image" :aria-label="t('lcd.startupImage.canvasLabel')" /></div>
       <template v-if="image">
-        <label>Rotation <n-select v-model:value="rotation" :disabled="busy" :options="[0, 90, 180, 270].map(value => ({ label: `${value}°`, value }))" /></label>
-        <label>Zoom ({{ zoom }}%) <n-slider v-model:value="zoom" :min="1" :max="300" :disabled="busy" /></label>
-        <label>Horizontal position <n-slider v-model:value="panX" :min="-100" :max="100" :disabled="busy" /></label>
-        <label>Vertical position <n-slider v-model:value="panY" :min="-100" :max="100" :disabled="busy" /></label>
+        <label>{{ t("lcd.startupImage.rotation") }} <n-select v-model:value="rotation" :disabled="busy" :options="[0, 90, 180, 270].map(value => ({ label: `${value}°`, value }))" /></label>
+        <label>{{ t("lcd.startupImage.zoom", { zoom }) }} <n-slider v-model:value="zoom" :min="1" :max="300" :disabled="busy" /></label>
+        <label>{{ t("lcd.startupImage.horizontal") }} <n-slider v-model:value="panX" :min="-100" :max="100" :disabled="busy" /></label>
+        <label>{{ t("lcd.startupImage.vertical") }} <n-slider v-model:value="panY" :min="-100" :max="100" :disabled="busy" /></label>
       </template>
       <n-alert v-if="error" type="error">{{ error }}</n-alert>
       <n-alert v-if="job?.status.state === 'failed'" type="error">{{ job.status.message }}</n-alert>
-      <n-alert v-else-if="job?.status.state === 'transferred'" type="info"><template v-if="wirelessH2">Wireless transfer acknowledged. Saving and boot display still need hardware verification.</template><template v-else>Image transferred. {{ job.status.response_received ? '' : 'The screen did not confirm the upload. ' }}Power-cycle the screen to check the startup image.</template></n-alert>
-      <p v-else-if="job?.status.state === 'cancelled'">{{ wirelessH2 ? 'Upload cancelled. An image already submitted may still be saved.' : 'Cancelled before transfer.' }}</p>
-      <p v-if="busy">{{ job?.status.state === 'transferring' ? 'Uploading. Keep the screen connected.' : 'Preparing upload…' }}</p>
+      <n-alert v-else-if="job?.status.state === 'transferred'" type="info">{{ wirelessH2 ? t("lcd.startupImage.wirelessTransferred") : job.status.response_received ? t("lcd.startupImage.transferred") : t("lcd.startupImage.transferredUnconfirmed") }}</n-alert>
+      <p v-else-if="job?.status.state === 'cancelled'">{{ wirelessH2 ? t("lcd.startupImage.wirelessCancelled") : t("lcd.startupImage.cancelled") }}</p>
+      <p v-if="busy">{{ job?.status.state === 'transferring' ? t("lcd.startupImage.uploading") : t("lcd.startupImage.preparing") }}</p>
       <div class="actions">
-        <n-button v-if="busy" @click="cancel">Request cancellation</n-button>
-        <n-button type="primary" :loading="busy" :disabled="busy || picking || previewPending || !payload || !!error" @click="upload">Upload startup image</n-button>
+        <n-button v-if="busy" @click="cancel">{{ t("lcd.startupImage.requestCancel") }}</n-button>
+        <n-button type="primary" :loading="busy" :disabled="busy || picking || previewPending || !payload || !!error" @click="upload">{{ t("lcd.startupImage.upload") }}</n-button>
       </div>
     </div>
   </n-modal>

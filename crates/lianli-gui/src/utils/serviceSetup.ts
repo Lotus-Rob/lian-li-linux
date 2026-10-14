@@ -1,4 +1,12 @@
+import type { DaemonInfo } from "@/types";
 import type { ServiceReport } from "@/types/installation";
+import type { MessageKey } from "@/i18n";
+
+export const DAEMON_MODE_LABELS: Record<DaemonInfo["mode"], MessageKey> = {
+  user: "service.scope.user",
+  system: "service.scope.system",
+  unknown: "service.scope.unknown",
+};
 
 export function canSwitchServices(report?: ServiceReport | null): boolean {
   if (report?.context.kind === "native") return true;

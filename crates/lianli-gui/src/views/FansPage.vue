@@ -10,11 +10,13 @@ import FanGroupCard from "@/components/fans/FanGroupCard.vue";
 import SensorSelect from "@/components/common/SensorSelect.vue";
 import type { SensorSource, DeviceInfo } from "@/types";
 import { enumerateSensorsAsOptions } from "@/stores/sensorOptions";
+import { useTranslate } from "@/i18n";
 
 const config = useConfigStore();
 const devices = useDevicesStore();
 const names = useDeviceNamesStore();
 const dialog = useDialog();
+const t = useTranslate();
 
 const selectedCurve = ref(0);
 
@@ -72,9 +74,9 @@ const curveUsers = computed(() => {
     const slots = device ? group.speeds.slice(0, device.fan_count ?? 1) : group.speeds;
     const count = slots.filter((speed) => speed === name).length;
     if (!count) return [];
-    if (!device) return [`${group.device_id ?? "Unknown device"} (offline)`];
+    if (!device) return [t("fans.page.curveUserOffline", { device: group.device_id ?? t("fans.page.unknownDevice") })];
     const label = names.label(device.device_id, fanLabels.value.get(device.device_id) ?? device.name);
-    return [`${label} (${count} fan${count === 1 ? "" : "s"})`];
+    return [t(count === 1 ? "fans.page.curveUserOneFan" : "fans.page.curveUserFans", { label, count })];
   });
 });
 
@@ -87,7 +89,7 @@ function onCurveChange(value: [number, number][]) {
 }
 
 function addCurve() {
-  const name = uniqueName("New Curve", curves.value.map((c) => c.name));
+  const name = uniqueName(t("fans.page.newCurveName"), curves.value.map((c) => c.name));
   config.addFanCurve({
     name,
     temp_source: null,
@@ -103,10 +105,10 @@ function addCurve() {
 
 function removeCurve(idx: number) {
   dialog.error({
-    title: "Delete curve?",
-    content: `"${curves.value[idx]?.name ?? "Curve"}" will be permanently deleted.`,
-    positiveText: "Delete",
-    negativeText: "Cancel",
+    title: t("fans.page.deleteCurveTitle"),
+    content: t("fans.page.deleteCurveContent", { name: curves.value[idx]?.name ?? t("fans.page.curveFallbackName") }),
+    positiveText: t("common.delete"),
+    negativeText: t("common.cancel"),
     onPositiveClick: () => {
       curves.value.splice(idx, 1);
       if (selectedCurve.value > idx) selectedCurve.value -= 1;
@@ -193,7 +195,7 @@ function onHysteresisPwm(percent: number | null) {
     <!-- Section 1: Fan curves -->
     <section class="card section">
       <div class="section-head">
-        <h2 class="section-title">Fan Curves</h2>
+        <h2 class="section-title">{{ t("fans.page.fanCurves") }}</h2>
       </div>
 
       <!-- Curve selector as tabs (clearer than a dropdown + separate label).
@@ -209,14 +211,14 @@ function onHysteresisPwm(percent: number | null) {
           <span class="curve-tab-name" @click="selectedCurve = i">{{ c.name }}</span>
           <button
             class="curve-tab-del"
-            title="Delete curve"
+            :title="t('fans.page.deleteCurve')"
             @click.stop="removeCurve(i)"
           >
             <X :size="11" />
           </button>
         </div>
         <button class="curve-tab add" @click="addCurve">
-          <Plus :size="13" /> Add
+          <Plus :size="13" /> {{ t("common.add") }}
         </button>
       </div>
 
@@ -227,16 +229,16 @@ function onHysteresisPwm(percent: number | null) {
         />
         <div class="curve-side">
           <div class="field">
-            <label class="muted">Name</label>
+            <label class="muted">{{ t("fans.page.name") }}</label>
             <n-input
               size="small"
               v-model:value="nameBuffer"
               @blur="renameCurve(nameBuffer)"
-              placeholder="Curve name"
+              :placeholder="t('fans.page.curveNamePlaceholder')"
             />
           </div>
           <div class="field">
-            <label class="muted">Temperature source</label>
+            <label class="muted">{{ t("fans.page.temperatureSource") }}</label>
             <SensorSelect
               size="small"
               :value="tempSourceValue"
@@ -246,26 +248,26 @@ function onHysteresisPwm(percent: number | null) {
             />
           </div>
           <div class="field" v-if="tempSourceValue === 'command' || tempSourceValue === ''">
-            <label class="muted">Custom command</label>
+            <label class="muted">{{ t("fans.page.customCommand") }}</label>
             <n-input
               size="small"
               v-model:value="commandBuffer"
               @blur="onTempCommand(commandBuffer)"
-              placeholder="e.g. cat /sys/class/thermal/thermal_zone0/temp"
+              :placeholder="t('fans.page.commandPlaceholder', { command: 'cat /sys/class/thermal/thermal_zone0/temp' })"
             />
           </div>
           <div class="field">
-            <label class="muted">Used by</label>
-            <span class="used-by">{{ curveUsers.length ? curveUsers.join(", ") : "No fans use this curve" }}</span>
+            <label class="muted">{{ t("fans.page.usedBy") }}</label>
+            <span class="used-by">{{ curveUsers.length ? curveUsers.join(t("fans.page.usedBySeparator")) : t("fans.page.noFansUseCurve") }}</span>
           </div>
         </div>
       </div>
-      <div v-else class="empty muted">No fan curves. Click "Add" to create one.</div>
+      <div v-else class="empty muted">{{ t("fans.page.noCurves") }}</div>
     </section>
 
     <!-- Section 2: Fan speed assignments -->
     <section class="card section">
-      <h2 class="section-title">Fan Speed Assignments</h2>
+      <h2 class="section-title">{{ t("fans.page.fanSpeedAssignments") }}</h2>
       <div v-if="assignmentGroups.length" class="groups">
         <FanGroupCard
           v-for="ag in assignmentGroups"
@@ -276,13 +278,13 @@ function onHysteresisPwm(percent: number | null) {
           :pwm-headers="config.pwmHeaders"
         />
       </div>
-      <div v-else class="empty muted">No fan devices detected.</div>
+      <div v-else class="empty muted">{{ t("fans.page.noFanDevices") }}</div>
     </section>
 
     <section class="card settings-row">
-      <h2 class="section-title">Controller</h2>
+      <h2 class="section-title">{{ t("fans.page.controller") }}</h2>
       <div class="field">
-        <label class="muted">Update interval</label>
+        <label class="muted">{{ t("fans.page.updateInterval") }}</label>
         <n-input-number
           size="small"
           :value="fanCfg.update_interval_ms"
@@ -293,7 +295,7 @@ function onHysteresisPwm(percent: number | null) {
         ><template #suffix>ms</template></n-input-number>
       </div>
       <div class="field">
-        <label class="muted" title="Ignore temperature changes smaller than this">Temperature hysteresis</label>
+        <label class="muted" :title="t('fans.page.temperatureHysteresisHint')">{{ t("fans.page.temperatureHysteresis") }}</label>
         <n-input-number
           size="small"
           :value="fanCfg.hysteresis_temp"
@@ -305,7 +307,7 @@ function onHysteresisPwm(percent: number | null) {
         ><template #suffix>°C</template></n-input-number>
       </div>
       <div class="field">
-        <label class="muted" title="Ignore speed changes smaller than this">Speed hysteresis</label>
+        <label class="muted" :title="t('fans.page.speedHysteresisHint')">{{ t("fans.page.speedHysteresis") }}</label>
         <n-input-number
           size="small"
           :value="Math.round((fanCfg.hysteresis_pwm / 255) * 1000) / 10"

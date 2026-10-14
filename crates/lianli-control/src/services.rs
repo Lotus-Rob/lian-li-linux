@@ -1,10 +1,11 @@
 use crate::command::{self, Output};
 use anyhow::{bail, ensure, Context, Result};
 use lianli_shared::installation::{
-    CheckState, FindingSeverity, InstallationContext, InstallationFinding, InstallationGuide,
+    message_params, CheckState, FindingSeverity, InstallationContext, InstallationFinding,
+    InstallationGuide,
 };
 use lianli_shared::services::{ServiceProbe, ServiceReport, UnitState, SYSTEM_UNIT, USER_UNIT};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, OpenOptions};
 use std::io::Read;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt};
@@ -338,6 +339,7 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
                 title: "Service switching needs host support".into(), evidence: format!("{error:#}"),
                 remediation: "Install the matching host control helper, systemd-run and Polkit. For Distrobox, use Set up host support in Settings. Run a desktop authentication agent, then Recheck.".into(),
                 guide: InstallationGuide::ServiceModes,
+                message_key: Some("control.switchPrerequisites".into()), message_params: BTreeMap::new(),
             });
         }
     }
@@ -357,6 +359,7 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
             severity: FindingSeverity::Error, feature: "Service startup".into(), context: context.into(),
             title: "Host service selection is unverified".into(), evidence: reason.clone(),
             remediation: "Resolve any unfinished service switch before starting a daemon. For invalid or hidden selection records, follow the Service modes guide and preserve recovery files. Do not create a private container selection file.".into(), guide,
+            message_key: Some("control.serviceSelection".into()), message_params: BTreeMap::new(),
         });
     }
     if let ServiceProbe::Known { value } = &report.user {
@@ -371,17 +374,20 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
             InstallationContext::Native => false,
         };
         if needs_recipe {
-            let remediation = match &report.context {
-                InstallationContext::Distrobox { name } => crate::distrobox_unit::guidance(name)
-                    .unwrap_or_else(|error| format!("{error:#}. Follow the Distrobox guide to select an existing box and update the host user unit.")),
-                _ => "Follow the Distrobox guide to update the host user unit, then reload the user manager. Keep both application binaries installed inside the same box. Stop an older daemon cleanly before changing its unit.".into(),
+            let (message_key, params, remediation) = match &report.context {
+                InstallationContext::Distrobox { name } => match crate::distrobox_unit::guidance(name) {
+                    Ok(guidance) => ("control.distroboxRecipe", message_params([("name", name.clone())]), guidance),
+                    Err(error) => ("control.distroboxRecipeInvalidBox", BTreeMap::new(),
+                        format!("{error:#}. Follow the Distrobox guide to select an existing box and update the host user unit.")),
+                },
+                _ => ("control.distroboxRecipeUnsupported", BTreeMap::new(), "Follow the Distrobox guide to update the host user unit, then reload the user manager. Keep both application binaries installed inside the same box. Stop an older daemon cleanly before changing its unit.".into()),
             };
             findings.push(InstallationFinding {
                 code: "service.distrobox_recipe".into(), state: CheckState::Failed,
                 severity: FindingSeverity::Warning, feature: "Service management".into(), context: context.into(),
                 title: "Distrobox service controls need the current service recipe".into(),
                 evidence: "The host user service is missing or does not have verified invocation-aware start and stop commands for this box.".into(),
-                remediation, guide,
+                remediation, guide, message_key: Some(message_key.into()), message_params: params,
             });
         }
     }
@@ -392,6 +398,7 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
             context: context.into(), title: "Service controls need the current host setup".into(),
             evidence: reason.clone(),
             remediation: "Install the current packaging/tmpfiles.d/lianli.conf on the host and run sudo systemd-tmpfiles --create lianli.conf, then Recheck.".into(), guide,
+            message_key: Some("control.operationLock".into()), message_params: BTreeMap::new(),
         });
     }
     if let Some(ServiceProbe::Unavailable { reason }) = &report.ownership {
@@ -399,6 +406,7 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
             code: "ownership.kernel".into(), state: CheckState::Unavailable, severity: FindingSeverity::Warning,
             feature: "Daemon ownership".into(), context: context.into(), title: "Kernel lock ownership is unverified".into(),
             evidence: reason.clone(), remediation: "Restore the shared host lock and host bridge before switching modes. A PID written in the file does not prove current ownership.".into(), guide,
+            message_key: Some("control.ownershipKernel".into()), message_params: BTreeMap::new(),
         });
     }
     if let Some(ServiceProbe::Known { value }) = &report.ownership {
@@ -409,12 +417,23 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
                 context: context.into(), title: "Hardware owner's service is unverified".into(),
                 evidence: reason.clone(),
                 remediation: "Recheck after startup or shutdown finishes. Service switching requires host process and service cgroup access. Do not stop a PID based on its number alone.".into(), guide,
+                message_key: Some("control.ownershipProcess".into()), message_params: BTreeMap::new(),
             });
         }
     }
-    for (code, title, probe) in [
-        ("service.user", "User hardware service", &report.user),
-        ("service.system", "System hardware service", &report.system),
+    for (code, message_key, title, probe) in [
+        (
+            "service.user",
+            "control.userService",
+            "User hardware service",
+            &report.user,
+        ),
+        (
+            "service.system",
+            "control.systemService",
+            "System hardware service",
+            &report.system,
+        ),
     ] {
         let (state, severity, evidence) = match probe {
             ServiceProbe::Unavailable { reason } => (
@@ -482,6 +501,7 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
             code: code.into(), state, severity, feature: "Service management".into(), context: context.into(),
             title: title.into(), evidence,
             remediation: "Check the host service setup and journal. Install the supplied units, then select one hardware mode. Do not start another daemon while an existing owner is running.".into(), guide,
+            message_key: Some(message_key.into()), message_params: BTreeMap::new(),
         });
     }
     let global_enabled = match &report.global_user {
@@ -499,6 +519,8 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
                     "Check global user-service enablement on the host before selecting system mode."
                         .into(),
                 guide,
+                message_key: Some("control.globalUserUnverified".into()),
+                message_params: BTreeMap::new(),
             });
             false
         }
@@ -518,6 +540,7 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
             feature: "Daemon ownership".into(), context: context.into(), title: "Competing hardware service selections".into(),
             evidence: "Both hardware modes are active or selected for startup. The ownership lock prevents concurrent access, but competing services may keep retrying.".into(),
             remediation: "Choose one hardware service mode. Resolve global user enablement and manually launched owners before switching. Do not stop another user's daemon.".into(), guide,
+            message_key: Some("control.serviceConflict".into()), message_params: BTreeMap::new(),
         });
     } else if global_enabled {
         findings.push(InstallationFinding {
@@ -525,6 +548,7 @@ pub fn findings(report: &ServiceReport) -> Vec<InstallationFinding> {
             feature: "Daemon ownership".into(), context: context.into(), title: "Hardware service enabled for every user".into(),
             evidence: "The host has global user-service enablement. Another login can start a competing hardware service.".into(),
             remediation: "Ask the administrator to disable the global default and select startup only for the intended user or the system service.".into(), guide,
+            message_key: Some("control.globalUserEnabled".into()), message_params: BTreeMap::new(),
         });
     }
     findings

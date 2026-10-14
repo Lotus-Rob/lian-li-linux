@@ -3,6 +3,7 @@ import { onScopeDispose, ref } from "vue";
 import { useIpc } from "@/composables/useIpc";
 import { useConfigStore } from "@/stores/config";
 import type { FanSpeed } from "@/types";
+import { tr } from "@/i18n";
 
 export const useFansStore = defineStore("fans", () => {
   const ipc = useIpc();
@@ -53,10 +54,12 @@ export const useFansStore = defineStore("fans", () => {
 
   function fanSpeedLabel(speed: FanSpeed, curves: string[]): string {
     if (typeof speed === "number") return `PWM ${Math.round((speed / 255) * 100)}%`;
-    if (speed === "__mb_sync__") return "MB Sync";
-    if (speed.startsWith("__mb_sync__:")) return `MB Sync (${speed.slice("__mb_sync__:".length)})`;
-    if (speed === "off" || speed === "") return "Off";
-    if (curves.includes(speed)) return `Curve: ${speed}`;
+    if (speed === "__mb_sync__") return tr("fans.speedMode.mbSync");
+    if (speed.startsWith("__mb_sync__:")) {
+      return tr("fans.speedMode.mbSyncSource", { source: speed.slice("__mb_sync__:".length) });
+    }
+    if (speed === "off" || speed === "") return tr("common.off");
+    if (curves.includes(speed)) return tr("fans.speedMode.curve", { name: speed });
     return speed;
   }
 

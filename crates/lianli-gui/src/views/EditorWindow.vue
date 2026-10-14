@@ -16,11 +16,13 @@ import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import MediaAccessNotice from "@/components/lcd/MediaAccessNotice.vue";
 import { screenPresets } from "@/constants/screen";
 import { sourceConfigsAsOptions, inferSensorCategory } from "@/stores/sensorOptions";
+import { useTranslate } from "@/i18n";
 
 const config = useConfigStore();
 const lcd = useLcdStore();
 const route = useRoute();
 const { load: loadFonts, fontOptions } = useFonts();
+const t = useTranslate();
 
 const template = ref<LcdTemplate | null>(null);
 const selectedId = ref<string | null>(null);
@@ -105,7 +107,7 @@ function uniqueTemplateName(base: string): string {
 function blankTemplate(): LcdTemplate {
   return {
     id: "user-" + Date.now().toString(16),
-    name: uniqueTemplateName("New Template"),
+    name: uniqueTemplateName(t("editor.window.newTemplateName")),
     base_width: 480,
     base_height: 480,
     background: { type: "color", rgb: [0, 0, 0, 255] },
@@ -411,16 +413,16 @@ async function onCopyJson() {
   const json = JSON.stringify(portablizeForExport(template.value), null, 2);
   try {
     await writeText(json);
-    setStatus("Template JSON copied to clipboard", false);
+    setStatus(t("editor.window.jsonCopied"), false);
   } catch (e) {
-    setStatus(`Copy failed: ${e}`, true);
+    setStatus(t("editor.window.copyFailed", { error: String(e) }), true);
   }
 }
 
 async function onSave() {
   if (!template.value) return;
   if (!template.value.name.trim()) {
-    setStatus("Template name must not be empty", true);
+    setStatus(t("editor.window.nameEmpty"), true);
     return;
   }
   if (
@@ -428,7 +430,7 @@ async function onSave() {
       (t) => t.id !== template.value!.id && t.name === template.value!.name,
     )
   ) {
-    setStatus(`A template named '${template.value.name}' already exists.`, true);
+    setStatus(t("editor.window.nameExists", { name: template.value.name }), true);
     return;
   }
   const idx = config.templates.findIndex((t) => t.id === template.value!.id);
@@ -439,9 +441,9 @@ async function onSave() {
   }
   try {
     await lcd.setTemplates(config.templates);
-    setStatus("Saved", false);
+    setStatus(t("common.saved"), false);
   } catch (e) {
-    setStatus(`Save failed: ${e}`, true);
+    setStatus(t("editor.window.saveFailed", { error: String(e) }), true);
   }
 }
 
@@ -471,22 +473,22 @@ function commitName() {
 <template>
   <div class="editor-window">
     <div class="toolbar">
-      <n-input v-model:value="localName" @blur="commitName" size="small" style="width: 220px" placeholder="Template name" />
+      <n-input v-model:value="localName" @blur="commitName" size="small" style="width: 220px" :placeholder="t('editor.window.templateNamePlaceholder')" />
       <n-select
         :value="currentPresetLabel"
         :options="presetOptions"
         size="small"
         style="width: 260px"
-        placeholder="Target device"
+        :placeholder="t('editor.window.targetDevicePlaceholder')"
         @update:value="onPresetSelected"
       />
-      <n-checkbox :checked="template?.rotated ?? false" @update:checked="onRotated">Rotated</n-checkbox>
+      <n-checkbox :checked="template?.rotated ?? false" @update:checked="onRotated">{{ t("editor.window.rotated") }}</n-checkbox>
       <div class="bg-group">
         <n-button size="tiny" :type="bgType === 'color' ? 'primary' : 'default'" :ghost="bgType !== 'color'" @click="setBgColorMode">
-          <template #icon><Palette :size="12" /></template>Color
+          <template #icon><Palette :size="12" /></template>{{ t("editor.window.backgroundColor") }}
         </n-button>
         <n-button size="tiny" :type="bgType === 'image' ? 'primary' : 'default'" :ghost="bgType !== 'image'" @click="pickBgImage">
-          <template #icon><ImageIcon :size="12" /></template>Image
+          <template #icon><ImageIcon :size="12" /></template>{{ t("editor.window.backgroundImage") }}
         </n-button>
         <ColorPicker
           v-if="bgType === 'color'"
@@ -501,9 +503,9 @@ function commitName() {
       </div>
       <div class="spacer" />
       <span v-if="statusMessage" class="status" :class="{ err: statusIsError }">{{ statusMessage }}</span>
-      <n-button size="small" @click="onCopyJson"><template #icon><Copy :size="14" /></template>Copy JSON</n-button>
-      <n-button size="small" type="primary" @click="onSave"><template #icon><Save :size="14" /></template>Save</n-button>
-      <n-button size="small" quaternary @click="closeWindow"><template #icon><X :size="14" /></template>Close</n-button>
+      <n-button size="small" @click="onCopyJson"><template #icon><Copy :size="14" /></template>{{ t("editor.window.copyJson") }}</n-button>
+      <n-button size="small" type="primary" @click="onSave"><template #icon><Save :size="14" /></template>{{ t("common.save") }}</n-button>
+      <n-button size="small" quaternary @click="closeWindow"><template #icon><X :size="14" /></template>{{ t("common.close") }}</n-button>
     </div>
 
     <div v-if="template" class="template-access">

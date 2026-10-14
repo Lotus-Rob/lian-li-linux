@@ -2,7 +2,7 @@ use lianli_shared::installation::{
     CheckState, FindingSeverity, InstallationContext, InstallationFinding, InstallationGuide,
     InstallationReport,
 };
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read};
 use std::os::unix::fs::OpenOptionsExt;
@@ -84,6 +84,8 @@ pub fn check() -> Result<InstallationReport, String> {
             evidence: "This container does not expose the supported Distrobox host integration.".into(),
             remediation: "Use a native installation or restore Distrobox's /run/host integration. The daemon cannot safely start with a private container lock.".into(),
             guide: InstallationGuide::Distrobox,
+            message_key: Some("gui.hostUnavailable".into()),
+            message_params: BTreeMap::new(),
         });
     }
     let services = lianli_control::services::inspect(&context);
@@ -204,6 +206,8 @@ fn check_desktop_startup(context: &InstallationContext) -> InstallationFinding {
         }.into(),
         remediation: "Check lianli-session.service or follow the desktop startup guide for source builds. This helper is needed only for Desktop mode.".into(),
         guide: InstallationGuide::Troubleshooting,
+        message_key: Some(if present { "gui.desktopStartupFound" } else { "gui.desktopStartupMissing" }.into()),
+        message_params: BTreeMap::new(),
     }
 }
 
@@ -221,6 +225,7 @@ fn reconcile_rules(findings: &mut [InstallationFinding], daemon: &[InstallationF
         rules.severity = FindingSeverity::Info;
         rules.evidence.push_str(" The daemon has node access for visible devices. Custom rules or ACLs may provide it. Device initialization and devices outside this environment remain unverified.");
         rules.remediation = "No rule replacement is required. Keep working custom rules. Check daemon logs for open failures and Recheck after setup changes.".into();
+        rules.message_key = Some("gui.usbRulesCustomAccess".into());
     }
 }
 
@@ -239,13 +244,15 @@ fn merge_runtime(
 
 fn daemon_unavailable(owner_pid: Option<u32>, error: &str) -> InstallationFinding {
     let detail: String = error.chars().take(2048).collect();
-    let (title, evidence, remediation) = match owner_pid {
+    let (key, title, evidence, remediation) = match owner_pid {
         Some(pid) => (
+            "gui.hardwareOwnerUnreachable",
             "Hardware owner unreachable",
             format!("PID {pid} holds the hardware lock, but the GUI cannot reach daemon IPC. {detail}"),
             "Wait for startup or switching to finish, then Recheck. If this persists, check daemon logs and socket visibility. For a Distrobox daemon, launch the GUI in the same box or expose the host runtime socket.",
         ),
         None => (
+            "gui.daemonConnectionUnavailable",
             "Daemon connection unavailable",
             format!("The GUI cannot reach the daemon. {detail}"),
             "Choose one service in Settings or start your manual daemon, then Recheck. For Distrobox, the GUI and daemon must share a visible runtime socket.",
@@ -261,13 +268,16 @@ fn daemon_unavailable(owner_pid: Option<u32>, error: &str) -> InstallationFindin
         evidence,
         remediation: remediation.into(),
         guide: InstallationGuide::Troubleshooting,
+        message_key: Some(key.into()),
+        message_params: BTreeMap::new(),
     }
 }
 
 fn runtime_unavailable(code: &str, context: &str, evidence: &str) -> InstallationFinding {
     InstallationFinding { code:code.into(), state:CheckState::Unavailable, severity:FindingSeverity::Warning,
         feature:"Installation checks".into(), context:context.into(), title:"Runtime installation checks unavailable".into(),
-        evidence:evidence.into(), remediation:"Install the matching lianli-control beside the GUI and daemon, start the selected service, then Recheck. See the troubleshooting guide for source builds and offline diagnostics.".into(), guide:InstallationGuide::Troubleshooting }
+        evidence:evidence.into(), remediation:"Install the matching lianli-control beside the GUI and daemon, start the selected service, then Recheck. See the troubleshooting guide for source builds and offline diagnostics.".into(), guide:InstallationGuide::Troubleshooting,
+        message_key: Some("gui.runtimeChecksUnavailable".into()), message_params: BTreeMap::new() }
 }
 
 fn compare_daemon_lock(
@@ -290,6 +300,8 @@ fn compare_daemon_lock(
         title: "Connected daemon lock identity".into(), evidence: evidence.into(),
         remediation: "Update all daemon launch routes, stop the old owner cleanly and restart the selected service. Do not delete a live lock file or start another daemon to repair this.".into(),
         guide: InstallationGuide::ServiceModes,
+        message_key: Some("gui.daemonLockIdentity".into()),
+        message_params: BTreeMap::new(),
     })
 }
 
@@ -328,6 +340,8 @@ fn check_lock(path: &Path, context: &str) -> InstallationFinding {
         evidence,
         remediation: "Install the supplied tmpfiles rule on the host and run sudo systemd-tmpfiles --create lianli.conf. Never delete or replace a lock while a daemon is running.".into(),
         guide: InstallationGuide::ServiceModes,
+        message_key: Some("gui.ownershipLock".into()),
+        message_params: BTreeMap::new(),
     }
 }
 
@@ -342,6 +356,8 @@ fn check_rules(root: &Path, context: &str) -> InstallationFinding {
         evidence: "60-lianli.rules was not found in the host's udev rule directories. Other custom rules may still provide access.".into(),
         remediation: "Install the current USB rules on the host, reload udev rules and reapply them. Review intentional custom rules before replacing them. File checks alone do not verify device permissions.".into(),
         guide: InstallationGuide::UsbPermissions,
+        message_key: Some("gui.usbRules".into()),
+        message_params: BTreeMap::new(),
     };
     for name in RULE_PATHS {
         let resolved = match resolve_in_root(root, Path::new(name)) {

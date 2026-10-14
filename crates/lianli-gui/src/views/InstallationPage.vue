@@ -7,15 +7,22 @@ import MediaStreamStatus from "@/components/common/MediaStreamStatus.vue";
 import DiagnosticExport from "@/components/common/DiagnosticExport.vue";
 import DesktopStreamStatus from "@/components/common/DesktopStreamStatus.vue";
 import { INSTALLATION_GUIDES, type CheckState, type InstallationGuide } from "@/types/installation";
+import { DAEMON_MODE_LABELS } from "@/utils/serviceSetup";
+import { findingContext, findingFeature, findingRemediation, findingTitle } from "@/utils/findingText";
+import { useTranslate, type MessageKey } from "@/i18n";
 
+const t = useTranslate();
 const installation = useInstallationStore();
 const daemon = useDaemonStore();
 const checkedAt = computed(() => installation.report
-  ? new Date(installation.report.checked_at_unix_ms).toLocaleString() : "Not checked yet");
+  ? new Date(installation.report.checked_at_unix_ms).toLocaleString() : t("service.installation.notChecked"));
 const needsAttention = computed(() => (installation.report?.findings ?? []).filter((finding) => finding.state !== "passed" && finding.state !== "not_applicable"));
 const otherFindings = computed(() => (installation.report?.findings ?? []).filter((finding) => finding.state === "passed" || finding.state === "not_applicable"));
-const stateLabels: Record<CheckState, string> = {
-  passed: "Passed", failed: "Failed", unavailable: "Unverified", not_applicable: "N/A",
+const stateLabels: Record<CheckState, MessageKey> = {
+  passed: "service.installation.state.passed",
+  failed: "service.installation.state.failed",
+  unavailable: "service.installation.state.unavailable",
+  not_applicable: "service.installation.state.notApplicable",
 };
 onMounted(() => {
   if (!installation.report) void installation.recheck();
@@ -34,58 +41,58 @@ async function recheck() {
 <template>
   <div class="health-page">
     <div class="health-header">
-      <div><h1>Installation Health</h1><p>{{ installation.contextLabel }} · {{ checkedAt }}</p></div>
-      <n-button :loading="installation.checking" @click="recheck">Recheck</n-button>
+      <div><h1>{{ t("service.installation.title") }}</h1><p>{{ installation.contextLabel }} · {{ checkedAt }}</p></div>
+      <n-button :loading="installation.checking" @click="recheck">{{ t("service.installation.recheck") }}</n-button>
     </div>
-    <n-alert v-if="installation.error" type="error" title="Check could not finish">
-      {{ installation.error }} Previous results, if shown, may be out of date.
+    <n-alert v-if="installation.error" type="error" :title="t('service.installation.checkFailedTitle')">
+      {{ t("service.installation.checkFailed", { error: installation.error }) }}
     </n-alert>
     <div class="connection-row">
-      <n-tag :type="daemon.connected ? 'success' : 'warning'">{{ daemon.connected ? 'Connected' : 'Offline' }}</n-tag>
-      <span v-if="daemon.info">{{ daemon.info.version }} · {{ daemon.info.mode }}</span>
-      <router-link to="/settings">Service settings</router-link>
-      <n-button size="small" text type="primary" @click="guide(installation.report?.context.kind === 'distrobox' ? 'distrobox' : 'service_modes')">Setup guide</n-button>
+      <n-tag :type="daemon.connected ? 'success' : 'warning'">{{ t(daemon.connected ? 'service.installation.connected' : 'service.installation.offline') }}</n-tag>
+      <span v-if="daemon.info">{{ daemon.info.version }} · {{ t(DAEMON_MODE_LABELS[daemon.info.mode]) }}</span>
+      <router-link to="/settings">{{ t("service.installation.serviceSettings") }}</router-link>
+      <n-button size="small" text type="primary" @click="guide(installation.report?.context.kind === 'distrobox' ? 'distrobox' : 'service_modes')">{{ t("service.installation.setupGuide") }}</n-button>
     </div>
-    <p v-if="!daemon.connected" class="muted">Start a service in Settings, then Recheck.</p>
+    <p v-if="!daemon.connected" class="muted">{{ t("service.installation.startServiceHint") }}</p>
     <div v-if="needsAttention.length" class="check-list">
       <details v-for="finding in needsAttention" :key="finding.code" class="check-row">
         <summary>
-          <n-tag size="small" :type="finding.severity === 'error' ? 'error' : 'warning'">{{ stateLabels[finding.state] }}</n-tag>
+          <n-tag size="small" :type="finding.severity === 'error' ? 'error' : 'warning'">{{ t(stateLabels[finding.state]) }}</n-tag>
           <span class="check-text">
-            <span class="check-title">{{ finding.title }}</span>
-            <span class="check-sub">{{ finding.remediation || finding.evidence }}</span>
+            <span class="check-title">{{ findingTitle(finding) }}</span>
+            <span class="check-sub">{{ findingRemediation(finding) || finding.evidence }}</span>
           </span>
         </summary>
         <div class="check-details">
-          <p class="check-context">{{ finding.context }} · {{ finding.feature }}</p>
+          <p class="check-context">{{ findingContext(finding) }} · {{ findingFeature(finding) }}</p>
           <p>{{ finding.evidence }}</p>
-          <n-button size="small" text type="primary" @click="guide(finding.guide)">Open guide</n-button>
+          <n-button size="small" text type="primary" @click="guide(finding.guide)">{{ t("service.installation.openGuide") }}</n-button>
         </div>
       </details>
     </div>
-    <p v-else-if="installation.report" class="all-good">All checks that need attention pass.</p>
+    <p v-else-if="installation.report" class="all-good">{{ t("service.installation.allGood") }}</p>
     <details v-if="otherFindings.length" class="passed-checks">
-      <summary>{{ otherFindings.length }} passed or non-applicable checks</summary>
+      <summary>{{ t("service.installation.otherChecks", { count: otherFindings.length }) }}</summary>
       <div class="check-list">
         <details v-for="finding in otherFindings" :key="finding.code" class="check-row">
           <summary>
-            <n-tag size="small" :type="finding.state === 'passed' ? 'success' : 'default'">{{ stateLabels[finding.state] }}</n-tag>
+            <n-tag size="small" :type="finding.state === 'passed' ? 'success' : 'default'">{{ t(stateLabels[finding.state]) }}</n-tag>
             <span class="check-text">
-              <span class="check-title">{{ finding.title }}</span>
-              <span class="check-sub">{{ finding.feature }}</span>
+              <span class="check-title">{{ findingTitle(finding) }}</span>
+              <span class="check-sub">{{ findingFeature(finding) }}</span>
             </span>
           </summary>
           <div class="check-details">
             <p>{{ finding.evidence }}</p>
-            <n-button size="small" text type="primary" @click="guide(finding.guide)">Open guide</n-button>
+            <n-button size="small" text type="primary" @click="guide(finding.guide)">{{ t("service.installation.openGuide") }}</n-button>
           </div>
         </details>
       </div>
     </details>
     <MediaStreamStatus />
     <DesktopStreamStatus />
-    <details class="diagnostics"><summary>Export diagnostics & daemon logs</summary><DiagnosticExport /></details>
-    <details><summary>About these checks</summary><p>Checks cover installation, permissions, service state and the last configuration load. Recheck does not reload configuration or test physical playback.</p><p v-if="daemon.socketPath">{{ daemon.socketPath }}</p></details>
+    <details class="diagnostics"><summary>{{ t("service.installation.exportDiagnostics") }}</summary><DiagnosticExport /></details>
+    <details><summary>{{ t("service.installation.aboutChecks") }}</summary><p>{{ t("service.installation.aboutChecksText") }}</p><p v-if="daemon.socketPath">{{ daemon.socketPath }}</p></details>
   </div>
 </template>
 

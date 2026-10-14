@@ -18,7 +18,9 @@ import {
   familySupportsDisplaySwitch,
   familyIsDesktopMode,
 } from "@/constants";
+import { useTranslate } from "@/i18n";
 
+const t = useTranslate();
 const message = useMessage();
 const props = defineProps<{ device: DeviceInfo }>();
 
@@ -83,7 +85,7 @@ const supportsDisplaySwitch = computed(() =>
 );
 const isDesktop = computed(() => familyIsDesktopMode(d.value.family));
 const displayModeLabel = computed(() =>
-  isDesktop.value ? "Switch to LCD Mode" : "Switch to Desktop Mode",
+  isDesktop.value ? t("devices.card.switchToLcd") : t("devices.card.switchToDesktop"),
 );
 
 async function onSwitchDisplay() {
@@ -92,7 +94,7 @@ async function onSwitchDisplay() {
   try {
     await lcd.switchDisplayMode(deviceId);
   } catch (error) {
-    devices.finishDisplaySwitch(deviceId, String(error));
+    devices.finishDisplaySwitch(deviceId, { message: String(error) });
     message.error(String(error));
   } finally {
     await refreshSoon();
@@ -106,8 +108,8 @@ const isBindOther = computed(() => d.value.wireless_bind_status === "bind_other"
 const needsRebind = computed(() => d.value.wireless_bind_status === "needs_rebind");
 const foreignOnline = computed(() => d.value.foreign_master_online === true);
 const bindLabel = computed(() => {
-  if (pending.value === "bind") return "Binding...";
-  return isBindOther.value ? "Take over" : "Bind";
+  if (pending.value === "bind") return t("devices.card.bindingButton");
+  return isBindOther.value ? t("devices.card.takeOver") : t("devices.card.bind");
 });
 
 async function onBind() {
@@ -115,11 +117,10 @@ async function onBind() {
   if (isBindOther.value) {
     const ok = await new Promise<boolean>((resolve) => {
       dialog.warning({
-        title: "Take over this device?",
-        content:
-          "It currently belongs to another controller. Taking it over will disconnect it from that PC.",
-        positiveText: "Take over",
-        negativeText: "Cancel",
+        title: t("devices.card.takeOverTitle"),
+        content: t("devices.card.takeOverContent"),
+        positiveText: t("devices.card.takeOver"),
+        negativeText: t("common.cancel"),
         onPositiveClick: () => resolve(true),
         onNegativeClick: () => resolve(false),
         onClose: () => resolve(false),
@@ -172,8 +173,8 @@ const defaultLabel = computed(() =>
 );
 const customName = computed(() => names.nameOf(d.value.device_id));
 const role = computed(() => {
-  if (caps.value.fan && fanRpms.value.length > 1) return `Fan group · ${fanRpms.value.length} fans`;
-  if (caps.value.lcd && !caps.value.fan && !caps.value.pump) return "LCD screen";
+  if (caps.value.fan && fanRpms.value.length > 1) return t("devices.card.roleFanGroup", { count: fanRpms.value.length });
+  if (caps.value.lcd && !caps.value.fan && !caps.value.pump) return t("devices.card.roleLcdScreen");
   return null;
 });
 
@@ -181,36 +182,36 @@ const subtitle = computed(() =>
   [
     role.value,
     familyName.value,
-    isBoundWireless.value || isUnboundWireless.value ? "Wireless" : null,
-    d.value.serial ? `SN ${d.value.serial}` : null,
-    d.value.firmware_version ? `FW ${d.value.firmware_version}` : null,
+    isBoundWireless.value || isUnboundWireless.value ? t("devices.card.wireless") : null,
+    d.value.serial ? t("devices.card.serial", { serial: d.value.serial }) : null,
+    d.value.firmware_version ? t("devices.card.firmware", { version: d.value.firmware_version }) : null,
   ].filter(Boolean).join(" · "),
 );
 
 type StatusTone = "success" | "warning" | "danger" | "muted" | "info";
 const status = computed<{ label: string; tone: StatusTone; busy?: boolean }>(() => {
-  if (!daemon.connected) return { label: "Offline", tone: "muted" };
+  if (!daemon.connected) return { label: t("common.offline"), tone: "muted" };
   switch (pending.value) {
-    case "switch": return { label: "Switching…", tone: "warning", busy: true };
-    case "bind": return { label: "Binding…", tone: "warning", busy: true };
-    case "unbind": return { label: "Unbinding…", tone: "warning", busy: true };
-    case "fan-quantity": return { label: "Applying…", tone: "warning", busy: true };
+    case "switch": return { label: t("devices.card.status.switching"), tone: "warning", busy: true };
+    case "bind": return { label: t("devices.card.status.binding"), tone: "warning", busy: true };
+    case "unbind": return { label: t("devices.card.status.unbinding"), tone: "warning", busy: true };
+    case "fan-quantity": return { label: t("devices.card.status.applying"), tone: "warning", busy: true };
   }
   if (isUnboundWireless.value) {
     return isBindOther.value
-      ? { label: foreignOnline.value ? "Other PC (online)" : "Other PC (offline)", tone: "muted" }
-      : { label: "Not bound", tone: "muted" };
+      ? { label: foreignOnline.value ? t("devices.card.status.otherPcOnline") : t("devices.card.status.otherPcOffline"), tone: "muted" }
+      : { label: t("devices.card.status.notBound"), tone: "muted" };
   }
-  if (needsRebind.value) return { label: "Needs rebind", tone: "warning" };
-  if (d.value.telemetry?.error) return { label: "Telemetry error", tone: "danger" };
-  if (isDesktop.value) return { label: "Desktop mode", tone: "info" };
-  return { label: "Online", tone: "success" };
+  if (needsRebind.value) return { label: t("devices.card.status.needsRebind"), tone: "warning" };
+  if (d.value.telemetry?.error) return { label: t("devices.card.status.telemetryError"), tone: "danger" };
+  if (isDesktop.value) return { label: t("devices.card.status.desktopMode"), tone: "info" };
+  return { label: t("common.online"), tone: "success" };
 });
 
 const temperatureReadings = computed(() =>
   (d.value.telemetry?.temperatures ?? []).map((reading) => ({
     name: reading.name,
-    text: reading.celsius == null ? (reading.abnormal ? "Abnormal" : "N/A") : `${reading.celsius.toFixed(1)}°C`,
+    text: reading.celsius == null ? (reading.abnormal ? t("devices.card.abnormal") : t("devices.card.notAvailable")) : `${reading.celsius.toFixed(1)}°C`,
   })),
 );
 
@@ -219,9 +220,9 @@ async function ping() {
     await ipc.request("PingDevice", { device_id: d.value.device_id, zone: 0 });
   } catch (e) {
     dialog.error({
-      title: "Ping failed",
+      title: t("devices.card.pingFailed"),
       content: String(e),
-      positiveText: "OK",
+      positiveText: t("common.ok"),
     });
   }
 }
@@ -240,15 +241,15 @@ async function ping() {
         />
         <span class="caps">
           <Monitor v-if="caps.lcd" :size="12" class="cap-lcd" title="LCD" />
-          <Fan v-if="caps.fan" :size="12" class="cap-fan" title="Fan" />
-          <Droplet v-if="caps.pump" :size="12" class="cap-pump" title="Pump" />
+          <Fan v-if="caps.fan" :size="12" class="cap-fan" :title="t('devices.card.capFan')" />
+          <Droplet v-if="caps.pump" :size="12" class="cap-pump" :title="t('devices.card.capPump')" />
           <Palette v-if="caps.rgb" :size="12" class="cap-rgb" title="RGB" />
         </span>
       </div>
       <div class="subtitle">{{ subtitle }}</div>
       <p v-if="d.telemetry?.error" class="error-text">{{ d.telemetry.error }}</p>
-      <p v-if="isUnboundWireless && isBindOther" class="subtitle">Owned by another controller</p>
-      <p v-if="isBoundWireless && needsRebind" class="subtitle">Not following this dongle. Rebind to restore control.</p>
+      <p v-if="isUnboundWireless && isBindOther" class="subtitle">{{ t("devices.card.ownedByOther") }}</p>
+      <p v-if="isBoundWireless && needsRebind" class="subtitle">{{ t("devices.card.needsRebindHint") }}</p>
     </div>
 
     <span class="status" :class="`tone-${status.tone}`">
@@ -258,23 +259,23 @@ async function ping() {
     </span>
 
     <div class="readings">
-      <span v-if="fanRpmText" class="reading" :title="`Fan RPM: ${fanRpmText}`">
+      <span v-if="fanRpmText" class="reading" :title="t('devices.card.fanRpmTitle', { rpms: fanRpmText })">
         <Fan :size="12" /><span class="mono">{{ fanRpmText }}</span>
       </span>
-      <span v-if="coolantText" class="reading" title="Coolant">
+      <span v-if="coolantText" class="reading" :title="t('devices.card.coolantTitle')">
         <Droplet :size="12" /><span class="mono">{{ coolantText }}</span>
       </span>
       <span v-for="reading in temperatureReadings" :key="reading.name" class="reading" :title="reading.name">
         <span class="reading-label">{{ reading.name }}</span><span class="mono">{{ reading.text }}</span>
       </span>
-      <span v-if="resolution" class="reading" title="Screen">
+      <span v-if="resolution" class="reading" :title="t('devices.card.screenTitle')">
         <Monitor :size="12" /><span class="mono">{{ resolution }}</span>
       </span>
     </div>
 
     <div class="actions">
       <label v-if="supportsFanQuantity" class="qty">
-        <span class="muted">Fans</span>
+        <span class="muted">{{ t("devices.card.fanQuantity") }}</span>
         <n-input-number
           :value="fanQty"
           size="tiny"
@@ -290,7 +291,7 @@ async function ping() {
         :loading="pending === 'switch'"
         :disabled="pending === 'switch'"
         @click="onSwitchDisplay"
-      >{{ pending === "switch" ? "Switching…" : displayModeLabel }}</n-button>
+      >{{ pending === "switch" ? t("devices.card.status.switching") : displayModeLabel }}</n-button>
       <n-button
         v-if="isUnboundWireless"
         size="tiny"
@@ -306,15 +307,15 @@ async function ping() {
         :loading="pending === 'bind'"
         :disabled="pending === 'bind' || pending === 'unbind'"
         @click="onBind"
-      >{{ pending === "bind" ? "Rebinding…" : "Rebind" }}</n-button>
+      >{{ pending === "bind" ? t("devices.card.rebinding") : t("devices.card.rebind") }}</n-button>
       <n-button
         v-if="isBoundWireless"
         size="tiny"
         :loading="pending === 'unbind'"
         :disabled="pending === 'unbind' || pending === 'bind'"
         @click="onUnbind"
-      >{{ pending === "unbind" ? "Unbinding…" : "Unbind" }}</n-button>
-      <button v-if="caps.rgb" class="ping-btn" title="Identify device" @click="ping">
+      >{{ pending === "unbind" ? t("devices.card.status.unbinding") : t("devices.card.unbind") }}</n-button>
+      <button v-if="caps.rgb" class="ping-btn" :title="t('devices.card.identify')" @click="ping">
         <Locate :size="15" />
       </button>
     </div>

@@ -2,7 +2,7 @@ use lianli_shared::installation::{
     CheckState, FindingSeverity, InstallationFinding, InstallationGuide,
 };
 use lianli_shared::sensors::SensorReading;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
@@ -96,6 +96,15 @@ fn finding_for(tracked: usize, fallback: usize) -> InstallationFinding {
         evidence,
         remediation: remediation.into(),
         guide: InstallationGuide::Troubleshooting,
+        message_key: Some(
+            if fallback > 0 {
+                "daemon.coolingFallback"
+            } else {
+                "daemon.coolingTemperatures"
+            }
+            .into(),
+        ),
+        message_params: BTreeMap::new(),
     }
 }
 

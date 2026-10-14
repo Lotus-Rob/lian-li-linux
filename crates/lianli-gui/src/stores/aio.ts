@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { useIpc } from "@/composables/useIpc";
+import { tr } from "@/i18n";
 
 /**
  * AIO + wireless-bind side effects that are not part of the config save path.
@@ -27,13 +28,11 @@ export const useAioStore = defineStore("aio", () => {
         );
         if (result.status === "succeeded") return;
         if (result.status === "failed") {
-          throw new Error(result.message || "Wireless operation failed");
+          throw new Error(result.message || tr("devices.wireless.operationFailed"));
         }
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
-      throw new Error(
-        "Wireless operation is still pending. Refresh the device list to check its state.",
-      );
+      throw new Error(tr("devices.wireless.operationPending"));
     } catch (e) {
       lastError.value = String(e);
       throw e;

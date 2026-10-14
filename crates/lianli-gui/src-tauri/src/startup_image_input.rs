@@ -39,16 +39,19 @@ fn read_image(path: &Path) -> Result<Vec<u8>> {
 }
 
 #[tauri::command]
-pub async fn pick_startup_image(app: tauri::AppHandle) -> Result<tauri::ipc::Response, String> {
+pub async fn pick_startup_image(
+    app: tauri::AppHandle,
+    title: Option<String>,
+    filter: Option<String>,
+) -> Result<tauri::ipc::Response, String> {
+    let title = crate::ui_text(title, "Choose startup image");
+    let filter = crate::ui_text(filter, "Still images (PNG, JPEG, BMP)");
     tauri::async_runtime::spawn_blocking(move || {
         let Some(selected) = app
             .dialog()
             .file()
-            .set_title("Choose startup image")
-            .add_filter(
-                "Still images (PNG, JPEG, BMP)",
-                &["png", "jpg", "jpeg", "bmp"],
-            )
+            .set_title(&title)
+            .add_filter(&filter, &["png", "jpg", "jpeg", "bmp"])
             .blocking_pick_file()
         else {
             return Ok(tauri::ipc::Response::new(Vec::new()));

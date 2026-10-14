@@ -1,5 +1,5 @@
 use lianli_shared::installation::{
-    CheckState, FindingSeverity, InstallationFinding, InstallationGuide,
+    message_params, CheckState, FindingSeverity, InstallationFinding, InstallationGuide,
 };
 use std::process::Command;
 use std::time::Duration;
@@ -65,6 +65,8 @@ fn evaluate(tool: &str, output: anyhow::Result<crate::command::Output>) -> Insta
         title: format!("{tool} availability"), evidence,
         remediation: "Install FFmpeg with ffprobe and libx264 in the daemon's environment (inside its Distrobox when applicable). Verify the service PATH, then Recheck and save the failed media settings to retry. No GPU encoder is required.".into(),
         guide: InstallationGuide::Troubleshooting,
+        message_key: Some("control.mediaTool".into()),
+        message_params: message_params([("tool", tool.into())]),
     }
 }
 

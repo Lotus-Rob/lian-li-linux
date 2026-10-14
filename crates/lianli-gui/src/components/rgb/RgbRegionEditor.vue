@@ -6,9 +6,11 @@ import { useConfigStore } from "@/stores/config";
 import ColorPicker from "@/components/rgb/ColorPicker.vue";
 import LabeledSlider from "@/components/common/LabeledSlider.vue";
 import { recallDeviceEffect, rememberDeviceEffect } from "@/components/rgb/effectMemory";
-import { RGB_BRIGHTNESS, RGB_DIRECTIONS, modeLabel } from "@/constants";
+import { RGB_BRIGHTNESS, RGB_DIRECTIONS, modeLabel, scopeLabel } from "@/constants";
+import { useTranslate } from "@/i18n";
 
 const props = defineProps<{ deviceId: string; cap: RgbDeviceCapabilities }>();
+const t = useTranslate();
 const config = useConfigStore();
 
 const devConfig = computed(() => config.rgbDeviceConfig(props.deviceId));
@@ -175,25 +177,25 @@ function flipGroup(flip: boolean) {
 <template>
   <div class="regional">
     <div v-if="!devConfig.regions?.length" class="migration card-inset">
-      <span>Animations apply to device regions. Choose group regions to replace the existing per-zone settings.</span>
-      <n-button size="small" @click="startRegions">Use group regions</n-button>
+      <span>{{ t("rgb.regionEditor.migration") }}</span>
+      <n-button size="small" @click="startRegions">{{ t("rgb.regionEditor.useGroupRegions") }}</n-button>
     </div>
     <template v-else>
       <div class="region-tabs">
-        <n-button v-for="scope in scopes" :key="scope" size="small" :type="selected === scope ? 'primary' : 'default'" @click="selectScope(scope)">{{ scope }}</n-button>
+        <n-button v-for="scope in scopes" :key="scope" size="small" :type="selected === scope ? 'primary' : 'default'" @click="selectScope(scope)">{{ scopeLabel(scope) }}</n-button>
       </div>
       <div v-if="cap.render_profile?.family === 'Tl' && current" class="row">
-        <label class="muted">Swap top and bottom</label>
+        <label class="muted">{{ t("rgb.regionEditor.swapTopBottom") }}</label>
         <n-switch :value="current.flip" @update:value="flipGroup" />
       </div>
-      <n-button v-if="selected !== 'All' && current && scopes.includes('All')" :disabled="!canApplyAll" size="small" quaternary @click="applyToAll">{{ copyToSegments ? 'Apply to all segments' : 'Apply this region to All' }}</n-button>
+      <n-button v-if="selected !== 'All' && current && scopes.includes('All')" :disabled="!canApplyAll" size="small" quaternary @click="applyToAll">{{ copyToSegments ? t("rgb.regionEditor.applyToAllSegments") : t("rgb.regionEditor.applyRegionToAll") }}</n-button>
       <div v-if="current" class="region-body card-inset">
-        <div class="row"><label class="muted">Mode</label><n-select size="small" :value="mixedSelection ? null : current.effect.mode" placeholder="Mixed region effects" :options="modeOptions" @update:value="onMode" /></div>
+        <div class="row"><label class="muted">{{ t("rgb.effect.mode") }}</label><n-select size="small" :value="mixedSelection ? null : current.effect.mode" :placeholder="t('rgb.regionEditor.mixedEffects')" :options="modeOptions" @update:value="onMode" /></div>
         <div v-if="isPalette" class="colors">
-          <label class="muted">Colors</label>
+          <label class="muted">{{ t("rgb.effect.colors") }}</label>
           <div class="color-list">
             <div v-for="(_, i) in paletteColors" :key="i" class="color-item">
-              <span v-if="perFanColors" class="muted">Fan {{ i + 1 }}</span>
+              <span v-if="perFanColors" class="muted">{{ t("rgb.regionEditor.fan", { index: i + 1 }) }}</span>
               <ColorPicker class="region-color" :model-value="paletteColors[i]" @update:model-value="(v) => onColor(i, v)" />
               <n-button v-if="!perFanColors && current.effect.colors.length > minColors" quaternary size="small" type="error" @click="removeColor(i)"><Trash2 :size="14" /></n-button>
             </div>
@@ -201,10 +203,10 @@ function flipGroup(flip: boolean) {
           </div>
         </div>
         <div v-if="parameters" class="two-col">
-          <LabeledSlider v-if="parameters?.supports_speed" label="Speed" :model-value="current.effect.speed" :min="0" :max="4" @update:model-value="(v) => patchEffect({ speed: v })" />
-          <div class="field"><label class="muted">Brightness</label><n-select size="small" :value="current.effect.brightness" :options="RGB_BRIGHTNESS" @update:value="(v) => patchEffect({ brightness: v })" /></div>
+          <LabeledSlider v-if="parameters?.supports_speed" :label="t('rgb.effect.speed')" :model-value="current.effect.speed" :min="0" :max="4" @update:model-value="(v) => patchEffect({ speed: v })" />
+          <div class="field"><label class="muted">{{ t("rgb.effect.brightness") }}</label><n-select size="small" :value="current.effect.brightness" :options="RGB_BRIGHTNESS" @update:value="(v) => patchEffect({ brightness: v })" /></div>
         </div>
-        <div v-if="directionOptions.length" class="field"><label class="muted">Direction</label><n-select size="small" :value="current.effect.direction" :options="directionOptions" @update:value="(v) => patchEffect({ direction: v })" /></div>
+        <div v-if="directionOptions.length" class="field"><label class="muted">{{ t("rgb.effect.direction") }}</label><n-select size="small" :value="current.effect.direction" :options="directionOptions" @update:value="(v) => patchEffect({ direction: v })" /></div>
       </div>
     </template>
   </div>
