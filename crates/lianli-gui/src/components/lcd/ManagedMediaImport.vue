@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { backendText, invoke, type UiMessage } from "@/utils/backendText";
 import { useDaemonStore } from "@/stores/daemon";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
@@ -12,7 +12,7 @@ import { useTranslate, type MessageKey } from "@/i18n";
 const props = defineProps<{ lcds: LcdConfig[]; templates: LcdTemplate[] }>();
 const emit = defineEmits<{ inProgress: [active: boolean] }>();
 interface Result { import_id: string; lcds: LcdConfig[]; templates: LcdTemplate[] }
-interface Status { id: string; active: boolean; result: Result | null; error: string | null }
+interface Status { id: string; active: boolean; result: Result | null; error: string | null; error_ui?: UiMessage | null }
 const daemon = useDaemonStore();
 const config = useConfigStore();
 const devices = useDevicesStore();
@@ -159,7 +159,7 @@ async function stage() {
       <ul class="incomplete"><li v-for="item in incomplete" :key="item">{{ item }}</li></ul>
     </n-alert>
     <n-alert v-if="error" type="error">{{ readableError(error) }}</n-alert>
-    <n-alert v-else-if="status?.error" type="error">{{ t("lcd.managedImport.importFailed", { error: readableError(status.error) }) }}</n-alert>
+    <n-alert v-else-if="status?.error" type="error">{{ t("lcd.managedImport.importFailed", { error: readableError(backendText(status.error, status.error_ui)) }) }}</n-alert>
     <template v-if="status?.result">
       <p>{{ t("lcd.managedImport.resultSummary", { lcds: status.result.lcds.length, templates: status.result.templates.length }) }}</p>
       <ul><li v-for="(lcd, index) in status.result.lcds" :key="index">{{ t("lcd.managedImport.resultItem", { screen: screenName(lcd), value: lcd.path ?? lcd.template_id ?? lcd.type }) }}</li></ul>

@@ -12,6 +12,7 @@ import RgbZoneEditor from "@/components/rgb/RgbZoneEditor.vue";
 import RgbRegionEditor from "@/components/rgb/RgbRegionEditor.vue";
 import { motherboardSyncEnabled, quickSyncControls } from "@/components/rgb/syncSettings";
 import { useTranslate } from "@/i18n";
+import { backendText } from "@/utils/backendText";
 
 const props = defineProps<{ cap: RgbDeviceCapabilities; label: string }>();
 
@@ -170,7 +171,7 @@ const summary = computed(() =>
       </button>
     </div>
 
-    <p v-if="cap.deferred_reason" class="notice warning">{{ cap.deferred_reason }}</p>
+    <p v-if="cap.deferred_reason" class="notice warning">{{ backendText(cap.deferred_reason, cap.deferred_reason_ui) }}</p>
     <p v-if="syncActive" class="notice">{{ t(cap.fan_led_count_control ? "rgb.deviceCard.quickSyncNoticeLedCount" : "rgb.deviceCard.quickSyncNotice") }}</p>
 
     <div class="device-controls">

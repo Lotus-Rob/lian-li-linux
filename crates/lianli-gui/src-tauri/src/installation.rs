@@ -1,7 +1,9 @@
+use crate::command_error::CommandError;
 use lianli_shared::installation::{
     CheckState, FindingSeverity, InstallationContext, InstallationFinding, InstallationGuide,
     InstallationReport,
 };
+use lianli_shared::ui_message::UiMessage;
 use std::collections::{BTreeMap, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read};
@@ -41,18 +43,26 @@ impl Drop for CheckGuard {
     }
 }
 
-pub fn check() -> Result<InstallationReport, String> {
+fn cache_unavailable() -> CommandError {
+    CommandError::ui(
+        "Installation cache is unavailable",
+        UiMessage::new("gui.installation.cacheUnavailable"),
+    )
+}
+
+pub fn check() -> Result<InstallationReport, CommandError> {
     {
-        let mut cache = CACHE
-            .lock()
-            .map_err(|_| "Installation cache is unavailable".to_string())?;
+        let mut cache = CACHE.lock().map_err(|_| cache_unavailable())?;
         if let Some((time, report)) = &cache.report {
             if time.elapsed() < Duration::from_secs(2) {
                 return Ok(report.clone());
             }
         }
         if cache.running {
-            return Err("An installation check is already running. Try again shortly.".into());
+            return Err(CommandError::ui(
+                "An installation check is already running. Try again shortly.",
+                UiMessage::new("gui.installation.alreadyRunning"),
+            ));
         }
         cache.running = true;
     }
@@ -179,10 +189,7 @@ pub fn check() -> Result<InstallationReport, String> {
             .min(u64::MAX as u128) as u64,
         findings,
     };
-    CACHE
-        .lock()
-        .map_err(|_| "Installation cache is unavailable".to_string())?
-        .report = Some((Instant::now(), report.clone()));
+    CACHE.lock().map_err(|_| cache_unavailable())?.report = Some((Instant::now(), report.clone()));
     Ok(report)
 }
 

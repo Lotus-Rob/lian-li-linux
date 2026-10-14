@@ -447,6 +447,7 @@ mod tests {
         lianli_shared::media_dependencies::AssetDependency {
             path,
             owner: "fixture".into(),
+            owner_ui: None,
             kind: lianli_shared::media_dependencies::AssetKind::Image,
         }
     }

@@ -6,6 +6,7 @@ import { computed, ref } from "vue";
 import { useMessage } from "naive-ui";
 import type { TelemetrySnapshot } from "@/types";
 import { useTranslate, type MessageKey } from "@/i18n";
+import { backendText } from "@/utils/backendText";
 type Preparation = NonNullable<TelemetrySnapshot["media_preparation"]>[string];
 const t = useTranslate();
 const stateLabels: Record<Preparation["state"], MessageKey> = {
@@ -68,15 +69,15 @@ async function clearRecovery(deviceId: string) {
         <div><dt>{{ t("service.mediaStream.fpsLimit") }}</dt><dd>{{ status.runtime?.fps_limit ?? '—' }}</dd></div>
         <div><dt>{{ t("service.mediaStream.encoder") }}</dt><dd>{{ status.runtime?.encoder?.name ?? '—' }}</dd></div>
       </dl>
-      <p v-if="status.error" class="failure">{{ status.error }}</p>
+      <p v-if="status.error" class="failure">{{ backendText(status.error, status.error_ui) }}</p>
       <n-button v-if="status.startup_recovery_required && daemon.info?.capabilities.includes('startup_recovery_clear')" size="small" :loading="clearing === status.device_id" :disabled="!!clearing || !daemon.canWrite" @click="clearRecovery(status.device_id)">{{ t("service.mediaStream.clearRecovery") }}</n-button>
       <details v-if="status.last_playback_error || status.runtime">
         <summary>{{ t("service.mediaStream.playbackDetails") }}</summary>
         <p v-if="status.runtime">{{ t(status.runtime.hardware_video_allowed ? 'service.mediaStream.stageHardwareEnabled' : 'service.mediaStream.stageHardwareDisabled', { stage: t(stageLabels[status.runtime.stage]) }) }}</p>
         <p v-if="status.runtime?.h264_transfer_started != null">{{ t(status.runtime.h264_transfer_started ? 'service.mediaStream.firstTransferSent' : 'service.mediaStream.firstTransferPending') }}</p>
-        <p v-if="status.runtime?.fallback_reason">{{ status.runtime.fallback_reason }}</p>
+        <p v-if="status.runtime?.fallback_reason">{{ backendText(status.runtime.fallback_reason, status.runtime.fallback_reason_ui) }}</p>
         <p v-if="status.runtime?.encoder?.software_fallback">{{ t("service.mediaStream.softwareFallback") }}</p>
-        <p v-if="status.last_playback_error">{{ t("service.mediaStream.lastError", { error: status.last_playback_error }) }}</p>
+        <p v-if="status.last_playback_error">{{ t("service.mediaStream.lastError", { error: backendText(status.last_playback_error, status.last_playback_error_ui) }) }}</p>
         <p v-if="status.runtime?.stage === 'failed' || status.state === 'failed'">{{ t(daemon.info?.capabilities.includes('media_retry') ? 'service.mediaStream.repairAndRetry' : 'service.mediaStream.repairAndRestart') }}</p>
       </details>
     </n-card>

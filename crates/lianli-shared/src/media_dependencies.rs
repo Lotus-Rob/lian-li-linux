@@ -1,6 +1,7 @@
 use crate::config::LcdConfig;
 use crate::media::MediaType;
 use crate::template::{LcdTemplate, TemplateBackground, WidgetKind};
+use crate::ui_message::{UiError, UiMessage};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -14,13 +15,23 @@ pub enum AssetKind {
     Font,
 }
 
+fn lcd_owner(lcd: &str, key: &str, english: String) -> (String, Option<UiMessage>) {
+    (english, Some(UiMessage::new(key).param("lcd", lcd)))
+}
+
 pub fn stored_lcd_dependencies(config: &LcdConfig) -> Vec<AssetDependency> {
     let owner = format!("LCD[{}]", config.device_id());
     let mut dependencies = Vec::new();
     if let Some(path) = &config.path {
+        let (owner, owner_ui) = lcd_owner(
+            &owner,
+            "status.mediaAccess.savedMedia",
+            format!("{owner} saved media"),
+        );
         dependencies.push(AssetDependency {
             path: path.clone(),
-            owner: format!("{owner} saved media"),
+            owner,
+            owner_ui,
             kind: match config.media_type {
                 MediaType::Image | MediaType::Sensor => AssetKind::Image,
                 MediaType::Video => AssetKind::Video,
@@ -34,9 +45,15 @@ pub fn stored_lcd_dependencies(config: &LcdConfig) -> Vec<AssetDependency> {
         .as_ref()
         .and_then(|sensor| sensor.font_path.as_ref())
     {
+        let (owner, owner_ui) = lcd_owner(
+            &owner,
+            "status.mediaAccess.savedSensorFont",
+            format!("{owner} saved sensor font"),
+        );
         dependencies.push(AssetDependency {
             path: path.clone(),
-            owner: format!("{owner} saved sensor font"),
+            owner,
+            owner_ui,
             kind: AssetKind::Font,
         });
     }
@@ -60,14 +77,20 @@ pub fn map_lcd_paths(config: &mut LcdConfig, mut map: impl FnMut(&mut PathBuf)) 
 pub struct AssetDependency {
     pub path: PathBuf,
     pub owner: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_ui: Option<UiMessage>,
     pub kind: AssetKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssetAccessIssue {
     pub owner: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_ui: Option<UiMessage>,
     pub path: Option<PathBuf>,
     pub error: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_ui: Option<UiMessage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,16 +135,40 @@ pub fn validate_dependency_paths(dependencies: &[AssetDependency]) -> Result<(),
 }
 
 pub fn template_dependencies(template: &LcdTemplate) -> Vec<AssetDependency> {
+    template_dependencies_for(template, None)
+}
+
+fn template_dependencies_for(template: &LcdTemplate, lcd: Option<&str>) -> Vec<AssetDependency> {
+    let owned = |english: String, key: &str, lcd_key: &str| match lcd {
+        Some(lcd) => (
+            format!("{lcd}: {english}"),
+            UiMessage::new(lcd_key).param("lcd", lcd),
+        ),
+        None => (english, UiMessage::new(key)),
+    };
     let mut dependencies = Vec::new();
     if let TemplateBackground::Image { path } = &template.background {
+        let (owner, owner_ui) = owned(
+            format!("Template '{}' background", template.id),
+            "status.mediaAccess.templateBackground",
+            "status.mediaAccess.lcdTemplateBackground",
+        );
         dependencies.push(AssetDependency {
             path: path.clone(),
-            owner: format!("Template '{}' background", template.id),
+            owner,
+            owner_ui: Some(owner_ui.param("template", &template.id)),
             kind: AssetKind::Image,
         });
     }
     for widget in &template.widgets {
-        let owner = format!("Template '{}' widget '{}'", template.id, widget.id);
+        let (owner, owner_ui) = owned(
+            format!("Template '{}' widget '{}'", template.id, widget.id),
+            "status.mediaAccess.templateWidget",
+            "status.mediaAccess.lcdTemplateWidget",
+        );
+        let owner_ui = owner_ui
+            .param("template", &template.id)
+            .param("widget", &widget.id);
         let dependency = match &widget.kind {
             WidgetKind::Image { path, .. } => Some((path, AssetKind::Image)),
             WidgetKind::Video { path, .. } => Some((path, AssetKind::Video)),
@@ -134,6 +181,7 @@ pub fn template_dependencies(template: &LcdTemplate) -> Vec<AssetDependency> {
             dependencies.push(AssetDependency {
                 path: path.clone(),
                 owner,
+                owner_ui: Some(owner_ui),
                 kind,
             });
         }
@@ -144,18 +192,24 @@ pub fn template_dependencies(template: &LcdTemplate) -> Vec<AssetDependency> {
 pub fn lcd_dependencies(
     config: &LcdConfig,
     templates: &[LcdTemplate],
-) -> Result<Vec<AssetDependency>, String> {
+) -> Result<Vec<AssetDependency>, UiError> {
     let owner = format!("LCD[{}]", config.device_id());
+    let lcd_error = |key: &str, english: String| {
+        UiError::new(UiMessage::new(key).param("lcd", &owner), english)
+    };
     let mut dependencies = Vec::new();
     match config.media_type {
         MediaType::Image | MediaType::Video | MediaType::Gif => {
-            let path = config
-                .path
-                .clone()
-                .ok_or_else(|| format!("{owner} has no media path"))?;
+            let path = config.path.clone().ok_or_else(|| {
+                lcd_error(
+                    "status.mediaAccess.noMediaPath",
+                    format!("{owner} has no media path"),
+                )
+            })?;
             dependencies.push(AssetDependency {
                 path,
-                owner,
+                owner: owner.clone(),
+                owner_ui: None,
                 kind: if config.media_type == MediaType::Image {
                     AssetKind::Image
                 } else if config.media_type == MediaType::Gif {
@@ -167,9 +221,15 @@ pub fn lcd_dependencies(
         }
         MediaType::Sensor => {
             if let Some(path) = &config.path {
+                let (owner, owner_ui) = lcd_owner(
+                    &owner,
+                    "status.mediaAccess.sensorBackground",
+                    format!("{owner} sensor background"),
+                );
                 dependencies.push(AssetDependency {
                     path: path.clone(),
-                    owner: format!("{owner} sensor background"),
+                    owner,
+                    owner_ui,
                     kind: AssetKind::Image,
                 });
             }
@@ -178,26 +238,38 @@ pub fn lcd_dependencies(
                 .as_ref()
                 .and_then(|sensor| sensor.font_path.as_ref())
             {
+                let (owner, owner_ui) = lcd_owner(
+                    &owner,
+                    "status.mediaAccess.sensorFont",
+                    format!("{owner} sensor font"),
+                );
                 dependencies.push(AssetDependency {
                     path: path.clone(),
-                    owner: format!("{owner} sensor font"),
+                    owner,
+                    owner_ui,
                     kind: AssetKind::Font,
                 });
             }
         }
         MediaType::Custom => {
-            let id = config
-                .template_id
-                .as_deref()
-                .ok_or_else(|| format!("{owner} has no template ID"))?;
+            let id = config.template_id.as_deref().ok_or_else(|| {
+                lcd_error(
+                    "status.mediaAccess.noTemplateId",
+                    format!("{owner} has no template ID"),
+                )
+            })?;
             let template = templates
                 .iter()
                 .find(|template| template.id == id)
-                .ok_or_else(|| format!("{owner} references missing template '{id}'"))?;
-            dependencies = template_dependencies(template);
-            for dependency in &mut dependencies {
-                dependency.owner = format!("{owner}: {}", dependency.owner);
-            }
+                .ok_or_else(|| {
+                    UiError::new(
+                        UiMessage::new("status.mediaAccess.missingTemplate")
+                            .param("lcd", &owner)
+                            .param("template", id),
+                        format!("{owner} references missing template '{id}'"),
+                    )
+                })?;
+            dependencies = template_dependencies_for(template, Some(&owner));
         }
         MediaType::Color | MediaType::Doublegauge | MediaType::Cooler => {}
     }
@@ -253,7 +325,7 @@ mod tests {
             serde_json::json!({"type": "custom", "index": 2, "template_id": "missing"}),
         )
         .unwrap();
-        let error = lcd_dependencies(&config, &[]).unwrap_err();
+        let error = lcd_dependencies(&config, &[]).unwrap_err().to_string();
         assert!(error.contains("LCD[index:2]"));
         assert!(error.contains("template 'missing'"));
     }

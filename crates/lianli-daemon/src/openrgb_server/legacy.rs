@@ -222,6 +222,7 @@ mod tests {
             vec![
                 RgbZoneInfo {
                     name: "Zone".into(),
+                    name_ui: None,
                     led_count: 1
                 };
                 self.zone_count

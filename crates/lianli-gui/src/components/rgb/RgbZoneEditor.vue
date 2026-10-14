@@ -11,6 +11,7 @@ import LabeledSlider from "@/components/common/LabeledSlider.vue";
 import { recallDeviceEffect, rememberDeviceEffect } from "@/components/rgb/effectMemory";
 import { RGB_DIRECTIONS, RGB_BRIGHTNESS, modeLabel, scopeLabel } from "@/constants";
 import { useTranslate } from "@/i18n";
+import { backendText } from "@/utils/backendText";
 
 const props = defineProps<{
   deviceId: string;
@@ -238,9 +239,11 @@ function clearAll() {
   });
 }
 
-const zoneLabel = computed(
-  () => props.groupEffects ? t("rgb.zoneEditor.portEffects") : props.cap.zones[props.zoneIndex]?.name ?? t("rgb.zoneEditor.zoneName", { index: props.zoneIndex }),
-);
+const zoneLabel = computed(() => {
+  if (props.groupEffects) return t("rgb.zoneEditor.portEffects");
+  const zone = props.cap.zones[props.zoneIndex];
+  return zone ? backendText(zone.name, zone.name_ui) : t("rgb.zoneEditor.zoneName", { index: props.zoneIndex });
+});
 </script>
 
 <template>

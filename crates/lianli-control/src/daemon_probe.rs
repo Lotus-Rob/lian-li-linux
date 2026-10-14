@@ -213,7 +213,9 @@ fn exchange(
                 if buffer[..count].contains(&b'\n') {
                     return match serde_json::from_slice::<IpcResponse>(&response)? {
                         IpcResponse::Ok { data } => Ok(data),
-                        IpcResponse::Error { message } => anyhow::bail!("Service IPC: {message}"),
+                        IpcResponse::Error { message, .. } => {
+                            anyhow::bail!("Service IPC: {message}")
+                        }
                     };
                 }
             }

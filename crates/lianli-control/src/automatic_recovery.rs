@@ -1,9 +1,11 @@
 use crate::account::Account;
 use crate::reservation::ServiceOperationLock;
 use crate::switch_journal::{Journal, Record};
+use crate::ui_text::text;
 use anyhow::{ensure, Result};
 use lianli_shared::installation::InstallationContext;
 use lianli_shared::services::ServiceScope;
+use lianli_shared::ui_message::UiText;
 use std::path::Path;
 
 fn caller_uid(record: &Record) -> u32 {
@@ -14,7 +16,7 @@ fn caller_uid(record: &Record) -> u32 {
     }
 }
 
-pub fn run() -> Result<String> {
+pub fn run() -> Result<UiText> {
     ensure!(
         unsafe { libc::geteuid() } == 0
             && InstallationContext::detect() == InstallationContext::Native,
@@ -24,7 +26,10 @@ pub fn run() -> Result<String> {
         {
             let operation = ServiceOperationLock::acquire(&InstallationContext::Native)?;
             let Some(journal) = Journal::load(&operation)? else {
-                return Ok("No service switch needs recovery.".into());
+                return Ok(text(
+                    "control.switch.nothingToRecover",
+                    "No service switch needs recovery.",
+                ));
             };
             let caller = Account::user(caller_uid(journal.record()))?;
             ensure!(caller.name == journal.record().intent.caller_name,

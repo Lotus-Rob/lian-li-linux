@@ -6,6 +6,7 @@
 
 use crate::controllers::rgb::{DirectColorBuffer, RgbController};
 use lianli_shared::rgb::{RgbDeviceCapabilities, RgbDirection, RgbEffect, RgbMode};
+use lianli_shared::ui_message::{ui_message_of, UiError, UiMessage, UiText};
 use parking_lot::Mutex;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -160,7 +161,7 @@ pub struct OpenRgbServerState {
     pub running: bool,
     pub port: Option<u16>,
     pub regions_enabled: bool,
-    pub error: Option<String>,
+    pub error: Option<UiText>,
 }
 
 /// Starts the OpenRGB SDK server in a background thread.
@@ -184,7 +185,10 @@ pub fn start_openrgb_server(
             error!("OpenRGB server error: {e}");
             let mut s = state.lock();
             s.running = false;
-            s.error = Some(e.to_string());
+            s.error = Some(UiText {
+                english: e.to_string(),
+                ui: ui_message_of(&e),
+            });
         } else {
             let mut s = state.lock();
             s.running = false;
@@ -205,14 +209,22 @@ fn run_server(
         Ok(l) => l,
         Err(e) => {
             let msg = if e.kind() == std::io::ErrorKind::AddrInUse {
-                format!("Port {port} is already in use")
+                UiError::new(
+                    UiMessage::new("status.openRgb.portInUse").param("port", port),
+                    format!("Port {port} is already in use"),
+                )
             } else {
-                format!("Failed to bind port {port}: {e}")
+                UiError::new(
+                    UiMessage::new("status.openRgb.bindFailed")
+                        .param("port", port)
+                        .param("error", &e),
+                    format!("Failed to bind port {port}: {e}"),
+                )
             };
             let mut s = state.lock();
             s.running = false;
             s.port = Some(port);
-            s.error = Some(msg.clone());
+            s.error = Some(msg.clone().into());
             anyhow::bail!(msg);
         }
     };

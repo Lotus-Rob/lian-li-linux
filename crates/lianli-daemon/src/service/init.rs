@@ -691,19 +691,27 @@ impl ServiceManager {
         quantity: u8,
     ) -> anyhow::Result<()> {
         use anyhow::Context;
+        use lianli_shared::ui_message::{UiError, UiMessage};
         anyhow::ensure!(
             self.startup_image_job.is_none(),
-            "Wait for the startup image upload before changing fan quantity"
+            UiError::new(
+                UiMessage::new("daemon.fan.quantityStartupBusy"),
+                "Wait for the startup image upload before changing fan quantity",
+            )
         );
         let (base_id, port) = device_id.rsplit_once(":port").unwrap_or((device_id, "0"));
-        let port = port.parse::<u8>().context("Invalid fan port")?;
+        let port = port.parse::<u8>().context(UiError::new(
+            UiMessage::new("daemon.fan.invalidPort"),
+            "Invalid fan port",
+        ))?;
         let port_device_id = format!("{base_id}:port{port}");
 
-        let ctrl = self
-            .registry
-            .fan_devices
-            .get(base_id)
-            .context("Fan controller is unavailable")?;
+        let ctrl = self.registry.fan_devices.get(base_id).ok_or_else(|| {
+            UiError::new(
+                UiMessage::new("daemon.fan.controllerUnavailable"),
+                "Fan controller is unavailable",
+            )
+        })?;
         ctrl.set_port_fan_quantity(port, quantity)?;
 
         let persisted = {
@@ -718,8 +726,13 @@ impl ServiceManager {
                 .or_default()
                 .fan_quantities
                 .insert(port, quantity);
-            let result = persistence::write_config(&self.config_path, &cfg)
-                .context("Fan quantity applied but could not be saved");
+            let result = persistence::write_config(&self.config_path, &cfg).map_err(|error| {
+                anyhow::Error::new(UiError::new(
+                    UiMessage::new("daemon.fan.quantityNotSaved")
+                        .param("error", format!("{error:#}")),
+                    format!("Fan quantity applied but could not be saved: {error:#}"),
+                ))
+            });
             if result.is_ok() {
                 self.config = Some(cfg.clone());
                 ipc_state.config = Some(cfg);

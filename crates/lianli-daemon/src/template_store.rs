@@ -3,6 +3,7 @@
 use anyhow::{Context, Result};
 use lianli_shared::sensors::SensorInfo;
 use lianli_shared::template::LcdTemplate;
+use lianli_shared::ui_message::{UiError, UiMessage};
 use std::fs;
 use std::io::Read;
 use std::os::unix::fs::OpenOptionsExt;
@@ -88,12 +89,18 @@ pub fn merge_user_templates(
 ) -> Result<()> {
     anyhow::ensure!(
         originals.len() <= 1024 && copies.len() <= 1024,
-        "Too many templates in copied selection"
+        UiError::new(
+            UiMessage::new("daemon.templates.tooManyCopies"),
+            "Too many templates in copied selection",
+        )
     );
     let mut ids = std::collections::HashSet::new();
     anyhow::ensure!(
         copies.iter().all(|template| ids.insert(&template.id)),
-        "Copied template IDs must be unique"
+        UiError::new(
+            UiMessage::new("daemon.templates.duplicateCopyIds"),
+            "Copied template IDs must be unique",
+        )
     );
     crate::persistence::update_json(path, |previous| {
         let mut templates = previous
@@ -106,8 +113,13 @@ pub fn merge_user_templates(
             anyhow::ensure!(
                 serde_json::to_value(current.map(|index| &templates[index]))?
                     == serde_json::to_value(original)?,
-                "Template '{}' changed. Reload and review it before saving copied paths.",
-                copy.id
+                UiError::new(
+                    UiMessage::new("daemon.templates.changedSinceCopy").param("id", &copy.id),
+                    format!(
+                        "Template '{}' changed. Reload and review it before saving copied paths.",
+                        copy.id
+                    ),
+                )
             );
             if let Some(index) = current {
                 templates[index] = copy.clone();

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, watch } from "vue";
 import OpenRgbRegionsToggle from "@/components/rgb/OpenRgbRegionsToggle.vue";
-import { invoke } from "@tauri-apps/api/core";
+import { backendText, invoke } from "@/utils/backendText";
 import { ExternalLink } from "lucide-vue-next";
 import { useExternalLink } from "@/composables/useExternalLink";
 import { useDaemonStore } from "@/stores/daemon";
@@ -253,7 +253,7 @@ function onHidBackend(v: "hidraw" | "rusb") {
       </div>
       <n-checkbox v-model:checked="openrgbEnabled" style="margin-top: 1rem;">{{ t("settings.openrgb.enableServer") }}</n-checkbox>
       <OpenRgbRegionsToggle v-if="openrgbEnabled" />
-      <n-alert v-if="daemon.connected && daemon.openrgbEnabled && daemon.openrgbError" type="error" style="margin-top: 1rem;">{{ daemon.openrgbError }}</n-alert>
+      <n-alert v-if="daemon.connected && daemon.openrgbEnabled && daemon.openrgbError" type="error" style="margin-top: 1rem;">{{ backendText(daemon.openrgbError, daemon.openrgbErrorUi) }}</n-alert>
       <n-button v-if="daemon.connected && daemon.openrgbEnabled && daemon.openrgbError && !daemon.openrgbRunning" :loading="retryingOpenRgb" :disabled="retryingOpenRgb || !daemon.canWrite || !daemon.info?.capabilities.includes('openrgb_retry')" @click="retryOpenRgb">{{ t("settings.openrgb.retry") }}</n-button>
       <p v-if="daemon.openrgbError && daemon.connected" class="hint">{{ t("settings.openrgb.retryHint") }}</p>
       <p v-if="openrgbRetryQueued" class="hint">{{ t("settings.openrgb.retryQueued") }}</p>

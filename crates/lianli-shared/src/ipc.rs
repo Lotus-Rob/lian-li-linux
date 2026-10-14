@@ -361,17 +361,27 @@ impl IpcRequest {
         }
     }
 
-    pub fn authorize(self, daemon: &crate::daemon::DaemonInfo) -> Result<Self, String> {
+    pub fn authorize(
+        self,
+        daemon: &crate::daemon::DaemonInfo,
+    ) -> Result<Self, crate::ui_message::UiError> {
+        use crate::ui_message::{UiError, UiMessage};
         match self {
             Self::Guarded { guard, request } => {
                 guard.validate(daemon)?;
                 if matches!(*request, Self::Guarded { .. }) {
-                    return Err("Nested guarded requests are not supported".into());
+                    return Err(UiError::new(
+                        UiMessage::new("daemon.request.nestedGuarded"),
+                        "Nested guarded requests are not supported",
+                    ));
                 }
                 Ok(*request)
             }
             request if request.is_read_only() => Ok(request),
-            _ => Err("Changes require a compatible client. Update the GUI/client and daemon together, then restart the selected daemon cleanly.".into()),
+            _ => Err(UiError::new(
+                UiMessage::new("daemon.request.incompatibleClient"),
+                "Changes require a compatible client. Update the GUI/client and daemon together, then restart the selected daemon cleanly.",
+            )),
         }
     }
 }
@@ -390,7 +400,11 @@ pub enum IpcResponse {
     #[serde(rename = "ok")]
     Ok { data: serde_json::Value },
     #[serde(rename = "error")]
-    Error { message: String },
+    Error {
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ui: Option<crate::ui_message::UiMessage>,
+    },
 }
 
 impl IpcResponse {
@@ -403,6 +417,22 @@ impl IpcResponse {
     pub fn error(msg: impl Into<String>) -> Self {
         Self::Error {
             message: msg.into(),
+            ui: None,
+        }
+    }
+
+    pub fn error_ui(english: impl Into<String>, ui: crate::ui_message::UiMessage) -> Self {
+        Self::Error {
+            message: english.into(),
+            ui: Some(ui),
+        }
+    }
+
+    /// The full English chain, with the GUI message of its outermost keyed layer.
+    pub fn from_error(error: &anyhow::Error) -> Self {
+        Self::Error {
+            message: format!("{error:#}"),
+            ui: crate::ui_message::ui_message_of(error),
         }
     }
 }
@@ -431,12 +461,18 @@ pub enum IpcEvent {
 pub enum WirelessOperationStatus {
     Pending,
     Succeeded,
-    Failed { message: String },
+    Failed {
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message_ui: Option<crate::ui_message::UiMessage>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceTemperature {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_ui: Option<crate::ui_message::UiMessage>,
     pub celsius: Option<f32>,
     pub abnormal: bool,
 }
@@ -450,6 +486,8 @@ pub struct DeviceTelemetry {
     pub age_ms: Option<u64>,
     pub temperatures: Vec<DeviceTemperature>,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_ui: Option<crate::ui_message::UiMessage>,
 }
 
 /// Info about a connected device, returned by ListDevices.
@@ -528,6 +566,8 @@ pub struct OpenRgbServerStatus {
     pub port: Option<u16>,
     /// Error message if the server failed to start.
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_ui: Option<crate::ui_message::UiMessage>,
 }
 
 /// Current state of the LCD pixel conditioning cleaner.
@@ -561,10 +601,14 @@ pub struct MediaPreparationStatus {
     pub device_id: String,
     pub state: MediaPreparationState,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_ui: Option<crate::ui_message::UiMessage>,
     #[serde(default)]
     pub runtime: Option<MediaRuntimeStatus>,
     #[serde(default)]
     pub last_playback_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_playback_error_ui: Option<crate::ui_message::UiMessage>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -582,6 +626,8 @@ pub struct MediaRuntimeStatus {
     pub fps_limit: f32,
     pub hardware_video_allowed: bool,
     pub fallback_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_reason_ui: Option<crate::ui_message::UiMessage>,
     #[serde(default)]
     pub encoder: Option<MediaEncoderStatus>,
     #[serde(default)]
@@ -613,6 +659,8 @@ pub struct DesktopStreamStatus {
     pub backend: Option<String>,
     pub fallback_reason: Option<String>,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_ui: Option<crate::ui_message::UiMessage>,
     pub applied_generation: Option<u64>,
     pub applied_policy: Option<crate::display::DisplayVideoPolicy>,
     #[serde(default)]
@@ -649,6 +697,8 @@ pub struct LcdBrightnessStatus {
     /// Waiting for driver submission, not confirmation from the panel.
     pub pending: bool,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_ui: Option<crate::ui_message::UiMessage>,
 }
 
 #[cfg(test)]
@@ -666,6 +716,7 @@ mod quantity_tests {
             brightness: 30,
             pending: false,
             error: Some("USB write failed".into()),
+            error_ui: None,
         };
         let encoded = serde_json::to_value(failure).unwrap();
         assert_eq!(

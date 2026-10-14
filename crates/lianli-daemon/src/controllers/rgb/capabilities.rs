@@ -1,4 +1,5 @@
 use super::*;
+use lianli_shared::ui_message::UiMessage;
 
 impl RgbController {
     pub fn capabilities(&self) -> Vec<RgbDeviceCapabilities> {
@@ -18,6 +19,7 @@ impl RgbController {
                     modes.push(mode);
                 }
             }
+            let deferred = device.deferred_reason();
             caps.push(RgbDeviceCapabilities {
                 fan_led_count_control: device.fan_led_count_control(),
                 hardware_group_effects: !hardware_regions.is_empty(),
@@ -53,7 +55,8 @@ impl RgbController {
                 supports_direction: device.supports_direction(),
                 supports_merge_lighting: device.supports_merge_lighting(),
                 rf_owned: device.rf_owned(),
-                deferred_reason: device.deferred_reason(),
+                deferred_reason: deferred.as_ref().map(ToString::to_string),
+                deferred_reason_ui: deferred.map(|reason| reason.message),
             });
         }
         for (id, device) in &self.wireless_state {
@@ -65,20 +68,31 @@ impl RgbController {
                 .rgb_zone_led_counts(device.fan_count)
                 .iter()
                 .enumerate()
-                .map(|(index, &count)| RgbZoneInfo {
-                    name: if device.fan_type.total_led_count_override().is_some() {
-                        match device.fan_type {
-                            WirelessFanType::Lc217 => "Case Ring",
-                            WirelessFanType::Led88 => "Screen Ring",
-                            _ => "LED Strip",
-                        }
-                        .to_owned()
+                .map(|(index, &count)| {
+                    let (name, name_ui) = if device.fan_type.total_led_count_override().is_some() {
+                        let (name, key) = match device.fan_type {
+                            WirelessFanType::Lc217 => ("Case Ring", "devices.zone.caseRing"),
+                            WirelessFanType::Led88 => ("Screen Ring", "devices.zone.screenRing"),
+                            _ => ("LED Strip", "devices.zone.ledStrip"),
+                        };
+                        (name.to_owned(), UiMessage::new(key))
                     } else if device.fan_type.is_aio() && index == 0 {
-                        "Pump Head".to_owned()
+                        (
+                            "Pump Head".to_owned(),
+                            UiMessage::new("devices.zone.pumpHead"),
+                        )
                     } else {
-                        format!("Fan {}", index + usize::from(!device.fan_type.is_aio()))
-                    },
-                    led_count: count as u16,
+                        let number = index + usize::from(!device.fan_type.is_aio());
+                        (
+                            format!("Fan {number}"),
+                            UiMessage::new("devices.zone.fan").param("number", number),
+                        )
+                    };
+                    RgbZoneInfo {
+                        name,
+                        name_ui: Some(name_ui),
+                        led_count: count as u16,
+                    }
                 })
                 .collect();
             let software_modes = self
@@ -118,6 +132,7 @@ impl RgbController {
                 supports_merge_lighting: false,
                 rf_owned: false,
                 deferred_reason: None,
+                deferred_reason_ui: None,
             });
         }
         caps.sort_by(|a, b| a.device_id.cmp(&b.device_id));

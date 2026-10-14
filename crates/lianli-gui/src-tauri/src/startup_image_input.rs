@@ -1,4 +1,7 @@
-use anyhow::{ensure, Context, Result};
+use crate::command_error::CommandError;
+use anyhow::{ensure, Result};
+use lianli_control::ui_text::keyed;
+use lianli_shared::ui_message::{UiError, UiMessage};
 use std::{fs::OpenOptions, io::Read, os::unix::fs::OpenOptionsExt, path::Path};
 use tauri_plugin_dialog::DialogExt;
 
@@ -13,27 +16,47 @@ fn read_image(path: &Path) -> Result<Vec<u8>> {
         ["png", "jpg", "jpeg", "bmp"]
             .iter()
             .any(|candidate| extension.eq_ignore_ascii_case(candidate)),
-        "Choose a PNG, JPEG or BMP still image"
+        keyed(
+            "gui.startupImage.unsupportedExtension",
+            "Choose a PNG, JPEG or BMP still image"
+        )
     );
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NONBLOCK)
         .open(path)
-        .context("Opening startup image")?;
+        .map_err(|error| {
+            UiError::new(
+                UiMessage::new("gui.startupImage.openFailed").param("error", &error),
+                format!("Opening startup image: {error}"),
+            )
+        })?;
     let metadata = file.metadata()?;
-    ensure!(metadata.is_file(), "Choose a regular image file");
-    ensure!(metadata.len() <= MAX_BYTES, "Image exceeds 8 MiB");
+    ensure!(
+        metadata.is_file(),
+        keyed("gui.startupImage.notFile", "Choose a regular image file")
+    );
+    ensure!(
+        metadata.len() <= MAX_BYTES,
+        keyed("gui.startupImage.tooLarge", "Image exceeds 8 MiB")
+    );
     let mut bytes = Vec::new();
     file.take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
     ensure!(
         !bytes.is_empty() && bytes.len() as u64 <= MAX_BYTES,
-        "Choose a nonempty image under 8 MiB"
+        keyed(
+            "gui.startupImage.emptyOrTooLarge",
+            "Choose a nonempty image under 8 MiB"
+        )
     );
     ensure!(
         bytes.starts_with(b"\x89PNG\r\n\x1a\n")
             || bytes.starts_with(&[0xff, 0xd8, 0xff])
             || bytes.starts_with(b"BM"),
-        "The selected file is not a PNG, JPEG or BMP image"
+        keyed(
+            "gui.startupImage.notImage",
+            "The selected file is not a PNG, JPEG or BMP image"
+        )
     );
     Ok(bytes)
 }
@@ -43,7 +66,7 @@ pub async fn pick_startup_image(
     app: tauri::AppHandle,
     title: Option<String>,
     filter: Option<String>,
-) -> Result<tauri::ipc::Response, String> {
+) -> Result<tauri::ipc::Response, CommandError> {
     let title = crate::ui_text(title, "Choose startup image");
     let filter = crate::ui_text(filter, "Still images (PNG, JPEG, BMP)");
     tauri::async_runtime::spawn_blocking(move || {
@@ -59,7 +82,7 @@ pub async fn pick_startup_image(
         let path = selected.into_path().map_err(|error| error.to_string())?;
         read_image(&path)
             .map(tauri::ipc::Response::new)
-            .map_err(|error| format!("{error:#}"))
+            .map_err(CommandError::from)
     })
     .await
     .map_err(|error| error.to_string())?

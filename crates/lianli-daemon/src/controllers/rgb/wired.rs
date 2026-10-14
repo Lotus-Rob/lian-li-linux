@@ -312,6 +312,7 @@ mod tests {
         fn zone_info(&self) -> Vec<RgbZoneInfo> {
             vec![RgbZoneInfo {
                 name: "test".to_owned(),
+                name_ui: None,
                 led_count: 1,
             }]
         }

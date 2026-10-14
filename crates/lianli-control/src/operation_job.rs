@@ -1,7 +1,10 @@
 use crate::services::Route;
+use crate::ui_text::{bounded, keyed, text};
 use anyhow::{ensure, Context, Result};
 use lianli_shared::installation::InstallationContext;
 use lianli_shared::services::{ServiceActionRequest, ServiceOperationStatus};
+use lianli_shared::ui_message::UiMessage;
+use lianli_shared::ui_message::{ui_message_of, UiText};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -186,12 +189,15 @@ fn read_at(path: &Path) -> Result<Option<JobStatus>> {
             // Completion may have been published between the first read and the lock attempt.
             record = directory.read()?.context("Service progress disappeared")?;
             if record.status.active {
+                let interrupted = text(
+                    "control.serviceAction.interrupted",
+                    "Service verification was interrupted. Recheck services before retrying.",
+                );
                 record.status = ServiceOperationStatus {
                     active: false,
                     success: Some(false),
-                    message:
-                        "Service verification was interrupted. Recheck services before retrying."
-                            .into(),
+                    message: interrupted.english,
+                    message_ui: interrupted.ui,
                 };
             }
         }
@@ -202,7 +208,10 @@ fn read_at(path: &Path) -> Result<Option<JobStatus>> {
 pub fn start(context: &InstallationContext, request: ServiceActionRequest) -> Result<String> {
     ensure!(
         !read()?.is_some_and(|record| record.status.active),
-        "Another service operation is running"
+        keyed(
+            "control.serviceAction.alreadyRunning",
+            "Another service operation is running"
+        )
     );
     let helper = std::env::current_exe()?
         .parent()
@@ -297,7 +306,7 @@ fn launch_arguments(
     Ok(args)
 }
 
-pub fn run(id: &str, request: ServiceActionRequest) -> Result<String> {
+pub fn run(id: &str, request: ServiceActionRequest) -> Result<UiText> {
     ensure!(valid_id(id), "Invalid service operation identifier");
     run_at(&runtime_path()?, id, request, |progress| {
         crate::service_operation::execute(InstallationContext::detect(), request, progress)
@@ -308,8 +317,8 @@ fn run_at(
     path: &Path,
     id: &str,
     request: ServiceActionRequest,
-    operation: impl FnOnce(&mut dyn FnMut(&str) -> Result<()>) -> Result<String>,
-) -> Result<String> {
+    operation: impl FnOnce(&mut dyn FnMut(UiText) -> Result<()>) -> Result<UiText>,
+) -> Result<UiText> {
     let directory = Directory::open(path, true)?.context("Missing service progress directory")?;
     let lock = directory.lock(true)?;
     ensure!(
@@ -326,27 +335,27 @@ fn run_at(
             active: true,
             success: None,
             message: "Checking service state…".into(),
+            message_ui: Some(UiMessage::new("control.serviceAction.checkingState")),
         },
     };
     directory.write(&record)?;
     let result = operation(&mut |message| {
-        record.status.message = bounded_message(message);
+        (record.status.message, record.status.message_ui) = bounded(message);
         directory.write(&record)
     });
     record.status.active = false;
     record.status.success = Some(result.is_ok());
-    record.status.message = bounded_message(&match &result {
+    (record.status.message, record.status.message_ui) = bounded(match &result {
         Ok(message) => message.clone(),
-        Err(error) => format!("{error:#}"),
+        Err(error) => UiText {
+            english: format!("{error:#}"),
+            ui: ui_message_of(error),
+        },
     });
     directory.write(&record).context(
         "Service action finished but its result could not be saved. Recheck actual services",
     )?;
     result
-}
-
-fn bounded_message(message: &str) -> String {
-    message.chars().take(2048).collect()
 }
 
 fn valid_id(id: &str) -> bool {
@@ -373,7 +382,10 @@ mod tests {
         let path = temporary.path().join("progress");
         assert!(read_at(&path).unwrap().is_none());
         let result = run_at(&path, ID, request(), |progress| {
-            progress("Verifying the new daemon instance")?;
+            progress(text(
+                "control.test.verifying",
+                "Verifying the new daemon instance",
+            ))?;
             let first_gui = read_at(&path)?.unwrap();
             assert!(first_gui.status.active);
             assert_eq!(
@@ -383,14 +395,18 @@ mod tests {
             drop(first_gui);
             assert!(read_at(&path)?.unwrap().status.active);
             assert!(run_at(&path, ID, request(), |_| panic!("Concurrent operation ran")).is_err());
-            Ok("New instance verified".into())
+            Ok(text("control.test.verified", "New instance verified"))
         })
         .unwrap();
-        assert_eq!(result, "New instance verified");
+        assert_eq!(result.english, "New instance verified");
         let completed = read_at(&path).unwrap().unwrap();
         assert!(!completed.status.active);
         assert_eq!(completed.status.success, Some(true));
-        assert_eq!(completed.status.message, result);
+        assert_eq!(completed.status.message, result.english);
+        assert_eq!(
+            completed.status.message_ui.unwrap().key,
+            "control.test.verified"
+        );
         assert_eq!(
             fs::metadata(path.join("status.json")).unwrap().mode() & 0o777,
             0o600
@@ -420,7 +436,10 @@ mod tests {
     fn abrupt_worker_exit_does_not_leave_permanent_busy_or_replay_an_action() {
         if let Some(path) = std::env::var_os("LIANLI_JOB_CRASH_FIXTURE") {
             let _ = run_at(Path::new(&path), ID, request(), |progress| {
-                progress("Request sent. Verifying completion")?;
+                progress(text(
+                    "control.test.sent",
+                    "Request sent. Verifying completion",
+                ))?;
                 std::process::exit(73);
             });
             panic!("The crash fixture did not execute");

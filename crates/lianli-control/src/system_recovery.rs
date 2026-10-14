@@ -318,6 +318,7 @@ mod tests {
         let (mut report, record, mut info) = fixture();
         report.selection = Some(lianli_shared::services::ServiceProbe::Unavailable {
             reason: "Startup paused".into(),
+            reason_ui: None,
         });
         assert!(validate_running(&report, &record, &info).is_err());
         validate_source(&report, &record, &info).unwrap();

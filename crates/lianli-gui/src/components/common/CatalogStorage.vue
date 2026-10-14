@@ -3,12 +3,14 @@ import { computed, onUnmounted, ref, watch } from "vue";
 import { useIpc } from "@/composables/useIpc";
 import { useDaemonStore } from "@/stores/daemon";
 import { useTranslate, type MessageKey } from "@/i18n";
+import { backendText, type UiMessage } from "@/utils/backendText";
 
 interface Entry {
   directory: string;
   bytes: number;
   ownership_verified: boolean;
   issue: string | null;
+  issue_ui?: UiMessage | null;
   saved_references?: string[];
   saved_references_checked?: boolean;
   saved_reference_count?: number;
@@ -24,7 +26,7 @@ interface Review {
     missing_files: string[];
   };
 }
-interface ReviewStatus { operation_id: string; finished: boolean; review: Review | null; error: string | null; removed?: boolean }
+interface ReviewStatus { operation_id: string; finished: boolean; review: Review | null; error: string | null; error_ui?: UiMessage | null; removed?: boolean }
 
 const props = defineProps<{ managed?: boolean }>();
 const t = useTranslate();
@@ -149,7 +151,7 @@ async function reviewFiles(entry: Entry) {
       if (result.operation_id !== operation || typeof result.finished !== "boolean") throw new Error(t("service.catalogStorage.reviewChanged"));
     }
     if (id !== requestId) return;
-    if (result.error) throw new Error(result.error);
+    if (result.error) throw new Error(backendText(result.error, result.error_ui));
     const snapshot = result.review;
     if (!snapshot?.contents || snapshot.references?.directory !== entry.directory || snapshot.references.ownership_verified !== true
       || snapshot.references.saved_references_checked !== true || snapshot.references.runtime_references_checked !== true
@@ -202,7 +204,7 @@ async function removeFiles(start: boolean) {
     }
     if (id !== requestId) return;
     removalOperation.value = "";
-    if (result.error) throw new Error(result.error);
+    if (result.error) throw new Error(backendText(result.error, result.error_ui));
     if (result.removed !== true) throw new Error(t("service.catalogStorage.removalIncomplete"));
     removalNotice.value = "service.catalogStorage.removed";
   } catch (reason) {
@@ -249,7 +251,7 @@ function closeReview() {
             <template #header><span class="directory">{{ entry.directory }}</span></template>
             <template #header-extra>{{ size(entry.bytes) }}</template>
             <p>{{ status(entry) }}</p>
-            <p v-if="entry.issue">{{ entry.issue }}</p>
+            <p v-if="entry.issue">{{ backendText(entry.issue, entry.issue_ui) }}</p>
             <p v-if="entry.runtime_referenced">{{ t("service.catalogStorage.runtimeReferenced") }}</p>
             <p v-if="entry.saved_references?.length">{{ t("service.catalogStorage.savedReferences", { count: entry.saved_reference_count ?? entry.saved_references.length }) }}</p>
             <ul v-if="entry.saved_references?.length"><li v-for="source in entry.saved_references" :key="source">{{ source }}</li></ul>

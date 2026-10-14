@@ -53,6 +53,7 @@ pub mod switch_journal;
 mod system_recovery;
 mod transfer_channel;
 pub mod transfer_cleanup;
+pub mod ui_text;
 pub mod usb_permissions;
 mod user_runtime;
 pub mod write_gate;

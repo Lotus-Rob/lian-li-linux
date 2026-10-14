@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
 import { useDialog, useMessage } from "naive-ui";
-import { invoke } from "@tauri-apps/api/core";
+import { backendText, invoke } from "@/utils/backendText";
 import { FolderOpen, Info, Pause, Play, Sparkles, Trash2 } from "lucide-vue-next";
 import type { DeviceInfo, LcdConfig, MediaFraming, MediaType, SensorDescriptor } from "@/types";
 import { clampFraming, defaultFraming, isDefaultFraming, MAX_ZOOM, panBy, previewPlacement } from "@/utils/mediaFraming";
@@ -584,9 +584,14 @@ const brightness = computed({
   },
 });
 
+const currentBrightnessStatus = computed(() => {
+  const status = devices.telemetry.lcd_brightness?.[selectedDeviceId.value];
+  return status && { ...status, error: status.error && backendText(status.error, status.error_ui) };
+});
+
 const currentBrightnessError = computed(() => brightnessError(
   brightness.value,
-  devices.telemetry.lcd_brightness?.[selectedDeviceId.value],
+  currentBrightnessStatus.value,
   lcd.brightnessErrors[selectedDeviceId.value],
   lcd.brightnessRequests[selectedDeviceId.value],
 ));

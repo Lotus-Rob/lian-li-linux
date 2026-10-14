@@ -11,6 +11,7 @@
 use crate::traits::{RgbDevice, RgbFrameDelivery};
 use anyhow::{bail, Context, Result};
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbRenderFamily, RgbRenderProfile, RgbZoneInfo};
+use lianli_shared::ui_message::UiMessage;
 use lianli_transport::usb::{RusbBulk, USB_TIMEOUT};
 use lianli_transport::TransportError;
 use lianli_transport::UsbContext;
@@ -148,6 +149,7 @@ impl RgbDevice for WinUsbLedDevice {
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
         vec![RgbZoneInfo {
             name: "Ring".to_string(),
+            name_ui: Some(UiMessage::new("devices.zone.ring")),
             led_count: self.led_count,
         }]
     }

@@ -4,19 +4,36 @@ use crate::pixel_cleaner::{PixelCleanSession, SavedTargetState};
 use lianli_media::MediaAsset;
 use lianli_shared::config::LcdConfig;
 use lianli_shared::screen::ScreenInfo;
+use lianli_shared::ui_message::{UiError, UiMessage, UiText};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tracing::warn;
 
-fn next_session_id() -> Result<u64, String> {
+fn next_session_id() -> Result<u64, UiError> {
     use std::io::Read;
     let mut bytes = [0_u8; 8];
     std::fs::File::open("/dev/urandom")
         .and_then(|mut file| file.read_exact(&mut bytes))
-        .map_err(|e| format!("Creating pixel cleaner session ID: {e}"))?;
+        .map_err(|e| {
+            UiError::new(
+                UiMessage::new("daemon.pixelClean.sessionIdFailed").param("error", &e),
+                format!("Creating pixel cleaner session ID: {e}"),
+            )
+        })?;
     Ok((u64::from_ne_bytes(bytes) & ((1 << 53) - 1)).max(1))
+}
+
+fn refused(key: &str, english: &str) -> UiError {
+    UiError::new(UiMessage::new(key), english)
+}
+
+fn targets_busy() -> UiError {
+    refused(
+        "daemon.pixelClean.targetsBusy",
+        "LCD targets are busy. Retry shortly.",
+    )
 }
 const MAX_TARGETS: usize = 16;
 const PREPARATION_LIFETIME: Duration = Duration::from_secs(90);
@@ -36,7 +53,7 @@ pub(super) struct PixelCleanPreparation {
     minutes: u16,
     targets: Vec<PlannedTarget>,
     cancel: Arc<AtomicBool>,
-    worker: Option<JoinHandle<Result<Vec<Arc<MediaAsset>>, String>>>,
+    worker: Option<JoinHandle<Result<Vec<Arc<MediaAsset>>, UiText>>>,
     assets: Option<Vec<Arc<MediaAsset>>>,
     expires: Instant,
 }
@@ -127,35 +144,48 @@ impl ServiceManager {
         &mut self,
         target_id: Option<String>,
         minutes: u16,
-    ) -> Result<u64, String> {
+    ) -> Result<u64, UiError> {
         if self.lcd_group_recovery.busy() {
-            return Err("LCD group recovery is still running".into());
+            return Err(refused(
+                "daemon.pixelClean.groupRecoveryRunning",
+                "LCD group recovery is still running",
+            ));
         }
         if self.startup_image_job.is_some() {
-            return Err("Startup image upload is still running".into());
+            return Err(refused(
+                "daemon.pixelClean.startupUploadRunning",
+                "Startup image upload is still running",
+            ));
         }
         if minutes == 0 {
-            return Err("Duration must be positive".into());
+            return Err(refused(
+                "daemon.request.durationNotPositive",
+                "Duration must be positive",
+            ));
         }
         if self.media_preparation.is_busy() {
-            return Err(
-                "Wait for LCD media preparation to finish before starting pixel cleaning".into(),
-            );
+            return Err(refused(
+                "daemon.pixelClean.mediaPreparationBusy",
+                "Wait for LCD media preparation to finish before starting pixel cleaning",
+            ));
         }
         if self.pixel_clean_preparation.is_some() {
-            return Err("Another pixel cleaner preparation is pending".into());
+            return Err(refused(
+                "daemon.pixelClean.preparationPending",
+                "Another pixel cleaner preparation is pending",
+            ));
         }
         let targets = self
             .targets
             .try_lock_for(Duration::from_millis(100))
-            .ok_or("LCD targets are busy. Retry shortly.")?;
+            .ok_or_else(targets_busy)?;
         if targets.iter().any(|(index, target)| {
             !target.is_initialized()
                 && target_id.as_ref().is_none_or(|id| {
                     target_matches(id, *index, &target.device_identity, self.config.as_ref())
                 })
         }) {
-            return Err("LCD initialization has not completed. Check Installation Health before starting pixel cleaning.".into());
+            return Err(refused("daemon.pixelClean.lcdNotInitialized", "LCD initialization has not completed. Check Installation Health before starting pixel cleaning."));
         }
         let planned: Vec<_> = targets
             .iter()
@@ -209,13 +239,22 @@ impl ServiceManager {
         affected.extend(planned.iter().map(|t| t.index));
         drop(targets);
         if affected.len() > MAX_TARGETS {
-            return Err("At most 16 LCDs can be cleaned concurrently".into());
+            return Err(refused(
+                "daemon.pixelClean.tooManyConcurrent",
+                "At most 16 LCDs can be cleaned concurrently",
+            ));
         }
         if planned.is_empty() {
-            return Err("No active LCD targets match the request".into());
+            return Err(refused(
+                "daemon.pixelClean.noMatchingTargets",
+                "No active LCD targets match the request",
+            ));
         }
         if planned.len() > MAX_TARGETS {
-            return Err("Pixel cleaning supports at most 16 targets per request".into());
+            return Err(refused(
+                "daemon.pixelClean.tooManyTargets",
+                "Pixel cleaning supports at most 16 targets per request",
+            ));
         }
         let id = next_session_id()?;
         let cancel = Arc::new(AtomicBool::new(false));
@@ -242,7 +281,10 @@ impl ServiceManager {
                     .sum::<usize>();
                 for target in worker_targets {
                     if worker_cancel.load(Ordering::Relaxed) {
-                        return Err("Preparation cancelled".into());
+                        return Err(UiText::new(
+                            UiMessage::new("status.pixelClean.preparationCancelled"),
+                            "Preparation cancelled",
+                        ));
                     }
                     let rotation = target.orientation.to_bits();
                     let asset = if let Some((_, _, _, asset)) =
@@ -259,7 +301,14 @@ impl ServiceManager {
                             target.payload_limit,
                             &worker_cancel,
                         )
-                        .map_err(|e| format!("Preparing {}: {e}", target.identity))?;
+                        .map_err(|e| {
+                            UiText::new(
+                                UiMessage::new("status.pixelClean.preparingFailed")
+                                    .param("device", &target.identity)
+                                    .param("error", &e),
+                                format!("Preparing {}: {e}", target.identity),
+                            )
+                        })?;
                         total_bytes += match &kind {
                             lianli_media::MediaAssetKind::Video { frames, .. } => {
                                 frames.iter().map(Vec::len).sum::<usize>()
@@ -270,7 +319,10 @@ impl ServiceManager {
                             _ => 0,
                         };
                         if total_bytes > 64 * 1024 * 1024 {
-                            return Err("Pixel cleaner preparation exceeds 64 MiB budget".into());
+                            return Err(UiText::new(
+                                UiMessage::new("status.pixelClean.budgetExceeded"),
+                                "Pixel cleaner preparation exceeds 64 MiB budget",
+                            ));
                         }
                         let asset = Arc::new(MediaAsset {
                             kind,
@@ -293,7 +345,12 @@ impl ServiceManager {
                 }
                 Ok(prepared)
             })
-            .map_err(|e| format!("Starting pixel cleaner preparation: {e}"))?;
+            .map_err(|e| {
+                UiError::new(
+                    UiMessage::new("daemon.pixelClean.preparationStartFailed").param("error", &e),
+                    format!("Starting pixel cleaner preparation: {e}"),
+                )
+            })?;
         self.pixel_clean_preparation = Some(PixelCleanPreparation {
             id,
             minutes: minutes.min(lianli_shared::ipc::MAX_CLEAN_MINUTES),
@@ -307,30 +364,41 @@ impl ServiceManager {
         Ok(id)
     }
 
-    pub(super) fn activate_pixel_cleaning(&mut self, id: u64) -> Result<u64, String> {
+    pub(super) fn activate_pixel_cleaning(&mut self, id: u64) -> Result<u64, UiError> {
         self.poll_pixel_clean_preparation();
         let pending = self
             .pixel_clean_preparation
             .as_ref()
             .filter(|p| p.id == id)
-            .ok_or("Unknown pixel cleaner preparation")?;
+            .ok_or_else(|| {
+                refused(
+                    "daemon.pixelClean.unknownPreparation",
+                    "Unknown pixel cleaner preparation",
+                )
+            })?;
         let assets = pending
             .assets
             .as_ref()
-            .ok_or("Pixel cleaner is not ready")?;
+            .ok_or_else(|| refused("daemon.pixelClean.notReady", "Pixel cleaner is not ready"))?;
         let mut targets = self
             .targets
             .try_lock_for(Duration::from_millis(100))
-            .ok_or("LCD targets are busy. Retry shortly.")?;
+            .ok_or_else(targets_busy)?;
         for plan in &pending.targets {
-            let current = targets
-                .get(&plan.index)
-                .ok_or("LCD disconnected during preparation. Previous session preserved.")?;
+            let current = targets.get(&plan.index).ok_or_else(|| {
+                refused(
+                    "daemon.pixelClean.lcdDisconnected",
+                    "LCD disconnected during preparation. Previous session preserved.",
+                )
+            })?;
             if current.device_identity != plan.identity
                 || !Arc::ptr_eq(&current.asset, &plan.previous)
                 || current.cleaner_payload_limit() != plan.payload_limit
             {
-                return Err("LCD changed during preparation. Previous session preserved.".into());
+                return Err(refused(
+                    "daemon.pixelClean.lcdChanged",
+                    "LCD changed during preparation. Previous session preserved.",
+                ));
             }
         }
         let mut saved = Vec::new();
@@ -388,10 +456,12 @@ impl ServiceManager {
         }
         if pending.worker.as_ref().is_some_and(JoinHandle::is_finished) {
             let worker = pending.worker.take().expect("finished worker");
-            match worker
-                .join()
-                .unwrap_or_else(|_| Err("Pixel cleaner preparation panicked".into()))
-            {
+            match worker.join().unwrap_or_else(|_| {
+                Err(UiText::new(
+                    UiMessage::new("status.pixelClean.preparationPanicked"),
+                    "Pixel cleaner preparation panicked",
+                ))
+            }) {
                 Ok(assets) => {
                     pending.assets = Some(assets);
                     self.ipc.state.lock().pixel_clean_preparation = Some((pending.id, true, None));
@@ -768,6 +838,7 @@ mod tests {
         assert!(service
             .start_pixel_cleaning(None, 0)
             .unwrap_err()
+            .to_string()
             .contains("Duration"));
         assert!(service
             .start_pixel_cleaning(Some("missing".into()), 1)

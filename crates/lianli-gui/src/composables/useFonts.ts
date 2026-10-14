@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/utils/backendText";
 import { tr } from "@/i18n";
 
 export interface SystemFont {

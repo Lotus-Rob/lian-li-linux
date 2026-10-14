@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { RouterLink } from "vue-router";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/utils/backendText";
 import * as icons from "lucide-vue-next";
 import { useTranslate } from "@/i18n";
 import { MAIN_ROUTES } from "@/router";

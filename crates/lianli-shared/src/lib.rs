@@ -21,3 +21,4 @@ pub mod session;
 pub mod startup_image;
 pub mod systeminfo;
 pub mod template;
+pub mod ui_message;

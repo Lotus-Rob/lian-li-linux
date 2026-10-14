@@ -94,6 +94,7 @@ impl RgbDevice for MockRgb {
         if self.frames.is_some() {
             vec![RgbZoneInfo {
                 name: "ring".into(),
+                name_ui: None,
                 led_count: 1,
             }]
         } else {

@@ -3,6 +3,7 @@ use crate::traits::SensorDevice;
 use anyhow::{ensure, Context, Result};
 use lianli_shared::device_id::{DeviceFamily, TransportKind};
 use lianli_shared::ipc::{DeviceTelemetry, DeviceTemperature};
+use lianli_shared::ui_message::UiMessage;
 use parking_lot::{Condvar, Mutex};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -55,10 +56,15 @@ fn read(backend: &SharedHid, command: u8) -> Result<Vec<u8>> {
 
 fn temperatures(payload: &[u8]) -> Result<Vec<DeviceTemperature>> {
     ensure!(payload.len() >= 9, "truncated Edge Hub temperatures");
-    Ok(["GPU 2 connector", "GPU 1 connector", "Hub ambient"]
+    const NAMES: [(&str, &str); 3] = [
+        ("GPU 2 connector", "devices.edgeHub.gpu2Connector"),
+        ("GPU 1 connector", "devices.edgeHub.gpu1Connector"),
+        ("Hub ambient", "devices.edgeHub.hubAmbient"),
+    ];
+    Ok(NAMES
         .iter()
         .enumerate()
-        .map(|(index, name)| {
+        .map(|(index, (name, key))| {
             let fraction = payload[index * 2 + 1];
             // The vendor encodes the fractional byte as decimal digits, not fixed point.
             let scale = if fraction < 10 {
@@ -71,6 +77,7 @@ fn temperatures(payload: &[u8]) -> Result<Vec<DeviceTemperature>> {
             let abnormal = payload[6 + index] != 0;
             DeviceTemperature {
                 name: (*name).into(),
+                name_ui: Some(UiMessage::new(*key)),
                 celsius: (!abnormal)
                     .then_some(f32::from(payload[index * 2]) + f32::from(fraction) / scale),
                 abnormal,
@@ -99,6 +106,7 @@ impl Snapshot {
             }
             if data.error.is_none() {
                 data.error = Some("Temperature readings are stale".into());
+                data.error_ui = Some(UiMessage::new("devices.edgeHub.stale"));
             }
         }
         data
@@ -132,6 +140,7 @@ impl EdgeHub {
                 product_subtype: Some(product[1]),
                 temperatures: temperatures(&[0, 0, 0, 0, 0, 0, 1, 1, 1])?,
                 error: Some("Waiting for temperature readings".into()),
+                error_ui: Some(UiMessage::new("devices.edgeHub.waiting")),
                 ..Default::default()
             },
             observed: None,
@@ -154,11 +163,13 @@ impl EdgeHub {
                             Ok(readings) => {
                                 snapshot.data.temperatures = readings;
                                 snapshot.data.error = None;
+                                snapshot.data.error_ui = None;
                                 snapshot.observed = Some(Instant::now());
                                 failures = 0;
                             }
                             Err(error) => {
                                 snapshot.data.error = Some(error.to_string());
+                                snapshot.data.error_ui = None;
                                 failures = failures.saturating_add(1);
                             }
                         }
@@ -187,6 +198,7 @@ impl SensorDevice for EdgeHub {
         let mut snapshot = self.state.lock();
         snapshot.observed = None;
         snapshot.data.error = Some("Waiting for a fresh reading after resume".into());
+        snapshot.data.error_ui = Some(UiMessage::new("devices.edgeHub.waitingAfterResume"));
         self.stop.1.notify_all();
     }
     fn telemetry(&self) -> DeviceTelemetry {

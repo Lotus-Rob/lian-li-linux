@@ -6,6 +6,7 @@ use lianli_shared::config::LcdConfig;
 use lianli_shared::fan::FanConfig;
 use lianli_shared::ipc::IpcResponse;
 use lianli_shared::rgb::RgbAppConfig;
+use lianli_shared::ui_message::UiMessage;
 
 use crate::ipc::{persist_and_notify, SharedState};
 
@@ -13,7 +14,7 @@ pub(super) fn validate_aio_modes(
     config: &lianli_shared::config::AppConfig,
     previous: Option<&lianli_shared::config::AppConfig>,
     devices: &[lianli_shared::ipc::DeviceInfo],
-) -> Option<String> {
+) -> Option<IpcResponse> {
     for device in devices {
         let Some(aio) = config.aio.get(&device.device_id) else {
             continue;
@@ -24,9 +25,9 @@ pub(super) fn validate_aio_modes(
             old.map(|aio| &aio.pump_target_rpm),
             device.pump_mb_sync_support,
         ) {
-            return Some(format!(
-                "{} does not support pump motherboard sync",
-                device.name
+            return Some(IpcResponse::error_ui(
+                format!("{} does not support pump motherboard sync", device.name),
+                UiMessage::new("daemon.config.pumpSyncUnsupported").param("device", &device.name),
             ));
         }
         for (slot, speed) in aio
@@ -40,9 +41,10 @@ pub(super) fn validate_aio_modes(
                 old.map(|aio| &aio.fan_speeds[slot]),
                 device.mb_sync_support,
             ) {
-                return Some(format!(
-                    "{} does not support fan motherboard sync",
-                    device.name
+                return Some(IpcResponse::error_ui(
+                    format!("{} does not support fan motherboard sync", device.name),
+                    UiMessage::new("daemon.config.fanSyncUnsupported")
+                        .param("device", &device.name),
                 ));
             }
         }

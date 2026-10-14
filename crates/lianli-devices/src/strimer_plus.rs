@@ -8,6 +8,7 @@ use crate::registry::SharedHid;
 use crate::traits::RgbDevice;
 use anyhow::{bail, Context, Result};
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
+use lianli_shared::ui_message::UiMessage;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::thread;
@@ -339,6 +340,7 @@ impl RgbDevice for StrimerPlusController {
         (0..total_ports)
             .map(|port| RgbZoneInfo {
                 name: format!("Port {}", port + 1),
+                name_ui: Some(UiMessage::new("devices.zone.port").param("number", port + 1)),
                 led_count: MAX_LEDS_PER_PORT,
             })
             .collect()

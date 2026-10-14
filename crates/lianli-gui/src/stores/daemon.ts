@@ -8,6 +8,7 @@ import { useThermalStore } from "@/stores/thermal";
 import { useLcdStore } from "@/stores/lcd";
 import { DONGLE_FAMILIES } from "@/constants";
 import type { DaemonInfo, SensorInfo, TelemetrySnapshot } from "@/types";
+import type { UiMessage } from "@/utils/backendText";
 
 function findTemp(sensors: SensorInfo[], kind: "cpu" | "gpu"): number | null {
   const match = sensors.find((s) => {
@@ -36,11 +37,13 @@ export const useDaemonStore = defineStore("daemon", () => {
   const desktopStreams = ref<NonNullable<TelemetrySnapshot["desktop_streams"]>>([]);
   const info = ref<DaemonInfo | null>(null);
   const writeError = ref<string | null>(null);
+  const writeErrorUi = ref<UiMessage | null>(null);
   const canWrite = computed(() => connected.value && !writeError.value);
   const version = computed(() => info.value?.version ?? "");
   const openrgbRunning = ref(false);
   const openrgbEnabled = ref(false);
   const openrgbError = ref("");
+  const openrgbErrorUi = ref<UiMessage | null>(null);
   const openrgbPort = ref<number | null>(null);
 
   let wasConnected = false;
@@ -54,6 +57,7 @@ export const useDaemonStore = defineStore("daemon", () => {
       info.value = result.daemon_info ?? null;
       connected.value = result.connected;
       writeError.value = result.write_error ?? null;
+      writeErrorUi.value = result.write_error_ui ?? null;
       socketPath.value = result.socket_path;
       streamingActive.value = result.telemetry.streaming_active;
       mediaPreparation.value = result.telemetry.media_preparation ?? {};
@@ -61,6 +65,7 @@ export const useDaemonStore = defineStore("daemon", () => {
       openrgbRunning.value = result.telemetry.openrgb_status.running;
       openrgbEnabled.value = result.telemetry.openrgb_status.enabled;
       openrgbError.value = result.telemetry.openrgb_status.error ?? "";
+      openrgbErrorUi.value = result.telemetry.openrgb_status.error_ui ?? null;
       openrgbPort.value = result.telemetry.openrgb_status.port;
 
       devices.applyPoll(result.devices, result.telemetry);
@@ -92,6 +97,7 @@ export const useDaemonStore = defineStore("daemon", () => {
       desktopStreams.value = [];
       info.value = null;
       writeError.value = null;
+      writeErrorUi.value = null;
       wasConnected = false;
       // eslint-disable-next-line no-console
       console.warn("poll failed", e);
@@ -115,6 +121,7 @@ export const useDaemonStore = defineStore("daemon", () => {
   return {
     connected,
     writeError,
+    writeErrorUi,
     canWrite,
     socketPath,
     streamingActive,
@@ -125,6 +132,7 @@ export const useDaemonStore = defineStore("daemon", () => {
     openrgbRunning,
     openrgbEnabled,
     openrgbError,
+    openrgbErrorUi,
     openrgbPort,
     refresh,
     start,

@@ -1,7 +1,10 @@
 use crate::account::Account;
+use crate::ui_text::{bounded, keyed, text};
 use anyhow::{ensure, Context, Result};
 use lianli_shared::installation::InstallationContext;
 use lianli_shared::services::{ServiceChangeRequest, ServiceOperationStatus};
+use lianli_shared::ui_message::UiMessage;
+use lianli_shared::ui_message::UiText;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -201,9 +204,15 @@ fn read_at(path: &Path, uid: u32) -> Result<Option<JobStatus>> {
             let _lock = Lock(file);
             record = store.read()?.context("Switch progress disappeared")?;
             if record.status.active {
+                let interrupted = text(
+                    "control.switch.interrupted",
+                    "Service switching was interrupted. Use Recover switch before trying another mode.",
+                );
                 record.status = ServiceOperationStatus {
-                    active: false, success: Some(false),
-                    message: "Service switching was interrupted. Use Recover switch before trying another mode.".into(),
+                    active: false,
+                    success: Some(false),
+                    message: interrupted.english,
+                    message_ui: interrupted.ui,
                 };
             }
         }
@@ -261,11 +270,17 @@ pub fn start(request: ServiceChangeRequest) -> Result<String> {
     prerequisites()?;
     ensure!(
         !read()?.is_some_and(|record| record.status.active),
-        "Another service switch is running"
+        keyed(
+            "control.switch.alreadyRunning",
+            "Another service switch is running"
+        )
     );
     ensure!(
         !crate::operation_job::read()?.is_some_and(|record| record.status.active),
-        "Another service action is running"
+        keyed(
+            "control.switch.actionRunning",
+            "Another service action is running"
+        )
     );
     let mut random = [0; 16];
     File::open("/dev/urandom")?.read_exact(&mut random)?;
@@ -358,7 +373,7 @@ pub fn submit(id: &str, request: ServiceChangeRequest) -> Result<()> {
     Ok(())
 }
 
-pub fn run(uid: u32, id: &str, request: ServiceChangeRequest) -> Result<String> {
+pub fn run(uid: u32, id: &str, request: ServiceChangeRequest) -> Result<UiText> {
     ensure!(
         unsafe { libc::geteuid() } == 0
             && InstallationContext::detect() == InstallationContext::Native,
@@ -387,8 +402,8 @@ fn run_at(
     caller: u32,
     id: &str,
     request: ServiceChangeRequest,
-    operation: impl FnOnce(&mut dyn FnMut(&str) -> Result<()>) -> Result<String>,
-) -> Result<String> {
+    operation: impl FnOnce(&mut dyn FnMut(UiText) -> Result<()>) -> Result<UiText>,
+) -> Result<UiText> {
     validate_id(id)?;
     let store = Store::open(path, owner, true)?.context("Missing switch progress directory")?;
     let lock = store.file("worker.lock", true)?;
@@ -407,27 +422,29 @@ fn run_at(
             active: true,
             success: None,
             message: "Checking service switch prerequisites…".into(),
+            message_ui: Some(UiMessage::new("control.switch.checkingPrerequisites")),
         },
     };
     store.write(&record)?;
     let result = operation(&mut |message| {
-        record.status.message = message.chars().take(2048).collect();
+        (record.status.message, record.status.message_ui) = bounded(message);
         store.write(&record)
     });
     record.status.active = false;
     record.status.success = Some(result.is_ok());
     // Public progress contains no paths or private configuration details from failures.
-    record.status.message = match &result {
-        Ok(message) => message.chars().take(2048).collect(),
-        Err(_) => "Service switch failed. Recheck Installation Health. If recovery is pending, choose Recover switch. See the journal for lianli-control-switch.service or lianli-control-recovery.service.".into(),
+    let message = match &result {
+        Ok(message) => message.clone(),
+        Err(_) => text("control.switch.failed", "Service switch failed. Recheck Installation Health. If recovery is pending, choose Recover switch. See the journal for lianli-control-switch.service or lianli-control-recovery.service."),
     };
+    (record.status.message, record.status.message_ui) = bounded(message);
     store
         .write(&record)
         .context("Switch finished but progress could not be saved. Recheck actual services")?;
     result
 }
 
-pub(crate) fn recover_automatically(caller: Account, id: &str) -> Result<String> {
+pub(crate) fn recover_automatically(caller: Account, id: &str) -> Result<UiText> {
     ensure!(
         unsafe { libc::geteuid() } == 0
             && InstallationContext::detect() == InstallationContext::Native,
@@ -492,7 +509,10 @@ mod tests {
         let uid = unsafe { libc::geteuid() };
         let request = ServiceChangeRequest::Recover {};
         run_at(&path, uid, 1000, ID, request, |progress| {
-            progress("Restoring the previous service mode…")?;
+            progress(text(
+                "control.switch.restoring",
+                "Restoring the previous service mode…",
+            ))?;
             let observed = read_at(&path, uid)?.unwrap();
             assert!(observed.status.active);
             assert!(observed.status.message.starts_with("Restoring"));
@@ -500,7 +520,10 @@ mod tests {
                 "Concurrent operation ran"
             ))
             .is_err());
-            Ok("Previous service mode restored and verified.".into())
+            Ok(text(
+                "control.switch.restored",
+                "Previous service mode restored and verified.",
+            ))
         })
         .unwrap();
         assert_eq!(
@@ -534,6 +557,7 @@ mod tests {
                 active: true,
                 success: None,
                 message: "Working".into(),
+                message_ui: None,
             },
         };
         store.write(&record).unwrap();

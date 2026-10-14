@@ -4,6 +4,7 @@ use super::EventSender;
 
 use lianli_shared::ipc::IpcResponse;
 use lianli_shared::template::LcdTemplate;
+use lianli_shared::ui_message::{UiError, UiMessage};
 use tracing::info;
 
 use crate::ipc::SharedState;
@@ -27,7 +28,10 @@ pub fn set(state: &SharedState, tx: EventSender, templates: Vec<LcdTemplate>) ->
             info!("LCD templates updated via IPC");
             IpcResponse::ok(serde_json::json!(null))
         }
-        Err(e) => IpcResponse::error(format!("failed to write templates: {e}")),
+        Err(e) => IpcResponse::error_ui(
+            format!("failed to write templates: {e}"),
+            UiMessage::new("daemon.templates.writeFailed").param("error", e),
+        ),
     }
 }
 
@@ -49,7 +53,10 @@ pub fn merge(
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
     {
-        return IpcResponse::error("A copied-template save is already running. Retry shortly");
+        return IpcResponse::error_ui(
+            "A copied-template save is already running. Retry shortly",
+            UiMessage::new("daemon.templates.copySaveRunning"),
+        );
     }
     let running = Running;
     let path = state.lock().templates_path();
@@ -57,10 +64,15 @@ pub fn merge(
     if let Err(error) = std::thread::Builder::new().name("template-merge".into()).spawn(move || {
         let _running = running;
         let result = template_store::merge_user_templates(&path, &originals, &copies).and_then(|()| {
-            tx.send(DaemonEvent::IpcUpdate).map_err(|_| anyhow::anyhow!("Templates were saved but reload was not confirmed. Reconnect and inspect settings"))
+            tx.send(DaemonEvent::IpcUpdate).map_err(|_| UiError::new(UiMessage::new("daemon.templates.reloadUnconfirmed"), "Templates were saved but reload was not confirmed. Reconnect and inspect settings").into())
         });
-        let _ = sender.send(result.map(|()| IpcResponse::ok(serde_json::json!(null))).unwrap_or_else(|error| IpcResponse::error(format!("{error:#}"))));
-    }) { return IpcResponse::error(format!("Could not start copied-template save: {error}")); }
+        let _ = sender.send(result.map(|()| IpcResponse::ok(serde_json::json!(null))).unwrap_or_else(|error| IpcResponse::from_error(&error)));
+    }) {
+        return IpcResponse::error_ui(
+            format!("Could not start copied-template save: {error}"),
+            UiMessage::new("daemon.templates.copySaveStartFailed").param("error", error),
+        );
+    }
     // A blocked filesystem retains the worker and write permit after the response deadline.
-    receiver.recv_timeout(std::time::Duration::from_secs(3)).unwrap_or_else(|_| IpcResponse::error("Copied-template save is unconfirmed and may still complete. Inspect templates before retrying"))
+    receiver.recv_timeout(std::time::Duration::from_secs(3)).unwrap_or_else(|_| IpcResponse::error_ui("Copied-template save is unconfirmed and may still complete. Inspect templates before retrying", UiMessage::new("daemon.templates.copySaveUnconfirmed")))
 }

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { backendText, invoke, type UiMessage } from "@/utils/backendText";
 import type { DeviceInfo } from "@/types";
 import { useIpc } from "@/composables/useIpc";
 import { useDaemonStore } from "@/stores/daemon";
 import { useTranslate } from "@/i18n";
 
-type Job = { id: number; device_id: string; status: { state: string; message?: string; response_received?: boolean } };
+type Job = { id: number; device_id: string; status: { state: string; message?: string; message_ui?: UiMessage | null; response_received?: boolean } };
 const props = defineProps<{ device: DeviceInfo }>();
 const ipc = useIpc();
 const daemon = useDaemonStore();
@@ -173,7 +173,7 @@ onBeforeUnmount(() => { disposed = true; selection++; clearTimeout(timer); clear
         <label>{{ t("lcd.startupImage.vertical") }} <n-slider v-model:value="panY" :min="-100" :max="100" :disabled="busy" /></label>
       </template>
       <n-alert v-if="error" type="error">{{ error }}</n-alert>
-      <n-alert v-if="job?.status.state === 'failed'" type="error">{{ job.status.message }}</n-alert>
+      <n-alert v-if="job?.status.state === 'failed'" type="error">{{ backendText(job.status.message ?? "", job.status.message_ui) }}</n-alert>
       <n-alert v-else-if="job?.status.state === 'transferred'" type="info">{{ wirelessH2 ? t("lcd.startupImage.wirelessTransferred") : job.status.response_received ? t("lcd.startupImage.transferred") : t("lcd.startupImage.transferredUnconfirmed") }}</n-alert>
       <p v-else-if="job?.status.state === 'cancelled'">{{ wirelessH2 ? t("lcd.startupImage.wirelessCancelled") : t("lcd.startupImage.cancelled") }}</p>
       <p v-if="busy">{{ job?.status.state === 'transferring' ? t("lcd.startupImage.uploading") : t("lcd.startupImage.preparing") }}</p>

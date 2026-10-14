@@ -19,6 +19,7 @@ import {
   familyIsDesktopMode,
 } from "@/constants";
 import { useTranslate } from "@/i18n";
+import { backendText } from "@/utils/backendText";
 
 const t = useTranslate();
 const message = useMessage();
@@ -210,7 +211,8 @@ const status = computed<{ label: string; tone: StatusTone; busy?: boolean }>(() 
 
 const temperatureReadings = computed(() =>
   (d.value.telemetry?.temperatures ?? []).map((reading) => ({
-    name: reading.name,
+    id: reading.name,
+    name: backendText(reading.name, reading.name_ui),
     text: reading.celsius == null ? (reading.abnormal ? t("devices.card.abnormal") : t("devices.card.notAvailable")) : `${reading.celsius.toFixed(1)}°C`,
   })),
 );
@@ -247,7 +249,7 @@ async function ping() {
         </span>
       </div>
       <div class="subtitle">{{ subtitle }}</div>
-      <p v-if="d.telemetry?.error" class="error-text">{{ d.telemetry.error }}</p>
+      <p v-if="d.telemetry?.error" class="error-text">{{ backendText(d.telemetry.error, d.telemetry.error_ui) }}</p>
       <p v-if="isUnboundWireless && isBindOther" class="subtitle">{{ t("devices.card.ownedByOther") }}</p>
       <p v-if="isBoundWireless && needsRebind" class="subtitle">{{ t("devices.card.needsRebindHint") }}</p>
     </div>
@@ -265,7 +267,7 @@ async function ping() {
       <span v-if="coolantText" class="reading" :title="t('devices.card.coolantTitle')">
         <Droplet :size="12" /><span class="mono">{{ coolantText }}</span>
       </span>
-      <span v-for="reading in temperatureReadings" :key="reading.name" class="reading" :title="reading.name">
+      <span v-for="reading in temperatureReadings" :key="reading.id" class="reading" :title="reading.name">
         <span class="reading-label">{{ reading.name }}</span><span class="mono">{{ reading.text }}</span>
       </span>
       <span v-if="resolution" class="reading" :title="t('devices.card.screenTitle')">

@@ -3,6 +3,7 @@ use lianli_devices::detect::{enumerate_devices, probe_tl_lcd_port_indices};
 use lianli_shared::device_id::DeviceFamily;
 use lianli_shared::ipc::DeviceInfo;
 use lianli_shared::screen::screen_info_for;
+use lianli_shared::ui_message::{UiMessage, UiText};
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, warn};
 
@@ -257,13 +258,20 @@ impl ServiceManager {
                     .thread
                     .as_ref()
                     .is_some_and(|thread| thread.is_finished());
+            let (error, error_ui) = UiText::split(orgb_state.error.clone().or_else(|| {
+                exited.then(|| {
+                    UiText::new(
+                        UiMessage::new("status.openRgb.stopped"),
+                        "OpenRGB stopped. Check daemon logs, then Retry OpenRGB.",
+                    )
+                })
+            }));
             lianli_shared::ipc::OpenRgbServerStatus {
                 enabled,
                 running: orgb_state.running && !exited,
                 port: orgb_state.port,
-                error: orgb_state.error.clone().or_else(|| {
-                    exited.then(|| "OpenRGB stopped. Check daemon logs, then Retry OpenRGB.".into())
-                }),
+                error,
+                error_ui,
             }
         };
 

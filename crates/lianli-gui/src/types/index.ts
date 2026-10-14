@@ -2,6 +2,8 @@
 // Serialization formats (serde rename rules) are preserved exactly so JSON
 // round-trips against the daemon.
 
+import type { UiMessage } from "@/utils/backendText";
+
 // ─── Device families ────────────────────────────────────────────────────────
 export type DeviceFamily =
   | "Ene6k77"
@@ -51,8 +53,9 @@ export interface DeviceInfo {
     product_type: number | null;
     product_subtype: number | null;
     age_ms: number | null;
-    temperatures: { name: string; celsius: number | null; abnormal: boolean }[];
+    temperatures: { name: string; name_ui?: UiMessage; celsius: number | null; abnormal: boolean }[];
     error: string | null;
+    error_ui?: UiMessage;
   };
   device_id: string;
   family: DeviceFamily;
@@ -89,6 +92,7 @@ export interface OpenRgbServerStatus {
   running: boolean;
   port: number | null;
   error: string | null;
+  error_ui?: UiMessage | null;
 }
 
 export interface PixelCleanStatus {
@@ -100,7 +104,13 @@ export interface PixelCleanStatus {
 }
 
 export interface TelemetrySnapshot {
-  lcd_brightness?: Record<string, { request_id?: string | null; brightness: number; pending: boolean; error: string | null }>;
+  lcd_brightness?: Record<string, {
+    request_id?: string | null;
+    brightness: number;
+    pending: boolean;
+    error: string | null;
+    error_ui?: UiMessage | null;
+  }>;
   desktop_streams?: DesktopStreamStatus[];
   media_preparation?: Record<string, {
     startup_recovery_required?: boolean;
@@ -108,12 +118,15 @@ export interface TelemetrySnapshot {
     device_id: string;
     state: "waiting_for_device" | "preparing" | "ready" | "failed";
     error: string | null;
+    error_ui?: UiMessage | null;
     last_playback_error?: string | null;
+    last_playback_error_ui?: UiMessage | null;
     runtime?: {
       stage: "failed" | "starting_source" | "autonomous_source_configured" | "frame_submitted";
       fps_limit: number;
       hardware_video_allowed: boolean;
       fallback_reason: string | null;
+      fallback_reason_ui?: UiMessage | null;
       encoder?: { name: string; software_fallback: boolean } | null;
       h264_transfer_started?: boolean | null;
     } | null;
@@ -134,6 +147,7 @@ export interface DesktopStreamStatus {
   backend: string | null;
   fallback_reason: string | null;
   error: string | null;
+  error_ui?: UiMessage | null;
   applied_generation: number | null;
   applied_policy: { hardware_video: boolean; fps_limit: number } | null;
   encoding?: {
@@ -161,7 +175,13 @@ export interface AssetAccessReport {
   uid: number;
   checked: number;
   failed: number;
-  issues: { owner: string; path: string | null; error: string }[];
+  issues: {
+    owner: string;
+    owner_ui?: UiMessage | null;
+    path: string | null;
+    error: string;
+    error_ui?: UiMessage | null;
+  }[];
 }
 
 export interface PollResult {
@@ -169,6 +189,7 @@ export interface PollResult {
   socket_path: string;
   daemon_info?: DaemonInfo | null;
   write_error?: string | null;
+  write_error_ui?: UiMessage | null;
   devices: DeviceInfo[];
   telemetry: TelemetrySnapshot;
 }
@@ -386,6 +407,7 @@ export interface RgbAppConfig {
 
 export interface RgbZoneInfo {
   name: string;
+  name_ui?: UiMessage;
   led_count: number;
 }
 
@@ -401,6 +423,7 @@ export interface RgbEffectParameters {
 export interface RgbDeviceCapabilities {
   fan_led_count_control?: { zone: number; min: number; max: number; default: number } | null;
   deferred_reason?: string;
+  deferred_reason_ui?: UiMessage;
   hardware_group_effects?: boolean;
   group_effect_modes?: string[];
   zone_effect_modes?: string[];

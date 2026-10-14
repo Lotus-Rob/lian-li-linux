@@ -1,8 +1,9 @@
 use super::renderers::{PreparedCustomH264, PreparedSensorH264};
-use super::runtime::{make_jpeg_source, FrameSource};
+use super::runtime::{failure_text, make_jpeg_source, FrameSource};
 use super::DaemonEvent;
 use lianli_media::{MediaAsset, MediaAssetKind};
 use lianli_shared::screen::ScreenInfo;
+use lianli_shared::ui_message::UiText;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Weak};
@@ -23,7 +24,7 @@ pub(super) enum PreparedSource {
     Custom(Box<PreparedCustomH264>),
     Jpeg {
         source: Box<dyn FrameSource>,
-        fallback: Option<String>,
+        fallback: Option<UiText>,
     },
 }
 
@@ -223,10 +224,12 @@ fn prepare(request: &SourceRequest, cancel: &AtomicBool) -> Result<PreparedSourc
             request,
             cancel,
             Some(
-                format!("H.264 unavailable. Using JPEG: {error:#}")
-                    .chars()
-                    .take(2048)
-                    .collect(),
+                failure_text(
+                    "status.media.h264Unavailable",
+                    "H.264 unavailable. Using JPEG",
+                    &error,
+                )
+                .truncated(2048),
             ),
         ),
     }
@@ -235,7 +238,7 @@ fn prepare(request: &SourceRequest, cancel: &AtomicBool) -> Result<PreparedSourc
 fn prepare_jpeg(
     request: &SourceRequest,
     cancel: &AtomicBool,
-    fallback: Option<String>,
+    fallback: Option<UiText>,
 ) -> Result<PreparedSource, String> {
     let mut source = make_jpeg_source(request.asset.clone(), request.tx.clone(), &request.screen)
         .ok_or_else(|| "This media source does not use a JPEG renderer".to_owned())?;

@@ -1,4 +1,5 @@
 use crate::services::Route;
+use crate::ui_text::keyed;
 use anyhow::{ensure, Context, Result};
 use lianli_shared::daemon::FileIdentity;
 use lianli_shared::installation::{InstallationContext, DAEMON_LOCK_PATH};
@@ -9,9 +10,12 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 
 pub fn inspect(context: &InstallationContext, route: &Route) -> Result<OwnershipSnapshot> {
-    let path = context
-        .daemon_lock_path()
-        .context("Host ownership lock is unavailable")?;
+    let path = context.daemon_lock_path().ok_or_else(|| {
+        keyed(
+            "control.route.ownershipLockUnavailable",
+            "Host ownership lock is unavailable",
+        )
+    })?;
     let identity = file_identity(&path, matches!(context, InstallationContext::Native))?;
     let table = match route {
         Route::Native => read_table(File::open("/proc/locks")?)?,

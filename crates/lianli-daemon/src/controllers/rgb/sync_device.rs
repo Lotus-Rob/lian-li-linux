@@ -3,6 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use lianli_devices::traits::{RgbDevice, RgbFrameDelivery};
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbPlaybackTiming, RgbZoneInfo};
+use lianli_shared::ui_message::UiMessage;
 
 pub(super) struct SyncDevice {
     pub inner: Arc<dyn RgbDevice>,
@@ -19,6 +20,7 @@ impl RgbDevice for SyncDevice {
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
         vec![RgbZoneInfo {
             name: "Sync".into(),
+            name_ui: Some(UiMessage::new("devices.zone.sync")),
             led_count: self.led_count,
         }]
     }

@@ -6,6 +6,7 @@ use lianli_shared::media_dependencies::{
     AssetAccessIssue, AssetAccessReport, AssetDependency,
 };
 use lianli_shared::template::LcdTemplate;
+use lianli_shared::ui_message::{UiError, UiMessage};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{Read, Seek, Write};
@@ -20,6 +21,10 @@ const MAX_INPUT: usize = 1024 * 1024;
 const MAX_DEPENDENCIES: usize = 1024;
 const MAX_ISSUES: usize = 32;
 static RUNNING: AtomicBool = AtomicBool::new(false);
+
+fn keyed(key: &str, english: &str) -> UiError {
+    UiError::new(UiMessage::new(key), english)
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct Input {
@@ -52,8 +57,10 @@ impl Input {
                         &mut report,
                         AssetAccessIssue {
                             owner: format!("LCD[{}]", lcd.device_id()),
+                            owner_ui: None,
                             path: None,
-                            error,
+                            error: error.to_string(),
+                            error_ui: Some(error.message),
                         },
                     );
                     continue;
@@ -77,17 +84,26 @@ fn check_dependencies(
     validate_dependency_paths(&dependencies).map_err(anyhow::Error::msg)?;
     ensure!(
         report.checked + dependencies.len() <= MAX_DEPENDENCIES,
-        "Too many media dependencies to check"
+        keyed(
+            "status.mediaAccess.tooManyDependencies",
+            "Too many media dependencies to check"
+        )
     );
     for dependency in dependencies {
         report.checked += 1;
         if let Err(error) = lianli_media::asset_access::check_file(&dependency.path) {
+            let error_ui = error
+                .get_ref()
+                .and_then(|inner| inner.downcast_ref::<UiError>())
+                .map(|inner| inner.message.clone());
             record(
                 report,
                 AssetAccessIssue {
                     owner: dependency.owner,
+                    owner_ui: dependency.owner_ui,
                     path: Some(dependency.path),
                     error: error.to_string(),
+                    error_ui,
                 },
             );
         }
@@ -114,7 +130,10 @@ pub fn check(input: Input) -> Result<AssetAccessReport> {
     let bytes = serde_json::to_vec(&input)?;
     ensure!(
         bytes.len() <= MAX_INPUT,
-        "Media access request exceeds 1 MiB"
+        keyed(
+            "status.mediaAccess.requestTooLarge",
+            "Media access request exceeds 1 MiB"
+        )
     );
     run_check(move || run_helper(&bytes), Duration::from_secs(3))
 }
@@ -127,7 +146,10 @@ fn run_check(
         RUNNING
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok(),
-        "Another media access check is still running. Recheck shortly."
+        keyed(
+            "status.mediaAccess.checkRunning",
+            "Another media access check is still running. Recheck shortly."
+        )
     );
     let running = Running;
     let (sender, receiver) = mpsc::sync_channel(1);
@@ -140,9 +162,10 @@ fn run_check(
             let result = job();
             let _ = sender.send(result);
         })?;
-    receiver.recv_timeout(timeout).context(
+    receiver.recv_timeout(timeout).context(keyed(
+        "status.mediaAccess.checkTimedOut",
         "Media access check did not finish. Storage may be unavailable. Repair it and Recheck.",
-    )?
+    ))?
 }
 
 fn run_helper(bytes: &[u8]) -> Result<AssetAccessReport> {

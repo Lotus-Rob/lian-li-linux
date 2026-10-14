@@ -171,7 +171,7 @@ pub enum DaemonEvent {
     SetEne6k77FanQuantity {
         device_id: String,
         quantity: u8,
-        reply: std::sync::mpsc::SyncSender<Result<(), String>>,
+        reply: std::sync::mpsc::SyncSender<anyhow::Result<()>>,
     },
     FrameFinished,
     MediaPrepared,
@@ -183,7 +183,7 @@ pub enum DaemonEvent {
     MediaPlaybackStopped {
         target_index: usize,
         key: String,
-        error: String,
+        error: lianli_shared::ui_message::UiText,
     },
     RecreateMedia {
         target_index: usize,
@@ -193,7 +193,7 @@ pub enum DaemonEvent {
         target_index: usize,
         removal: std::sync::Weak<()>,
         key: String,
-        error: String,
+        error: lianli_shared::ui_message::UiText,
     },
     ResyncWirelessRgb,
     LcdInitComplete {
@@ -221,7 +221,7 @@ pub enum DaemonEvent {
         duration_minutes: u16,
         preparation_id: Option<u64>,
         deadline: Instant,
-        reply: std::sync::mpsc::SyncSender<Result<(u64, bool), String>>,
+        reply: std::sync::mpsc::SyncSender<Result<(u64, bool), lianli_shared::ui_message::UiError>>,
     },
     StopPixelClean {
         device_id: Option<String>,
@@ -756,18 +756,24 @@ impl ServiceManager {
                                 target.consecutive_errors += 1;
                                 if target.consecutive_errors >= 3 {
                                     warn!("LCD[{id}] USB error (3/3): {err}");
-                                    if let Some(event) = target.removal_event(format!(
-                                        "USB transfer failed after three attempts: {err}"
-                                    )) {
+                                    if let Some(event) =
+                                        target.removal_event(runtime::failure_text(
+                                            "status.media.usbTransferFailed",
+                                            "USB transfer failed after three attempts",
+                                            &err,
+                                        ))
+                                    {
                                         to_recreate.push(event);
                                     }
                                 }
                             }
                             Err(runtime::SendError::Other(err)) => {
                                 warn!("LCD[{id}] media error: {err}");
-                                if let Some(event) =
-                                    target.removal_event(format!("Media playback failed: {err:#}"))
-                                {
+                                if let Some(event) = target.removal_event(runtime::failure_text(
+                                    "status.media.playbackFailed",
+                                    "Media playback failed",
+                                    &err,
+                                )) {
                                     to_recreate.push(event);
                                 }
                             }
@@ -856,6 +862,7 @@ impl ServiceManager {
                             id,
                             lianli_shared::startup_image::StartupImageState::Failed {
                                 message: error.to_string(),
+                                message_ui: lianli_shared::ui_message::ui_message_of(&error),
                             },
                         );
                     }
@@ -871,7 +878,7 @@ impl ServiceManager {
                     operation_id,
                 } => {
                     let result = parse_mac_str(&mac_address)
-                        .ok_or_else(|| anyhow::anyhow!("invalid wireless MAC address"))
+                        .ok_or_else(|| crate::ipc::wireless::invalid_mac().into())
                         .and_then(|mac| self.wireless.bind_device(&mac));
                     if let Err(error) = &result {
                         warn!("Failed to bind wireless device {mac_address}: {error:#}");
@@ -888,7 +895,7 @@ impl ServiceManager {
                     operation_id,
                 } => {
                     let result = parse_mac_str(&mac_address)
-                        .ok_or_else(|| anyhow::anyhow!("invalid wireless MAC address"))
+                        .ok_or_else(|| crate::ipc::wireless::invalid_mac().into())
                         .and_then(|mac| self.wireless.unbind_device(&mac));
                     if let Err(error) = &result {
                         warn!("Failed to unbind wireless device {mac_address}: {error:#}");
@@ -906,7 +913,7 @@ impl ServiceManager {
                     reply,
                 } => {
                     let result = self.handle_set_ene6k77_fan_quantity(&device_id, quantity);
-                    let _ = reply.send(result.map_err(|error| format!("{error:#}")));
+                    let _ = reply.send(result);
                 }
                 DaemonEvent::IpcUpdate => {
                     if self.startup_image_job.is_some() {
@@ -1149,7 +1156,12 @@ impl ServiceManager {
                     reply,
                 } => {
                     let res = if Instant::now() >= deadline {
-                        Err("Pixel cleaner request expired".into())
+                        Err(lianli_shared::ui_message::UiError::new(
+                            lianli_shared::ui_message::UiMessage::new(
+                                "daemon.pixelClean.requestExpired",
+                            ),
+                            "Pixel cleaner request expired",
+                        ))
                     } else if let Some(id) = preparation_id {
                         self.activate_pixel_cleaning(id).map(|id| (id, true))
                     } else {

@@ -1,5 +1,6 @@
 use lianli_shared::daemon::{parse_service_invocation, DaemonInfo};
 use lianli_shared::ipc::IpcResponse;
+use lianli_shared::ui_message::UiMessage;
 use std::io;
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
@@ -33,20 +34,32 @@ pub(super) fn request(
     stop: impl FnOnce() -> io::Result<()>,
 ) -> IpcResponse {
     if peer_uid != daemon_uid {
-        return IpcResponse::error("Only the daemon's own account may stop its service over IPC");
+        return IpcResponse::error_ui(
+            "Only the daemon's own account may stop its service over IPC",
+            UiMessage::new("daemon.serviceStop.wrongAccount"),
+        );
     }
     let invocation = match parse_service_invocation(invocation) {
         Ok(value) => value,
-        Err(error) => return IpcResponse::error(error),
+        Err(error) => {
+            return IpcResponse::error_ui(
+                error,
+                UiMessage::new("daemon.serviceStop.invalidInvocation"),
+            )
+        }
     };
     if info.service_invocation.as_deref() != Some(&invocation) {
-        return IpcResponse::error(
+        return IpcResponse::error_ui(
             "The daemon does not belong to this service invocation. It was not stopped",
+            UiMessage::new("daemon.serviceStop.otherInvocation"),
         );
     }
     match stop() {
         Ok(()) => IpcResponse::ok(serde_json::json!({"accepted": true})),
-        Err(error) => IpcResponse::error(format!("Cannot request graceful shutdown: {error}")),
+        Err(error) => IpcResponse::error_ui(
+            format!("Cannot request graceful shutdown: {error}"),
+            UiMessage::new("daemon.serviceStop.signalFailed").param("error", error),
+        ),
     }
 }
 

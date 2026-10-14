@@ -13,6 +13,7 @@ import OpenRgbRegionsToggle from "@/components/rgb/OpenRgbRegionsToggle.vue";
 import StatusDot from "@/components/common/StatusDot.vue";
 import { motherboardSyncEnabled, quickSyncControls } from "@/components/rgb/syncSettings";
 import { useTranslate } from "@/i18n";
+import { backendText } from "@/utils/backendText";
 
 const QUICK_SYNC = "quick-sync";
 
@@ -42,7 +43,7 @@ const openrgbPort = computed({
 
 const statusText = computed(() => {
   if (!openrgbEnabled.value) return t("common.disabled");
-  if (daemon.openrgbError) return t("rgb.page.openrgbError", { error: daemon.openrgbError });
+  if (daemon.openrgbError) return t("rgb.page.openrgbError", { error: backendText(daemon.openrgbError, daemon.openrgbErrorUi) });
   if (daemon.openrgbRunning) return t("rgb.page.openrgbListening", { port: daemon.openrgbPort ?? rgb.value.openrgb_port });
   return t("rgb.page.openrgbStarting");
 });

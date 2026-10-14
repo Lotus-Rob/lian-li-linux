@@ -28,6 +28,8 @@ pub struct CatalogStorageEntry {
     pub bytes: u64,
     pub ownership_verified: bool,
     pub issue: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issue_ui: Option<crate::ui_message::UiMessage>,
     #[serde(default)]
     pub saved_references: Vec<String>,
     #[serde(default)]
@@ -76,7 +78,8 @@ pub fn inspect_storage(config_dir: &Path) -> Result<Vec<CatalogStorageEntry>> {
         budget.bytes = 0;
         budget.entries += 1;
         budget.scan(&directory, 1)?;
-        let issue = if !name.starts_with("catalog-") {
+        let legacy = !name.starts_with("catalog-");
+        let issue = if legacy {
             Some("Older or manually installed catalog directory. Automatic cleanup is unavailable because it has no supported ownership receipt. Existing templates can still use these files.".into())
         } else {
             verify_receipt(&directory, &name)
@@ -93,6 +96,8 @@ pub fn inspect_storage(config_dir: &Path) -> Result<Vec<CatalogStorageEntry>> {
             bytes: budget.bytes,
             ownership_verified: issue.is_none(),
             issue,
+            issue_ui: legacy
+                .then(|| crate::ui_message::UiMessage::new("status.catalog.legacyDirectory")),
             saved_references: Vec::new(),
             saved_references_checked: false,
             saved_reference_count: 0,

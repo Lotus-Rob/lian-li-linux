@@ -1,5 +1,7 @@
 use crate::media_publication::{self, Directory};
+use crate::ui_text::text;
 use anyhow::{ensure, Context, Result};
+use lianli_shared::ui_message::{UiMessage, UiText};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
@@ -187,16 +189,20 @@ pub fn inspect(
                     .context("Managed import size overflow")?;
             }
         }
-        let issue = match verify(config_dir, &name) {
+        let (issue, issue_ui) = UiText::split(match verify(config_dir, &name) {
             Ok(true) => None,
-            Ok(false) => Some("No ownership receipt. Retained as unverified storage".into()),
-            Err(error) => Some(format!("{error:#}").chars().take(2048).collect()),
-        };
+            Ok(false) => Some(text(
+                "control.mediaStorage.noReceipt",
+                "No ownership receipt. Retained as unverified storage",
+            )),
+            Err(error) => Some(UiText::from_error(&error).truncated(2048)),
+        });
         entries.push(lianli_shared::template::catalog::CatalogStorageEntry {
             directory: name,
             bytes,
             ownership_verified: issue.is_none(),
             issue,
+            issue_ui,
             ..Default::default()
         });
     }
@@ -228,17 +234,22 @@ pub fn inspect(
             let ownership_verified = crate::media_removal::orphan_review(config_dir, id)
                 .is_ok_and(|review| review.is_some());
             let issue = match read(&receipts, id) {
-                Ok(Some(_)) => "Ownership receipt has no published directory. An import may be pending or interrupted. Review metadata and references before removal.".into(),
+                Ok(Some(_)) => text("control.mediaStorage.unpublishedReceipt", "Ownership receipt has no published directory. An import may be pending or interrupted. Review metadata and references before removal."),
                 Ok(None) => anyhow::bail!("Managed receipt disappeared during inventory"),
-                Err(error) => format!("Invalid retained ownership receipt: {error:#}")
-                    .chars()
-                    .take(2048)
-                    .collect(),
+                Err(error) => {
+                    let error = format!("{error:#}");
+                    UiText::new(
+                        UiMessage::new("control.mediaStorage.invalidReceipt").param("error", &error),
+                        format!("Invalid retained ownership receipt: {error}"),
+                    )
+                    .truncated(2048)
+                }
             };
             entries.push(lianli_shared::template::catalog::CatalogStorageEntry {
                 directory: id.into(),
                 ownership_verified,
-                issue: Some(issue),
+                issue: Some(issue.english),
+                issue_ui: issue.ui,
                 ..Default::default()
             });
         }
@@ -266,15 +277,16 @@ pub fn inspect(
         match crate::media_removal::resume(config_dir, &id) {
             Ok(Some(_)) => {
                 entry.ownership_verified = true;
-                entry.issue = Some(
-                    "Interrupted removal. Review remaining files and references before resuming"
-                        .into(),
-                );
+                (entry.issue, entry.issue_ui) = UiText::split(Some(text(
+                    "control.mediaStorage.interruptedRemoval",
+                    "Interrupted removal. Review remaining files and references before resuming",
+                )));
             }
             Ok(None) => anyhow::bail!("Managed removal record disappeared during inventory"),
             Err(error) => {
                 entry.ownership_verified = false;
-                entry.issue = Some(format!("{error:#}").chars().take(2048).collect());
+                (entry.issue, entry.issue_ui) =
+                    UiText::split(Some(UiText::from_error(&error).truncated(2048)));
             }
         }
     }

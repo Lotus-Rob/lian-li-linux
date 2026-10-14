@@ -12,6 +12,7 @@ use lianli_devices::wireless::WirelessController;
 use lianli_media::{MediaAsset, MediaAssetKind};
 use lianli_shared::config::ConfigKey;
 use lianli_shared::screen::ScreenInfo;
+use lianli_shared::ui_message::{UiMessage, UiText};
 use parking_lot::Mutex;
 use std::path::PathBuf;
 use std::process::ChildStdout;
@@ -617,28 +618,36 @@ fn is_transfer_interrupted(error: &anyhow::Error) -> bool {
         .is_some()
 }
 
+pub(super) fn failure_text(key: &str, prefix: &str, error: impl std::fmt::Display) -> UiText {
+    let error = format!("{error:#}");
+    UiText::new(
+        UiMessage::new(key).param("error", &error),
+        format!("{prefix}: {error}"),
+    )
+}
+
 #[derive(Clone)]
 pub(super) struct StreamFailure {
-    message: String,
+    message: UiText,
     interrupted: bool,
 }
 
 impl StreamFailure {
-    fn new(message: &str, interrupted: bool) -> Self {
+    fn new(message: UiText, interrupted: bool) -> Self {
         Self {
-            message: message.chars().take(2048).collect(),
+            message: message.truncated(2048),
             interrupted,
         }
     }
 
-    fn from_error(message: &str, error: &anyhow::Error) -> Self {
+    fn from_error(message: UiText, error: &anyhow::Error) -> Self {
         Self::new(message, is_transfer_interrupted(error))
     }
 }
 
 impl From<&str> for StreamFailure {
     fn from(message: &str) -> Self {
-        Self::new(message, false)
+        Self::new(message.into(), false)
     }
 }
 
@@ -746,7 +755,8 @@ impl FrameDelivery {
             return;
         }
         if let Err(error) = send() {
-            *self.failure.lock() = Some(StreamFailure::from_error(&error.to_string(), &error));
+            *self.failure.lock() =
+                Some(StreamFailure::from_error(error.to_string().into(), &error));
         }
     }
 }
@@ -829,7 +839,11 @@ impl ThreadedWinUsbSender {
                             worker_control.failed(
                                 &stop,
                                 StreamFailure::from_error(
-                                    &format!("H.264 file transfer failed: {e:#}"),
+                                    failure_text(
+                                        "status.media.h264FileTransferFailed",
+                                        "H.264 file transfer failed",
+                                        &e,
+                                    ),
                                     &e,
                                 ),
                             );
@@ -852,7 +866,11 @@ impl ThreadedWinUsbSender {
                             worker_control.failed(
                                 &stop,
                                 StreamFailure::from_error(
-                                    &format!("Live H.264 transfer failed: {e:#}"),
+                                    failure_text(
+                                        "status.media.liveH264TransferFailed",
+                                        "Live H.264 transfer failed",
+                                        &e,
+                                    ),
                                     &e,
                                 ),
                             );
@@ -1083,7 +1101,7 @@ pub(crate) struct ActiveTarget {
     source_failed: bool,
     source_selection: Arc<()>,
     media_stage: lianli_shared::ipc::MediaRuntimeStage,
-    media_fallback: Option<String>,
+    media_fallback: Option<UiText>,
     media_tx: Option<Sender<DaemonEvent>>,
     pub(super) lcd: LcdBackend,
     pub(super) asset: Arc<MediaAsset>,
@@ -1342,8 +1360,11 @@ impl ActiveTarget {
         };
         if let LcdInitialization::Failed(error) = &self.initialization {
             self.media_stage = lianli_shared::ipc::MediaRuntimeStage::Failed;
-            self.media_fallback = Some(format!(
-                "LCD initialization failed: {error}. Restart the daemon to retry initialization."
+            self.media_fallback = Some(UiText::new(
+                UiMessage::new("status.media.initializationFailed").param("error", error),
+                format!(
+                    "LCD initialization failed: {error}. Restart the daemon to retry initialization."
+                ),
             ));
         }
     }
@@ -1380,6 +1401,7 @@ impl ActiveTarget {
             brightness,
             pending: true,
             error: None,
+            error_ui: None,
         });
         self.brightness_retries = 3;
         self.flush_pending_brightness(wireless, builder);
@@ -1414,16 +1436,18 @@ impl ActiveTarget {
         self.brightness_status.as_ref()
     }
 
-    fn update_brightness_status(&mut self, brightness: u8, pending: bool, error: Option<String>) {
+    fn update_brightness_status(&mut self, brightness: u8, pending: bool, error: Option<UiText>) {
         let request_id = self
             .brightness_status
             .as_ref()
             .and_then(|status| status.request_id.clone());
+        let (error, error_ui) = UiText::split(error);
         self.brightness_status = Some(lianli_shared::ipc::LcdBrightnessStatus {
             request_id,
             brightness,
             pending,
             error,
+            error_ui,
         });
     }
 
@@ -1436,7 +1460,10 @@ impl ActiveTarget {
             return;
         };
         if let LcdInitialization::Failed(error) = &self.initialization {
-            let error = format!("LCD initialization failed: {error}");
+            let error = UiText::new(
+                UiMessage::new("status.brightness.initializationFailed").param("error", error),
+                format!("LCD initialization failed: {error}"),
+            );
             self.update_brightness_status(brightness, false, Some(error));
             self.pending_brightness = None;
             return;
@@ -1479,7 +1506,11 @@ impl ActiveTarget {
                 self.update_brightness_status(
                     brightness,
                     self.pending_brightness.is_some(),
-                    Some(format!("LCD brightness write failed: {error:#}")),
+                    Some(failure_text(
+                        "status.brightness.writeFailed",
+                        "LCD brightness write failed",
+                        &error,
+                    )),
                 );
             }
         }
@@ -1578,7 +1609,7 @@ impl ActiveTarget {
     fn finish_source_install(
         &mut self,
         media: anyhow::Result<Box<dyn FrameSource>>,
-        fallback: Option<String>,
+        fallback: Option<UiText>,
     ) {
         let media = match media {
             Ok(media) => media,
@@ -1586,10 +1617,12 @@ impl ActiveTarget {
                 self.media_pending = false;
                 self.source_failed = true;
                 self.media_fallback = Some(
-                    format!("Media attachment failed: {error:#}")
-                        .chars()
-                        .take(2048)
-                        .collect(),
+                    failure_text(
+                        "status.media.attachmentFailed",
+                        "Media attachment failed",
+                        &error,
+                    )
+                    .truncated(2048),
                 );
                 return;
             }
@@ -1666,7 +1699,11 @@ impl ActiveTarget {
                 "LCD[{}] JPEG transfer failed: {}",
                 self.index, failure.message
             );
-            let error = format!("JPEG transfer failed: {}", failure.message);
+            let error = failure_text(
+                "status.media.jpegTransferFailed",
+                "JPEG transfer failed",
+                &failure.message,
+            );
             if failure.interrupted {
                 return Err(self.interrupt_transfer(error));
             }
@@ -1692,16 +1729,16 @@ impl ActiveTarget {
             if self.media.has_exited() {
                 self.media_stage = lianli_shared::ipc::MediaRuntimeStage::Failed;
                 self.pause_source();
-                return Err(SendError::Stopped(
-                    "H.264 playback failed. Check daemon logs, then use Retry failed media in Installation Health."
-                        .into(),
-                ));
+                return Err(SendError::Stopped(UiText::new(
+                    UiMessage::new("status.media.h264PlaybackFailed"),
+                    "H.264 playback failed. Check daemon logs, then use Retry failed media in Installation Health.",
+                )));
             }
             if let Err(error) = self.media.start(&self.lcd) {
                 if self.media.has_exited() {
                     self.media_stage = lianli_shared::ipc::MediaRuntimeStage::Failed;
                     self.pause_source();
-                    return Err(SendError::Stopped(error.to_string()));
+                    return Err(SendError::Stopped(error.to_string().into()));
                 }
                 return Err(SendError::Other(error));
             }
@@ -1712,9 +1749,10 @@ impl ActiveTarget {
         if self.media.has_exited() {
             self.media_stage = lianli_shared::ipc::MediaRuntimeStage::Failed;
             self.pause_source();
-            return Err(SendError::Stopped(
-                "JPEG rendering failed. Check daemon logs, then use Retry failed media in Installation Health.".into(),
-            ));
+            return Err(SendError::Stopped(UiText::new(
+                UiMessage::new("status.media.jpegRenderingFailed"),
+                "JPEG rendering failed. Check daemon logs, then use Retry failed media in Installation Health.",
+            )));
         }
         let is_static = self.media.is_static();
         let frame = match self.media.next_frame() {
@@ -1734,7 +1772,11 @@ impl ActiveTarget {
                 return Ok(false);
             }
             Err(err) if is_transfer_interrupted(&err) => {
-                return Err(self.interrupt_transfer(format!("LCD frame transfer failed: {err:#}")));
+                return Err(self.interrupt_transfer(failure_text(
+                    "status.media.frameTransferFailed",
+                    "LCD frame transfer failed",
+                    &err,
+                )));
             }
             Err(err) => {
                 let send_err = match err.downcast::<lianli_transport::TransportError>() {
@@ -1763,7 +1805,14 @@ impl ActiveTarget {
             },
             fps_limit: self.playback_asset.stream_fps,
             hardware_video_allowed: self.playback_asset.hardware_video,
-            fallback_reason: self.media_fallback.clone(),
+            fallback_reason: self
+                .media_fallback
+                .as_ref()
+                .map(|text| text.english.clone()),
+            fallback_reason_ui: self
+                .media_fallback
+                .as_ref()
+                .and_then(|text| text.ui.clone()),
             h264_transfer_started: match &self.lcd {
                 LcdBackend::WinUsb(sender) if self.media.is_autonomous() => {
                     sender.stream_control.transferred()
@@ -1777,7 +1826,7 @@ impl ActiveTarget {
         }
     }
 
-    fn interrupt_transfer(&mut self, error: String) -> SendError {
+    fn interrupt_transfer(&mut self, error: UiText) -> SendError {
         self.media_stage = lianli_shared::ipc::MediaRuntimeStage::Failed;
         self.pause_source();
         let error = match self.transfer_recovery.schedule(Instant::now()) {
@@ -1794,12 +1843,17 @@ impl ActiveTarget {
                     "LCD[{}] transfer interrupted; automatic recovery gave up after {TRANSFER_RECOVERY_ATTEMPTS} attempts",
                     self.index
                 );
-                format!(
-                    "Automatic LCD recovery gave up after {TRANSFER_RECOVERY_ATTEMPTS} attempts. Use Retry failed media in Installation Health. {error}"
+                UiText::new(
+                    UiMessage::new("status.media.recoveryGaveUp")
+                        .param("attempts", TRANSFER_RECOVERY_ATTEMPTS)
+                        .param("error", &error),
+                    format!(
+                        "Automatic LCD recovery gave up after {TRANSFER_RECOVERY_ATTEMPTS} attempts. Use Retry failed media in Installation Health. {error}"
+                    ),
                 )
             }
         };
-        let error: String = error.chars().take(2048).collect();
+        let error = error.truncated(2048);
         self.media_fallback = Some(error.clone());
         SendError::Interrupted(error)
     }
@@ -1812,10 +1866,12 @@ impl ActiveTarget {
             "[devices] LCD[{}] recreating the LCD after an interrupted transfer",
             self.index
         );
-        let error = self
-            .media_fallback
-            .clone()
-            .unwrap_or_else(|| "LCD packet transfer was interrupted".into());
+        let error = self.media_fallback.clone().unwrap_or_else(|| {
+            UiText::new(
+                UiMessage::new("status.media.transferInterrupted"),
+                "LCD packet transfer was interrupted",
+            )
+        });
         self.removal_event(error)
     }
 
@@ -1860,9 +1916,9 @@ impl ActiveTarget {
         }
     }
 
-    pub(super) fn removal_event(&mut self, error: String) -> Option<DaemonEvent> {
+    pub(super) fn removal_event(&mut self, error: UiText) -> Option<DaemonEvent> {
         let removal = self.request_removal()?;
-        let error: String = error.chars().take(2048).collect();
+        let error = error.truncated(2048);
         self.media_fallback = Some(error.clone());
         Some(DaemonEvent::RemoveFailedLcd {
             target_index: self.index,
@@ -1888,6 +1944,7 @@ impl ActiveTarget {
             if let Some(status) = &mut self.brightness_status {
                 status.pending = false;
                 status.error = Some("LCD removed before brightness delivery".into());
+                status.error_ui = Some(UiMessage::new("status.brightness.lcdRemoved"));
             }
         }
         self.pending_brightness = None;
@@ -2432,7 +2489,7 @@ pub(super) fn make_jpeg_source(
 fn attach_prepared_source(
     prepared: PreparedSource,
     lcd: &LcdBackend,
-    fallback: &mut Option<String>,
+    fallback: &mut Option<UiText>,
 ) -> Result<Box<dyn FrameSource>, (PreparedSource, anyhow::Error)> {
     match prepared {
         PreparedSource::Sensor(source) => source
@@ -2589,9 +2646,9 @@ fn stream_h264_file_to_hid(
 }
 
 pub(super) enum SendError {
-    Stopped(String),
+    Stopped(UiText),
     /// The device stays wedged until the target recreates it.
-    Interrupted(String),
+    Interrupted(UiText),
     Usb(lianli_transport::TransportError),
     Other(anyhow::Error),
 }
@@ -2609,7 +2666,7 @@ mod tests {
         assert_eq!(
             control
                 .take_failure()
-                .map(|failure| failure.message)
+                .map(|failure| failure.message.english)
                 .as_deref(),
             Some("old transfer failure")
         );
@@ -2620,7 +2677,13 @@ mod tests {
         assert!(control.take_failure().is_none());
         control.failed(&current, "界".repeat(3000).as_str().into());
         assert_eq!(
-            control.take_failure().unwrap().message.chars().count(),
+            control
+                .take_failure()
+                .unwrap()
+                .message
+                .english
+                .chars()
+                .count(),
             2048
         );
         control.cancel();
@@ -2633,7 +2696,14 @@ mod tests {
             anyhow::Error::from(lianli_transport::TransportError::Usb(rusb::Error::Timeout))
                 .context(lianli_devices::winusb::lcd::LcdTransferInterrupted)
                 .context("streaming H.264");
-        StreamFailure::from_error(&format!("Live H.264 transfer failed: {error:#}"), &error)
+        StreamFailure::from_error(
+            failure_text(
+                "status.media.liveH264TransferFailed",
+                "Live H.264 transfer failed",
+                &error,
+            ),
+            &error,
+        )
     }
 
     #[test]
@@ -2654,7 +2724,7 @@ mod tests {
         assert!(restarter.transfer_interrupted());
         let failure = control.take_failure().unwrap();
         assert!(failure.interrupted);
-        assert!(failure.message.contains("USB error"));
+        assert!(failure.message.english.contains("USB error"));
         assert!(!restarter.transfer_interrupted());
     }
 
@@ -2951,7 +3021,7 @@ mod tests {
         ));
         delivery.submit(|| Err(anyhow::anyhow!("USB transfer timed out")));
         assert!(matches!(target.send_frame(None, &mut PacketBuilder::new()),
-            Err(SendError::Stopped(message)) if message.contains("USB transfer timed out")));
+            Err(SendError::Stopped(message)) if message.english.contains("USB transfer timed out")));
         assert_eq!(
             target.media_status().stage,
             lianli_shared::ipc::MediaRuntimeStage::Failed
@@ -3000,7 +3070,7 @@ mod tests {
             old.failure
                 .lock()
                 .as_ref()
-                .map(|failure| failure.message.as_str()),
+                .map(|failure| failure.message.english.as_str()),
             Some("late failure")
         );
         assert!(sender.frame_delivery.failure.lock().is_none());
@@ -3018,6 +3088,7 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .message
+                .english
                 .len(),
             2048
         );
@@ -3051,7 +3122,7 @@ mod tests {
                 .failure
                 .lock()
                 .as_ref()
-                .map(|failure| failure.message.as_str()),
+                .map(|failure| failure.message.english.as_str()),
             Some("existing failure")
         );
         assert!(sender
@@ -3318,7 +3389,7 @@ mod tests {
         target.media_pending = false;
         assert!(matches!(
             target.send_frame(None, &mut PacketBuilder::new()),
-            Err(SendError::Stopped(message)) if message.contains("JPEG rendering failed")
+            Err(SendError::Stopped(message)) if message.english.contains("JPEG rendering failed")
         ));
         assert!(matches!(
             target.send_frame(None, &mut PacketBuilder::new()),
@@ -3371,7 +3442,7 @@ mod tests {
         }
         assert!(matches!(
             target.send_frame(None, &mut PacketBuilder::new()),
-            Err(SendError::Stopped(error)) if error == "transfer stopped"
+            Err(SendError::Stopped(error)) if error.english == "transfer stopped"
         ));
         assert_eq!(brightness_drops.load(Ordering::Relaxed), 1);
         target.retry_failed_source();
@@ -3394,7 +3465,7 @@ mod tests {
         assert!(target.matches_removal(&removal));
         assert!(!target.matches_removal(&stale));
         assert_eq!(key, "replacement");
-        assert_eq!(error, "USB unavailable");
+        assert_eq!(error.english, "USB unavailable");
         assert!(target.removal_event("duplicate".into()).is_none());
         target.swap_media(target.asset.clone(), true, None);
         target.retry_failed_source();

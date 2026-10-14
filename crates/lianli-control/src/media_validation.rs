@@ -145,8 +145,10 @@ fn check_with(
             if report.issues.len() < 32 {
                 report.issues.push(AssetAccessIssue {
                     owner: dependency.owner.clone(),
+                    owner_ui: dependency.owner_ui.clone(),
                     path: Some(dependency.path.clone()),
                     error: format!("{error:#}").chars().take(512).collect(),
+                    error_ui: None,
                 });
             }
         }
@@ -182,6 +184,7 @@ mod tests {
             .map(|(index, kind)| AssetDependency {
                 path: path.clone(),
                 owner: format!("owner {index}"),
+                owner_ui: None,
                 kind,
             })
             .collect::<Vec<_>>();
@@ -209,6 +212,7 @@ mod tests {
             let dependency = AssetDependency {
                 path: path.clone(),
                 owner: "template child".into(),
+                owner_ui: None,
                 kind: AssetKind::Video,
             };
             let mut calls = 0;

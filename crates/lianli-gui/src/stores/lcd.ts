@@ -8,6 +8,7 @@ import { brightnessConfirmed, createBrightnessControl } from "@/utils/brightness
 import { useDevicesStore } from "@/stores/devices";
 import type { CatalogTemplate, LcdConfig, LcdTemplate, PixelCleanStatus } from "@/types";
 import { tr } from "@/i18n";
+import { backendText, type UiMessage } from "@/utils/backendText";
 
 /** Broadcast when SetLcdTemplates changes the template list, so other open
  *  windows (each with their own config store instance) know to reload it. */
@@ -18,6 +19,7 @@ export interface CatalogInstallStatus {
   template_id: string;
   finished: boolean;
   error: string | null;
+  error_ui?: UiMessage;
 }
 
 export interface ActiveCleanerSession {
@@ -307,10 +309,11 @@ export const useLcdStore = defineStore("lcd", () => {
       const deadline = Date.now() + 90_000;
       while (!activated && !pending.cancelled) {
         if (Date.now() >= deadline) throw new Error(tr("lcd.cleaner.preparationTimedOut"));
-        const status = await ipc.request<{ ready: boolean; error: string | null }>("GetPixelCleanPreparation", {
-          session_id: pending.sessionId,
-        });
-        if (status.error) throw new Error(status.error);
+        const status = await ipc.request<{ ready: boolean; error: string | null; error_ui?: UiMessage | null }>(
+          "GetPixelCleanPreparation",
+          { session_id: pending.sessionId },
+        );
+        if (status.error) throw new Error(backendText(status.error, status.error_ui));
         if (pending.cancelled) break;
         if (status.ready) {
           response = await ipc.request("StartPixelClean", {

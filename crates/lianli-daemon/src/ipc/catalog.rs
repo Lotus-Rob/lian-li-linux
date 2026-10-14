@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use lianli_shared::ipc::IpcResponse;
 use lianli_shared::template::catalog::CatalogInstallStatus;
 use lianli_shared::template::catalog::{self, CatalogTemplate};
+use lianli_shared::ui_message::UiMessage;
 use parking_lot::Mutex;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering},
@@ -33,7 +34,10 @@ pub fn storage(state: &SharedState, managed: bool) -> IpcResponse {
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
     {
-        return IpcResponse::error("Media storage inspection is already running. Retry shortly");
+        return IpcResponse::error_ui(
+            "Media storage inspection is already running. Retry shortly",
+            UiMessage::new("daemon.catalog.inspectionRunning"),
+        );
     }
     let inspection = Inspection;
     let runtime = state.lock().catalog_runtime.clone();
@@ -69,15 +73,22 @@ pub fn storage(state: &SharedState, managed: bool) -> IpcResponse {
                 })
                 .map(|entries| IpcResponse::ok(&entries))
                 .unwrap_or_else(|error| {
-                    IpcResponse::error(format!("Media storage inventory incomplete: {error:#}"))
+                    IpcResponse::error_ui(
+                        format!("Media storage inventory incomplete: {error:#}"),
+                        UiMessage::new("daemon.catalog.inventoryIncomplete")
+                            .param("error", format!("{error:#}")),
+                    )
                 });
             let _ = sender.send(result);
         })
     {
-        return IpcResponse::error(format!("Could not inspect media storage: {error}"));
+        return IpcResponse::error_ui(
+            format!("Could not inspect media storage: {error}"),
+            UiMessage::new("daemon.catalog.inspectionStartFailed").param("error", error),
+        );
     }
     // Keep one inspection slot occupied if filesystem I/O outlasts the client deadline.
-    receiver.recv_timeout(std::time::Duration::from_secs(3)).unwrap_or_else(|_| IpcResponse::error("Media inspection timed out. Cleanup remains disabled. Check storage access and retry."))
+    receiver.recv_timeout(std::time::Duration::from_secs(3)).unwrap_or_else(|_| IpcResponse::error_ui("Media inspection timed out. Cleanup remains disabled. Check storage access and retry.", UiMessage::new("daemon.catalog.inspectionTimedOut")))
 }
 
 #[derive(Default)]
@@ -114,13 +125,17 @@ fn begin(
     template: &CatalogTemplate,
 ) -> Result<(Job, CatalogInstallStatus), IpcResponse> {
     if template.id.len() > 128 {
-        return Err(IpcResponse::error("Catalog template ID exceeds 128 bytes"));
+        return Err(IpcResponse::error_ui(
+            "Catalog template ID exceeds 128 bytes",
+            UiMessage::new("daemon.catalog.idTooLong"),
+        ));
     }
     let (job, instance) = {
         let state = state.lock();
         if state.catalog_control.stopped() {
-            return Err(IpcResponse::error(
+            return Err(IpcResponse::error_ui(
                 "The daemon is stopping. Catalog installation is unavailable",
+                UiMessage::new("daemon.catalog.stopping"),
             ));
         }
         (
@@ -130,8 +145,9 @@ fn begin(
     };
     let mut current = job.lock();
     if current.as_ref().is_some_and(|status| !status.finished) {
-        return Err(IpcResponse::error(
+        return Err(IpcResponse::error_ui(
             "A catalog installation is already running. Check its status before retrying.",
+            UiMessage::new("daemon.catalog.alreadyRunning"),
         ));
     }
     let status = CatalogInstallStatus {
@@ -139,6 +155,7 @@ fn begin(
         template_id: template.id.clone(),
         finished: false,
         error: None,
+        error_ui: None,
     };
     *current = Some(status.clone());
     drop(current);
@@ -148,9 +165,11 @@ fn begin(
 fn finish(job: &Job, response: &IpcResponse) {
     if let Some(status) = job.lock().as_mut() {
         status.finished = true;
-        status.error = match response {
-            IpcResponse::Error { message } => Some(message.chars().take(2048).collect()),
-            IpcResponse::Ok { .. } => None,
+        (status.error, status.error_ui) = match response {
+            IpcResponse::Error { message, ui } => {
+                (Some(message.chars().take(2048).collect()), ui.clone())
+            }
+            IpcResponse::Ok { .. } => (None, None),
         };
     }
 }
@@ -176,7 +195,10 @@ pub fn start(state: &SharedState, tx: EventSender, template: CatalogTemplate) ->
             finish(&worker_job, &response);
         });
     if let Err(error) = spawned {
-        let response = IpcResponse::error(format!("Could not start catalog installation: {error}"));
+        let response = IpcResponse::error_ui(
+            format!("Could not start catalog installation: {error}"),
+            UiMessage::new("daemon.catalog.startFailed").param("error", error),
+        );
         finish(&job, &response);
         return response;
     }
@@ -195,13 +217,16 @@ pub fn install(state: &SharedState, tx: EventSender, template: CatalogTemplate) 
 
 fn run(state: &SharedState, tx: EventSender, template: CatalogTemplate) -> IpcResponse {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| install_inner(state, tx, template)))
-        .unwrap_or_else(|_| IpcResponse::error("Catalog worker stopped unexpectedly. Reload templates before retrying. Publication may have completed."))
+        .unwrap_or_else(|_| IpcResponse::error_ui("Catalog worker stopped unexpectedly. Reload templates before retrying. Publication may have completed.", UiMessage::new("daemon.catalog.workerStopped")))
 }
 
 fn install_inner(state: &SharedState, tx: EventSender, template: CatalogTemplate) -> IpcResponse {
     let control = state.lock().catalog_control.clone();
     if control.stopped() {
-        return IpcResponse::error("Catalog installation cancelled during daemon shutdown");
+        return IpcResponse::error_ui(
+            "Catalog installation cancelled during daemon shutdown",
+            UiMessage::new("daemon.catalog.cancelledShutdown"),
+        );
     }
     let config_dir = {
         let s = state.lock();
@@ -215,14 +240,20 @@ fn install_inner(state: &SharedState, tx: EventSender, template: CatalogTemplate
     let prepared =
         match catalog::install_template(&template, &sensors, &config_dir, || control.stopped()) {
             Ok(t) => t,
-            Err(e) => return IpcResponse::error(format!("install failed: {e}")),
+            Err(e) => {
+                return IpcResponse::error_ui(
+                    format!("install failed: {e}"),
+                    UiMessage::new("daemon.catalog.installFailed").param("error", e),
+                )
+            }
         };
     let installed = prepared.template();
 
     let path = state.lock().templates_path();
     let Some(_publication) = control.publish() else {
-        return IpcResponse::error(
+        return IpcResponse::error_ui(
             "Catalog installation cancelled before saving during daemon shutdown",
+            UiMessage::new("daemon.catalog.cancelledBeforeSave"),
         );
     };
     if let Err(e) = template_store::install_user_template(&path, installed) {
@@ -231,12 +262,12 @@ fn install_inner(state: &SharedState, tx: EventSender, template: CatalogTemplate
             .state_health
             .templates_failed(&format!("{e:#}"));
         prepared.commit();
-        return IpcResponse::error(format!("Template save could not be confirmed: {e}. Verified assets were retained because publication may have completed. Reload templates before retrying."));
+        return IpcResponse::error_ui(format!("Template save could not be confirmed: {e}. Verified assets were retained because publication may have completed. Reload templates before retrying."), UiMessage::new("daemon.catalog.saveUnconfirmed").param("error", e));
     }
     let installed = prepared.commit();
 
     if tx.send(DaemonEvent::IpcUpdate).is_err() {
-        return IpcResponse::error("Template was saved, but the daemon stopped before reload. Reconnect and review templates before retrying.");
+        return IpcResponse::error_ui("Template was saved, but the daemon stopped before reload. Reconnect and review templates before retrying.", UiMessage::new("daemon.catalog.reloadNotConfirmed"));
     }
     info!("installed catalog template '{}'", installed.id);
     IpcResponse::ok(&installed)

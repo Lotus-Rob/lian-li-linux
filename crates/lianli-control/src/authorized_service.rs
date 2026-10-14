@@ -8,6 +8,7 @@ use lianli_shared::installation::InstallationContext;
 use lianli_shared::services::{
     OwnershipSnapshot, ServiceActionRequest, ServiceProbe, ServiceReport, ServiceScope,
 };
+use lianli_shared::ui_message::UiText;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::time::{Duration, Instant};
@@ -37,8 +38,8 @@ pub fn execute(
     caller: &Account,
     operation: &ServiceOperationLock,
     request: ServiceActionRequest,
-    progress: impl FnMut(&str) -> Result<()>,
-) -> Result<String> {
+    progress: impl FnMut(UiText) -> Result<()>,
+) -> Result<UiText> {
     let mut backend = Authorized::new(caller, operation)?;
     if request.scope == ServiceScope::System
         && request.action != lianli_shared::services::ServiceAction::Stop

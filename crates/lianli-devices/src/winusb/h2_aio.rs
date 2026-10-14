@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use lianli_shared::rgb::{
     RgbEffect, RgbMode, RgbPlaybackTiming, RgbRenderFamily, RgbRenderProfile, RgbZoneInfo,
 };
+use lianli_shared::ui_message::{UiError, UiMessage};
 use lianli_transport::usb::{LCD_READ_TIMEOUT, LCD_WRITE_TIMEOUT};
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -780,11 +781,17 @@ impl RgbDevice for H2AioController {
     ) -> Result<()> {
         self.set_software_animation_with_stop(frames, timing, stop)
     }
-    fn deferred_reason(&self) -> Option<String> {
+    fn deferred_reason(&self) -> Option<UiError> {
         if self.transport.ring_recovery_pending() {
-            Some("The LCD connection has not recovered from an RGB upload. Further uploads are waiting.".into())
+            Some(UiError::new(
+                UiMessage::new("devices.rgb.ringRecoveryPending"),
+                "The LCD connection has not recovered from an RGB upload. Further uploads are waiting.",
+            ))
         } else if self.transport.software_cooling_active() {
-            Some("RGB changes wait while software fan or pump control uses this device.".into())
+            Some(UiError::new(
+                UiMessage::new("devices.rgb.softwareCoolingActive"),
+                "RGB changes wait while software fan or pump control uses this device.",
+            ))
         } else {
             None
         }
@@ -811,6 +818,7 @@ impl RgbDevice for H2AioController {
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
         vec![RgbZoneInfo {
             name: "Ring".to_string(),
+            name_ui: Some(UiMessage::new("devices.zone.ring")),
             led_count: RING_LED_COUNT as u16,
         }]
     }

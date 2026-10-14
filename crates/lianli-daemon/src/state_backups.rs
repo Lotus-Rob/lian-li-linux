@@ -1,5 +1,6 @@
 use anyhow::{ensure, Context, Result};
 use lianli_shared::backups::{BackupEntry, BackupPreview, BackupTarget};
+use lianli_shared::ui_message::{UiError, UiMessage, UiText};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
@@ -11,6 +12,10 @@ use std::time::UNIX_EPOCH;
 
 const MAX_BYTES: usize = 16 * 1024 * 1024;
 const PREVIEW_BYTES: usize = 64 * 1024;
+
+fn keyed(key: &str, english: &str) -> UiError {
+    UiError::new(UiMessage::new(key), english)
+}
 
 #[derive(Clone)]
 pub struct Locations {
@@ -31,7 +36,10 @@ impl Locations {
                         && name.len() <= 250
                         && !matches!(name.as_str(), "." | "..")
                         && !name.contains(['/', '\\', '\0']),
-                    "Invalid profile backup name"
+                    keyed(
+                        "status.backups.invalidProfileName",
+                        "Invalid profile backup name"
+                    )
                 );
                 parent(&self.config)
                     .join("profiles")
@@ -88,7 +96,10 @@ pub fn list(locations: &Locations) -> Result<Vec<BackupEntry>> {
             for (index, entry) in fs::read_dir(path)?.enumerate() {
                 ensure!(
                     index < 512,
-                    "Profile directory exceeds the 512-entry discovery limit"
+                    keyed(
+                        "status.backups.profileDirectoryTooLarge",
+                        "Profile directory exceeds the 512-entry discovery limit"
+                    )
                 );
                 let entry = entry?;
                 let filename = entry.file_name();
@@ -101,7 +112,13 @@ pub fn list(locations: &Locations) -> Result<Vec<BackupEntry>> {
                         })
                 }) {
                     targets.push((BackupTarget::Profile { name: name.into() }, preserved));
-                    ensure!(targets.len() <= 262, "Too many profile backup files");
+                    ensure!(
+                        targets.len() <= 262,
+                        keyed(
+                            "status.backups.tooManyProfiles",
+                            "Too many profile backup files"
+                        )
+                    );
                 }
             }
         }
@@ -117,6 +134,19 @@ pub fn list(locations: &Locations) -> Result<Vec<BackupEntry>> {
         match open_backup(&path) {
             Ok(file) => {
                 let metadata = file.metadata()?;
+                let (error, error_ui) = UiText::split(if !metadata.is_file() {
+                    Some(
+                        keyed(
+                            "status.backups.notRegularFile",
+                            "Backup is not a regular file",
+                        )
+                        .into(),
+                    )
+                } else if metadata.len() > MAX_BYTES as u64 {
+                    Some(keyed("status.backups.tooLarge", "Backup exceeds 16 MiB").into())
+                } else {
+                    None
+                });
                 entries.push(BackupEntry {
                     target,
                     preserved,
@@ -126,26 +156,25 @@ pub fn list(locations: &Locations) -> Result<Vec<BackupEntry>> {
                         .ok()
                         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
                         .map(|duration| duration.as_secs()),
-                    error: if !metadata.is_file() {
-                        Some("Backup is not a regular file".into())
-                    } else if metadata.len() > MAX_BYTES as u64 {
-                        Some("Backup exceeds 16 MiB".into())
-                    } else {
-                        None
-                    },
+                    error,
+                    error_ui,
                 });
             }
             Err(error)
                 if error
                     .downcast_ref::<std::io::Error>()
                     .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) => {}
-            Err(error) => entries.push(BackupEntry {
-                target,
-                preserved,
-                bytes: 0,
-                modified_unix_seconds: None,
-                error: Some(format!("{error:#}")),
-            }),
+            Err(error) => {
+                let error = UiText::from_error(&error);
+                entries.push(BackupEntry {
+                    target,
+                    preserved,
+                    bytes: 0,
+                    modified_unix_seconds: None,
+                    error: Some(error.english),
+                    error_ui: error.ui,
+                })
+            }
         }
     }
     entries.sort_by_key(|entry| serde_json::to_string(&entry.target).unwrap_or_default());
@@ -166,23 +195,36 @@ pub fn preview_record(
     let metadata = pinned.metadata()?;
     ensure!(
         metadata.is_file(),
-        "Backup must be a regular file, not a symlink or special file"
+        keyed(
+            "status.backups.mustBeRegularFile",
+            "Backup must be a regular file, not a symlink or special file"
+        )
     );
-    ensure!(metadata.len() <= MAX_BYTES as u64, "Backup exceeds 16 MiB");
+    ensure!(
+        metadata.len() <= MAX_BYTES as u64,
+        keyed("status.backups.tooLarge", "Backup exceeds 16 MiB")
+    );
     let file = File::open(format!("/proc/self/fd/{}", pinned.as_raw_fd()))?;
     let mut bytes = Vec::new();
     file.take(MAX_BYTES as u64 + 1).read_to_end(&mut bytes)?;
-    ensure!(bytes.len() <= MAX_BYTES, "Backup exceeds 16 MiB");
+    ensure!(
+        bytes.len() <= MAX_BYTES,
+        keyed("status.backups.tooLarge", "Backup exceeds 16 MiB")
+    );
     let mut parser = serde_json::Deserializer::from_slice(&bytes);
     let mut parse_error = serde::de::IgnoredAny::deserialize(&mut parser)
         .and_then(|_| parser.end())
         .err()
-        .map(|error| error.to_string());
+        .map(|error| UiText::from(error.to_string()));
     let json = match std::str::from_utf8(&bytes) {
         Ok(json) => std::borrow::Cow::Borrowed(json),
         Err(_) => {
             parse_error = Some(
-                "Backup is not UTF-8. Invalid text is shown with replacement characters".into(),
+                keyed(
+                    "status.backups.notUtf8",
+                    "Backup is not UTF-8. Invalid text is shown with replacement characters",
+                )
+                .into(),
             );
             String::from_utf8_lossy(&bytes[..bytes.len().min(PREVIEW_BYTES)])
         }
@@ -196,19 +238,31 @@ pub fn preview_record(
         Ok(mut warnings) => {
             if warnings.len() > 64 {
                 warnings.truncate(63);
-                warnings.push("Additional configuration warnings omitted".into());
+                warnings.push(
+                    keyed(
+                        "status.backups.warningsOmitted",
+                        "Additional configuration warnings omitted",
+                    )
+                    .into(),
+                );
             }
             for warning in &mut warnings {
-                let mut end = warning.len().min(2048);
-                while !warning.is_char_boundary(end) {
+                let mut end = warning.english.len().min(2048);
+                while !warning.english.is_char_boundary(end) {
                     end -= 1;
                 }
-                warning.truncate(end);
+                warning.english.truncate(end);
             }
             (warnings, None)
         }
-        Err(error) => (Vec::new(), Some(format!("{error:#}"))),
+        Err(error) => (Vec::new(), Some(UiText::from_error(&error))),
     };
+    let (parse_error, parse_error_ui) = UiText::split(parse_error);
+    let (validation_error, validation_error_ui) = UiText::split(validation_error);
+    let (warnings, warnings_ui) = warnings
+        .into_iter()
+        .map(|warning| (warning.english, warning.ui))
+        .unzip();
     Ok(BackupPreview {
         target,
         preserved,
@@ -217,8 +271,11 @@ pub fn preview_record(
         json: json[..end].into(),
         truncated: bytes.len() > PREVIEW_BYTES || end < json.len(),
         parse_error,
+        parse_error_ui,
         validation_error,
+        validation_error_ui,
         warnings,
+        warnings_ui,
     })
 }
 
@@ -237,7 +294,10 @@ pub fn restore(locations: &Locations, target: BackupTarget, sha256: &str) -> Res
     let bytes = read_bytes(&backup)?;
     ensure!(
         format!("{:x}", Sha256::digest(&bytes)) == sha256,
-        "Backup changed after preview. Review it again"
+        keyed(
+            "status.backups.changedAfterPreview",
+            "Backup changed after preview. Review it again"
+        )
     );
     validate(locations, &target, &bytes)?;
     let current = match read_bytes(&original) {
@@ -257,13 +317,25 @@ pub fn restore(locations: &Locations, target: BackupTarget, sha256: &str) -> Res
 pub(crate) fn read_bytes(path: &Path) -> Result<Vec<u8>> {
     let file = open_backup(path)?;
     let metadata = file.metadata()?;
-    ensure!(metadata.is_file(), "State must be a regular file");
-    ensure!(metadata.len() <= MAX_BYTES as u64, "State exceeds 16 MiB");
+    ensure!(
+        metadata.is_file(),
+        keyed(
+            "status.backups.stateNotRegularFile",
+            "State must be a regular file"
+        )
+    );
+    ensure!(
+        metadata.len() <= MAX_BYTES as u64,
+        keyed("status.backups.stateTooLarge", "State exceeds 16 MiB")
+    );
     let mut bytes = Vec::new();
     File::open(format!("/proc/self/fd/{}", file.as_raw_fd()))?
         .take(MAX_BYTES as u64 + 1)
         .read_to_end(&mut bytes)?;
-    ensure!(bytes.len() <= MAX_BYTES, "State exceeds 16 MiB");
+    ensure!(
+        bytes.len() <= MAX_BYTES,
+        keyed("status.backups.stateTooLarge", "State exceeds 16 MiB")
+    );
     Ok(bytes)
 }
 
@@ -271,11 +343,11 @@ pub(crate) fn validate(
     locations: &Locations,
     target: &BackupTarget,
     bytes: &[u8],
-) -> Result<Vec<String>> {
+) -> Result<Vec<UiText>> {
     match target {
         BackupTarget::Configuration => {
             let (_, warnings) =
-                lianli_shared::config::AppConfig::from_reader(bytes, &locations.config)?;
+                lianli_shared::config::AppConfig::from_reader_ui(bytes, &locations.config)?;
             return Ok(warnings);
         }
         BackupTarget::Templates => {
@@ -288,11 +360,17 @@ pub(crate) fn validate(
             let profile: lianli_shared::profile::DeviceProfile = serde_json::from_slice(bytes)?;
             ensure!(
                 profile.schema_version == 1,
-                "Unsupported profile schema version"
+                keyed(
+                    "status.backups.unsupportedProfileSchema",
+                    "Unsupported profile schema version"
+                )
             );
             ensure!(
                 profile.name == *name,
-                "Profile name does not match its backup filename"
+                keyed(
+                    "status.backups.profileNameMismatch",
+                    "Profile name does not match its backup filename"
+                )
             );
             for lcd in profile.lcds {
                 lcd.validate_settings()?;
@@ -443,10 +521,16 @@ mod tests {
         fs::write(&path, r#"{"lcds":[{"type":"color","rgb":[0,0,0]}]}"#).unwrap();
         let result = preview(&locations, BackupTarget::Configuration).unwrap();
         assert!(result.validation_error.is_none());
-        assert!(result
+        let missing = result
             .warnings
             .iter()
-            .any(|warning| warning.contains("missing both")));
+            .position(|warning| warning.contains("missing both"))
+            .unwrap();
+        assert_eq!(result.warnings_ui.len(), result.warnings.len());
+        assert_eq!(
+            result.warnings_ui[missing].as_ref().unwrap().key,
+            "status.config.lcdEntryMissingIdentity"
+        );
         fs::create_dir(root.path().join("profiles")).unwrap();
         fs::write(
             root.path().join("profiles/Quiet.json.bak"),

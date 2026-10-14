@@ -3,6 +3,7 @@ use lianli_shared::rgb::{
     RgbEffect, RgbMode, RgbPlaybackTiming, RgbRenderProfile, RgbScope, RgbZoneInfo,
 };
 use lianli_shared::screen::ScreenInfo;
+use lianli_shared::ui_message::UiError;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -358,7 +359,7 @@ pub trait RgbDevice: Send + Sync {
     fn configure_fan_led_count(&self, _count: Option<u16>) -> Result<bool> {
         anyhow::bail!("Adjustable fan LED count is unsupported")
     }
-    fn deferred_reason(&self) -> Option<String> {
+    fn deferred_reason(&self) -> Option<UiError> {
         None
     }
 
@@ -609,7 +610,7 @@ impl<T: RgbDevice + ?Sized> RgbDevice for Arc<T> {
     fn configure_fan_led_count(&self, count: Option<u16>) -> Result<bool> {
         (**self).configure_fan_led_count(count)
     }
-    fn deferred_reason(&self) -> Option<String> {
+    fn deferred_reason(&self) -> Option<UiError> {
         (**self).deferred_reason()
     }
     fn set_software_animation_with_stop(

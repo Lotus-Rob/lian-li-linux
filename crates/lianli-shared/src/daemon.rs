@@ -1,3 +1,4 @@
+use crate::ui_message::{UiError, UiMessage};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -40,10 +41,20 @@ pub struct WriteGuard {
 
 impl DaemonInfo {
     pub fn write_guard(&self, client_version: &str) -> Result<WriteGuard, String> {
+        self.checked_write_guard(client_version)
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn checked_write_guard(&self, client_version: &str) -> Result<WriteGuard, UiError> {
         if self.version != client_version || self.protocol_version != IPC_PROTOCOL_VERSION {
-            return Err(format!(
-                "Changes are disabled: GUI/client {client_version} and daemon {} must use matching versions. Update both and restart the selected daemon cleanly.",
-                self.version
+            return Err(UiError::new(
+                UiMessage::new("gui.compatibility.versionMismatch")
+                    .param("client", client_version)
+                    .param("daemon", &self.version),
+                format!(
+                    "Changes are disabled: GUI/client {client_version} and daemon {} must use matching versions. Update both and restart the selected daemon cleanly.",
+                    self.version
+                ),
             ));
         }
         if !self
@@ -51,7 +62,10 @@ impl DaemonInfo {
             .iter()
             .any(|capability| capability == GUARDED_WRITES)
         {
-            return Err("Changes are disabled: this daemon lacks compatibility checks. Update both applications and restart the selected daemon cleanly.".into());
+            return Err(UiError::new(
+                UiMessage::new("gui.compatibility.noChecks"),
+                "Changes are disabled: this daemon lacks compatibility checks. Update both applications and restart the selected daemon cleanly.",
+            ));
         }
         Ok(WriteGuard {
             client_version: client_version.into(),
@@ -62,10 +76,13 @@ impl DaemonInfo {
 }
 
 impl WriteGuard {
-    pub fn validate(&self, daemon: &DaemonInfo) -> Result<(), String> {
-        let expected = daemon.write_guard(&self.client_version)?;
+    pub fn validate(&self, daemon: &DaemonInfo) -> Result<(), UiError> {
+        let expected = daemon.checked_write_guard(&self.client_version)?;
         if self != &expected {
-            return Err("The daemon changed or the IPC version is incompatible. Refresh before applying changes.".into());
+            return Err(UiError::new(
+                UiMessage::new("daemon.request.daemonChanged"),
+                "The daemon changed or the IPC version is incompatible. Refresh before applying changes.",
+            ));
         }
         Ok(())
     }

@@ -1,5 +1,6 @@
 use crate::reservation::{HardwareReservation, ServiceOperationLock};
 use crate::services::{self, Route};
+use crate::ui_text::text;
 use anyhow::{ensure, Context, Result};
 use lianli_shared::daemon::DaemonInfo;
 use lianli_shared::installation::InstallationContext;
@@ -7,13 +8,15 @@ use lianli_shared::services::{
     OwnershipSnapshot, ServiceAction, ServiceActionRequest, ServiceProbe, ServiceReport,
     ServiceScope, UnitState,
 };
+use lianli_shared::ui_message::UiText;
+use lianli_shared::ui_message::{UiError, UiMessage};
 use std::time::{Duration, Instant};
 
 pub fn execute(
     context: InstallationContext,
     request: ServiceActionRequest,
-    progress: impl FnMut(&str) -> Result<()>,
-) -> Result<String> {
+    progress: impl FnMut(UiText) -> Result<()>,
+) -> Result<UiText> {
     ensure!(
         !matches!(context, InstallationContext::UnsupportedContainer),
         "Host service actions are unavailable in this container"
@@ -84,7 +87,7 @@ impl Backend for Native {
 fn known<T>(probe: &ServiceProbe<T>) -> Result<&T> {
     match probe {
         ServiceProbe::Known { value } => Ok(value),
-        ServiceProbe::Unavailable { reason } => {
+        ServiceProbe::Unavailable { reason, .. } => {
             anyhow::bail!("Service state is unverified: {reason}")
         }
     }
@@ -178,9 +181,12 @@ fn preflight(report: &ServiceReport, request: ServiceActionRequest, user_uid: u3
 pub(crate) fn run(
     backend: &mut impl Backend,
     request: ServiceActionRequest,
-    mut progress: impl FnMut(&str) -> Result<()>,
-) -> Result<String> {
-    progress("Checking service state and hardware ownership…")?;
+    mut progress: impl FnMut(UiText) -> Result<()>,
+) -> Result<UiText> {
+    progress(text(
+        "control.serviceAction.checking",
+        "Checking service state and hardware ownership…",
+    ))?;
     let before = backend.inspect()?;
     preflight(&before, request, backend.user_uid())?;
     let previous_owner = owner(&before)?;
@@ -195,11 +201,20 @@ pub(crate) fn run(
         verify_write_gate(&before, &info)?;
         Some(info)
     };
-    progress("Approve the service authorization prompt to continue…")?;
-    backend
-        .dispatch(request)
-        .context("The action was not retried. Recheck service state if the request timed out")?;
-    progress("Waiting for the service and verifying hardware ownership…")?;
+    progress(text(
+        "control.serviceAction.authorize",
+        "Approve the service authorization prompt to continue…",
+    ))?;
+    backend.dispatch(request).map_err(|error| {
+        UiError::new(
+            UiMessage::new("control.serviceAction.dispatchFailed").param("error", format!("{error:#}")),
+            format!("The action was not retried. Recheck service state if the request timed out: {error:#}"),
+        )
+    })?;
+    progress(text(
+        "control.serviceAction.waiting",
+        "Waiting for the service and verifying hardware ownership…",
+    ))?;
     let deadline = backend.elapsed() + Duration::from_secs(90);
     let mut detail = String::from("The service has not reached the requested state");
     while backend.elapsed() < deadline {
@@ -241,22 +256,29 @@ pub(crate) fn run(
         match result {
             Ok(true) => {
                 return Ok(match request.action {
-                    ServiceAction::Start => {
-                        "Service started. Daemon identity and loaded settings verified."
-                    }
-                    ServiceAction::Stop => "Service stopped cleanly. Hardware ownership released.",
-                    ServiceAction::Restart => {
-                        "Service restarted. New daemon identity and loaded settings verified."
-                    }
-                }
-                .into())
+                    ServiceAction::Start => text(
+                        "control.serviceAction.started",
+                        "Service started. Daemon identity and loaded settings verified.",
+                    ),
+                    ServiceAction::Stop => text(
+                        "control.serviceAction.stopped",
+                        "Service stopped cleanly. Hardware ownership released.",
+                    ),
+                    ServiceAction::Restart => text(
+                        "control.serviceAction.restarted",
+                        "Service restarted. New daemon identity and loaded settings verified.",
+                    ),
+                })
             }
             Ok(false) => {}
             Err(error) => detail = format!("{error:#}"),
         }
         backend.pause();
     }
-    anyhow::bail!("Service completion could not be verified: {detail}. No forced kill or automatic retry was issued. Recheck services and inspect the selected service's journal.")
+    anyhow::bail!(UiError::new(
+        UiMessage::new("control.serviceAction.unverified").param("detail", &detail),
+        format!("Service completion could not be verified: {detail}. No forced kill or automatic retry was issued. Recheck services and inspect the selected service's journal.")
+    ))
 }
 
 fn verify_invocation(unit: &UnitState, info: &DaemonInfo) -> Result<()> {
@@ -491,6 +513,7 @@ mod tests {
         .is_ok());
         report.selection = Some(ServiceProbe::Unavailable {
             reason: "Hidden host selection".into(),
+            reason_ui: None,
         });
         assert!(preflight(&report, request, unsafe { libc::geteuid() }).is_err());
         assert!(preflight(

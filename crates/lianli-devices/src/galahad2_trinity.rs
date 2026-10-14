@@ -11,6 +11,7 @@ use crate::registry::SharedHid;
 use crate::traits::{AioDevice, FanDevice, RgbDevice};
 use anyhow::{bail, Context, Result};
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
+use lianli_shared::ui_message::UiMessage;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -506,10 +507,12 @@ impl RgbDevice for Galahad2TrinityController {
         vec![
             RgbZoneInfo {
                 name: "Pump Head".to_string(),
+                name_ui: Some(UiMessage::new("devices.zone.pumpHead")),
                 led_count: 24, // Approximate pump LED count
             },
             RgbZoneInfo {
                 name: "Fans".to_string(),
+                name_ui: Some(UiMessage::new("devices.zone.fans")),
                 led_count: FAN_LED_COUNT,
             },
         ]

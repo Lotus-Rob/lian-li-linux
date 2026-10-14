@@ -5,6 +5,7 @@ use crate::reservation::{HardwareReservation, ServiceOperationLock};
 use crate::service_operation::Backend;
 use crate::service_startup::Policy;
 use crate::switch_journal::{Intent, Journal, Phase};
+use crate::ui_text::text;
 use anyhow::{ensure, Context, Result};
 use lianli_shared::daemon::{DaemonInfo, FileIdentity};
 use lianli_shared::installation::InstallationContext;
@@ -12,6 +13,7 @@ use lianli_shared::services::{
     OwnershipSnapshot, ServiceAction, ServiceActionRequest, ServiceProbe, ServiceReport,
     ServiceScope, ServiceSelection, UnitState,
 };
+use lianli_shared::ui_message::UiText;
 use std::io::Read;
 use std::path::Path;
 
@@ -25,7 +27,7 @@ fn other(scope: ServiceScope) -> ServiceScope {
 pub(crate) fn known<T>(value: &ServiceProbe<T>) -> Result<&T> {
     match value {
         ServiceProbe::Known { value } => Ok(value),
-        ServiceProbe::Unavailable { reason } => {
+        ServiceProbe::Unavailable { reason, .. } => {
             anyhow::bail!("Service state is unverified: {reason}")
         }
     }
@@ -135,7 +137,7 @@ fn action(
     backend: &mut impl Backend,
     scope: ServiceScope,
     action: ServiceAction,
-    progress: &mut impl FnMut(&str) -> Result<()>,
+    progress: &mut impl FnMut(UiText) -> Result<()>,
 ) -> Result<()> {
     crate::service_operation::run(backend, ServiceActionRequest { scope, action }, progress)?;
     Ok(())
@@ -145,7 +147,7 @@ fn start(
     backend: &mut impl Backend,
     selection: ServiceSelection,
     config: &Path,
-    progress: &mut impl FnMut(&str) -> Result<()>,
+    progress: &mut impl FnMut(UiText) -> Result<()>,
     mut verify_context: impl FnMut() -> Result<()>,
 ) -> Result<DaemonInfo> {
     let deadline = backend.elapsed() + std::time::Duration::from_secs(90);
@@ -178,7 +180,7 @@ fn start(
 fn stop_destination(
     backend: &mut Authorized<'_>,
     scope: ServiceScope,
-    progress: &mut impl FnMut(&str) -> Result<()>,
+    progress: &mut impl FnMut(UiText) -> Result<()>,
 ) -> Result<()> {
     let deadline = backend.elapsed() + std::time::Duration::from_secs(90);
     loop {
@@ -199,7 +201,7 @@ fn stop_destination(
 fn stop_recovered_system(
     backend: &mut Authorized<'_>,
     record: &crate::switch_journal::Record,
-    progress: &mut impl FnMut(&str) -> Result<()>,
+    progress: &mut impl FnMut(UiText) -> Result<()>,
 ) -> Result<()> {
     let deadline = backend.elapsed() + std::time::Duration::from_secs(90);
     loop {
@@ -272,8 +274,8 @@ pub(crate) fn check_launch(
 pub fn execute(
     destination_scope: ServiceScope,
     carry: bool,
-    progress: impl FnMut(&str) -> Result<()>,
-) -> Result<String> {
+    progress: impl FnMut(UiText) -> Result<()>,
+) -> Result<UiText> {
     execute_for(
         Account::authorized_caller()?,
         destination_scope,
@@ -286,8 +288,8 @@ pub(crate) fn execute_for(
     caller: Account,
     destination_scope: ServiceScope,
     carry: bool,
-    mut progress: impl FnMut(&str) -> Result<()>,
-) -> Result<String> {
+    mut progress: impl FnMut(UiText) -> Result<()>,
+) -> Result<UiText> {
     ensure!(
         InstallationContext::detect() == InstallationContext::Native,
         "Automatic switching requires the native host application"
@@ -298,7 +300,10 @@ pub(crate) fn execute_for(
         "Recover the pending switch before starting another"
     );
     let mut backend = Authorized::new(&caller, &operation)?;
-    progress("Checking both service accounts, startup selection and saved settings…")?;
+    progress(text(
+        "control.switch.checking",
+        "Checking both service accounts, startup selection and saved settings…",
+    ))?;
     let deployment = crate::container_deployment::load()?;
     if deployment.is_some() && destination_scope == ServiceScope::System {
         crate::lingering::require(&crate::services::Route::Native, caller.uid)?;
@@ -323,7 +328,7 @@ pub(crate) fn execute_for(
     let source_state = crate::destination::preflight(source, other(destination_scope))?;
     let destination_state = crate::destination::preflight(destination, destination_scope)?;
     if carry && destination_state.assets.failed > 0 {
-        progress("Old destination media is unavailable. Its settings will be backed up and replaced by the copied settings.")?;
+        progress(text("control.switch.oldMediaUnavailable", "Old destination media is unavailable. Its settings will be backed up and replaced by the copied settings."))?;
     }
     if source_running {
         verify_daemon(
@@ -370,9 +375,10 @@ pub(crate) fn execute_for(
     )?;
     let result = (|| {
         if carry {
-            progress(
+            progress(text(
+                "control.switch.preparing",
                 "Preparing settings and decoding copied media under the destination account…",
-            )?;
+            ))?;
             let prepared = crate::state_transfer::prepare(
                 source,
                 &source_state,
@@ -416,7 +422,10 @@ pub(crate) fn execute_for(
             &destination_state.config_path,
             &destination_state.working_directory,
         )?;
-        progress("Pausing competing starts and stopping the current daemon cleanly…")?;
+        progress(text(
+            "control.switch.stoppingSource",
+            "Pausing competing starts and stopping the current daemon cleanly…",
+        ))?;
         journal.advance(Phase::StoppingSource)?;
         journal.pause_launches()?;
         if source_running {
@@ -432,7 +441,10 @@ pub(crate) fn execute_for(
         same_state(source, &source_state, &source_checked)?;
         same_state(destination, &destination_state, &destination_checked)?;
         if carry {
-            progress("Publishing prepared settings and media with rollback backups…")?;
+            progress(text(
+                "control.switch.publishing",
+                "Publishing prepared settings and media with rollback backups…",
+            ))?;
             journal.publish_destination(destination, &hardware)?;
         } else {
             journal.advance(Phase::Published)?;
@@ -447,7 +459,10 @@ pub(crate) fn execute_for(
         journal.select_destination(&caller, &hardware)?;
         journal.advance(Phase::StartingDestination)?;
         drop(hardware);
-        progress("Starting and verifying the selected daemon…")?;
+        progress(text(
+            "control.switch.starting",
+            "Starting and verifying the selected daemon…",
+        ))?;
         let info = start(
             &mut backend,
             journal.record().intent.destination,
@@ -463,7 +478,7 @@ pub(crate) fn execute_for(
         Ok(()) => {
             journal.cleanup_preparation(destination)?;
             journal.finish()?;
-            Ok("Service mode switched. Selected account and loaded configuration have been verified.".into())
+            Ok(text("control.switch.switched", "Service mode switched. Selected account and loaded configuration have been verified."))
         }
         Err(error) => {
             journal.failure(&format!("{error:#}"))?;
@@ -505,9 +520,9 @@ fn rollback(
     source: &Account,
     destination: &Account,
     expected_lock: &FileIdentity,
-    progress: &mut impl FnMut(&str) -> Result<()>,
+    progress: &mut impl FnMut(UiText) -> Result<()>,
 ) -> Result<()> {
-    let mut report = |message: &str| {
+    let mut report = |message: UiText| {
         // Progress storage failure must not prevent restoration after the source stops.
         let _ = progress(message);
         Ok(())
@@ -571,7 +586,10 @@ fn rollback(
     ) {
         journal.advance(Phase::StoppingDestination)?;
     }
-    progress("Restoring the previous service mode…")?;
+    progress(text(
+        "control.switch.restoring",
+        "Restoring the previous service mode…",
+    ))?;
     if journal.record().phase == Phase::StoppingDestination {
         unit(
             &backend.inspect()?,
@@ -653,7 +671,7 @@ fn rollback(
     Ok(())
 }
 
-pub fn recover(progress: impl FnMut(&str) -> Result<()>) -> Result<String> {
+pub fn recover(progress: impl FnMut(UiText) -> Result<()>) -> Result<UiText> {
     recover_for(Account::authorized_caller()?, progress)
 }
 
@@ -665,23 +683,26 @@ fn check_recovery_runtime(journal: &Journal<'_>, expected: &Option<FileIdentity>
 
 pub(crate) fn recover_for(
     caller: Account,
-    progress: impl FnMut(&str) -> Result<()>,
-) -> Result<String> {
+    progress: impl FnMut(UiText) -> Result<()>,
+) -> Result<UiText> {
     recover_matching(caller, None, progress)
 }
 
 pub(crate) fn recover_matching(
     caller: Account,
     expected_id: Option<&str>,
-    mut progress: impl FnMut(&str) -> Result<()>,
-) -> Result<String> {
+    mut progress: impl FnMut(UiText) -> Result<()>,
+) -> Result<UiText> {
     ensure!(
         InstallationContext::detect() == InstallationContext::Native,
         "Recover service switching from the native host application"
     );
     let operation = ServiceOperationLock::acquire(&InstallationContext::Native)?;
     let Some(mut journal) = Journal::load(&operation)? else {
-        return Ok("No service switch needs recovery.".into());
+        return Ok(text(
+            "control.switch.nothingToRecover",
+            "No service switch needs recovery.",
+        ));
     };
     ensure!(
         expected_id.is_none_or(|id| journal.record().intent.id == id),
@@ -766,7 +787,10 @@ pub(crate) fn recover_matching(
         };
         journal.cleanup_preparation(destination)?;
         journal.finish()?;
-        return Ok("Completed switch record archived.".into());
+        return Ok(text(
+            "control.switch.archived",
+            "Completed switch record archived.",
+        ));
     }
     let mut backend = Authorized::new(&caller, &operation)?;
     let expected = crate::ownership::inspect(
@@ -806,7 +830,10 @@ pub(crate) fn recover_matching(
     }
     journal.cleanup_preparation(destination)?;
     journal.finish()?;
-    Ok("Previous service mode restored and verified.".into())
+    Ok(text(
+        "control.switch.restored",
+        "Previous service mode restored and verified.",
+    ))
 }
 
 #[cfg(test)]

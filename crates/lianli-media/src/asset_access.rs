@@ -1,20 +1,28 @@
 use crate::{MediaError, PreparationControl};
 use lianli_shared::media_dependencies::AssetDependency;
+use lianli_shared::ui_message::{UiError, UiMessage};
 use std::fs::{self, OpenOptions};
 use std::io;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
+fn not_regular_file() -> io::Error {
+    io::Error::other(UiError::new(
+        UiMessage::new("status.mediaAccess.notRegularFile"),
+        "Asset is not a regular file",
+    ))
+}
+
 pub fn check_file(path: &Path) -> io::Result<()> {
     if !fs::metadata(path)?.is_file() {
-        return Err(io::Error::other("Asset is not a regular file"));
+        return Err(not_regular_file());
     }
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY | libc::O_CLOEXEC)
         .open(path)?;
     if !file.metadata()?.is_file() {
-        return Err(io::Error::other("Asset is not a regular file"));
+        return Err(not_regular_file());
     }
     Ok(())
 }
@@ -75,6 +83,7 @@ mod tests {
         let mut dependency = AssetDependency {
             path: link,
             owner: "Template 'custom' widget 'video'".into(),
+            owner_ui: None,
             kind: AssetKind::Video,
         };
         let control = PreparationControl::new(false);

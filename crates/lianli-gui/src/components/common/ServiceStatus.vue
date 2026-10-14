@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { backendText, invoke } from "@/utils/backendText";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useDialog } from "naive-ui";
 import { useConfigStore } from "@/stores/config";
@@ -217,7 +217,7 @@ const owner = computed(() => {
   if (ownership.value.owner_pid === null) return t("common.none");
   const process = ownership.value.process;
   if (!process) return t("service.serviceStatus.processUnchecked");
-  if (process.state === "unavailable") return t("service.serviceStatus.ownerUnverified", { reason: process.reason });
+  if (process.state === "unavailable") return t("service.serviceStatus.ownerUnverified", { reason: backendText(process.reason, process.reason_ui) });
   const label: MessageKey = process.value.service === "user" ? "service.serviceStatus.ownerUserService"
     : process.value.service === "system" ? "service.serviceStatus.ownerSystemService"
     : "service.serviceStatus.ownerOther";
@@ -237,10 +237,10 @@ const lockMatch = computed(() => {
       <n-button size="small" :loading="installation.checking" :disabled="busy" @click="installation.recheck">{{ t("service.serviceStatus.recheck") }}</n-button>
     </template>
     <n-alert v-if="submissionError || installation.error" type="error">{{ submissionError || installation.error }}</n-alert>
-    <n-alert v-if="operation.message" :type="operation.success === false ? 'error' : operation.success === true ? 'success' : 'info'">{{ operation.message }}</n-alert>
+    <n-alert v-if="operation.message" :type="operation.success === false ? 'error' : operation.success === true ? 'success' : 'info'">{{ backendText(operation.message, operation.message_ui) }}</n-alert>
     <p v-if="initialSetup">{{ t("service.serviceStatus.setupIntroLine") }}</p>
     <p v-if="!report" class="muted">{{ t(installation.checking ? "service.serviceStatus.checking" : "service.serviceStatus.statusUnavailable") }}</p>
-    <p v-if="report?.operation_lock?.state === 'unavailable'">{{ t("service.serviceStatus.controlsUnavailable", { reason: report.operation_lock.reason }) }}</p>
+    <p v-if="report?.operation_lock?.state === 'unavailable'">{{ t("service.serviceStatus.controlsUnavailable", { reason: backendText(report.operation_lock.reason, report.operation_lock.reason_ui) }) }}</p>
     <div v-if="(canSwitch && controlsReady) || report?.context.kind === 'distrobox'" class="switch-row">
       <template v-if="canSwitch && controlsReady">
         <n-select v-model:value="destination" :options="modeOptions" :placeholder="t('service.serviceStatus.selectMode')" :disabled="busy || installation.checking" class="mode-select" />
@@ -271,7 +271,7 @@ const lockMatch = computed(() => {
             <n-button size="small" :disabled="busy || installation.checking || unit.probe.value.active_state !== 'active'" @click="act(unit.scope, 'restart')">{{ t(actionLabels.restart) }}</n-button>
           </n-space>
         </template>
-        <p v-else>{{ unit.probe.reason }}</p>
+        <p v-else>{{ backendText(unit.probe.reason, unit.probe.reason_ui) }}</p>
       </div>
     </div>
     <n-alert v-if="daemon.connected && lockMatch === false" type="error">{{ t("service.serviceStatus.lockMismatchAlert") }}</n-alert>
@@ -284,10 +284,10 @@ const lockMatch = computed(() => {
       </dl>
       <p>{{ t("service.serviceStatus.owner", { owner }) }}</p>
       <p v-if="report.selection?.state === 'known'">{{ t("service.serviceStatus.startupSelection", { selection: report.selection.value ? t(DAEMON_MODE_LABELS[report.selection.value.scope]) : t("service.serviceStatus.notConfigured") }) }}</p>
-      <p v-else-if="report.selection?.state === 'unavailable'">{{ report.selection.reason }}</p>
+      <p v-else-if="report.selection?.state === 'unavailable'">{{ backendText(report.selection.reason, report.selection.reason_ui) }}</p>
       <p v-if="report.global_user.state === 'known'">{{ t("service.serviceStatus.globalUserStartup", { state: report.global_user.value }) }}</p>
-      <p v-else>{{ report.global_user.reason }}</p>
-      <p v-if="report.ownership?.state === 'unavailable'">{{ report.ownership.reason }}</p>
+      <p v-else>{{ backendText(report.global_user.reason, report.global_user.reason_ui) }}</p>
+      <p v-if="report.ownership?.state === 'unavailable'">{{ backendText(report.ownership.reason, report.ownership.reason_ui) }}</p>
       <p v-if="daemon.connected">{{ t("service.serviceStatus.ownershipLock", { state: t(lockMatch === true ? 'service.serviceStatus.lockMatched' : lockMatch === false ? 'service.serviceStatus.lockMismatch' : 'service.serviceStatus.unverified') }) }}</p>
       <div v-for="unit in units" :key="unit.scope">
         <p v-if="unit.probe.state === 'known'">{{ t("service.serviceStatus.unitDetails", { label: unit.label, load: unit.probe.value.load_state, sub: unit.probe.value.sub_state, pid: unit.probe.value.main_pid || '—' }) }}<br />{{ unit.probe.value.fragment_path }}</p>

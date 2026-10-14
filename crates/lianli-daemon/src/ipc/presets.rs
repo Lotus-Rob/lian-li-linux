@@ -5,6 +5,7 @@ use super::EventSender;
 
 use lianli_shared::ipc::IpcResponse;
 use lianli_shared::rgb::{RgbDeviceConfig, RgbMode, RgbPreset, RgbPresetZone, RgbZoneConfig};
+use lianli_shared::ui_message::UiMessage;
 use tracing::info;
 
 use crate::ipc::{DaemonState, SharedState};
@@ -80,7 +81,12 @@ pub fn save(state: &SharedState, tx: EventSender, name: String, device_id: Strin
     };
     let zones = match zones {
         Some(z) => z,
-        None => return IpcResponse::error(format!("device {device_id} not found")),
+        None => {
+            return IpcResponse::error_ui(
+                format!("device {device_id} not found"),
+                UiMessage::new("daemon.presets.deviceNotFound").param("device", &device_id),
+            )
+        }
     };
     let preset = RgbPreset {
         name: name.clone(),
@@ -112,7 +118,7 @@ pub fn delete(
     let before = presets.len();
     presets.retain(|p| !(p.name == name && p.device_id == device_id));
     if presets.len() == before {
-        return IpcResponse::error(format!("preset '{name}' not found for {device_id}"));
+        return preset_not_found(&name, &device_id);
     }
     save_and_notify(&mut state, &tx, &name, presets)
 }
@@ -132,7 +138,7 @@ pub fn apply(state: &SharedState, tx: EventSender, name: String, device_id: Stri
             .cloned()
     };
     let Some(preset) = preset else {
-        return IpcResponse::error(format!("preset '{name}' not found for {device_id}"));
+        return preset_not_found(&name, &device_id);
     };
 
     let mut state = state.lock();
@@ -194,7 +200,7 @@ fn apply_config_and_leds(
         }
     }
     if let Err(e) = super::write_config(&state.config_path, &app_config) {
-        return Err(IpcResponse::error(format!("failed to write config: {e}")));
+        return Err(super::config_write_failed(e));
     }
     state.config = Some(app_config);
 
@@ -209,10 +215,12 @@ fn apply_config_and_leds(
                         zone_entry.zone,
                         &zone_entry.colors,
                     ) {
-                        return Err(IpcResponse::error(format!(
-                            "failed to apply preset zone {}: {e}",
-                            zone_entry.zone
-                        )));
+                        return Err(IpcResponse::error_ui(
+                            format!("failed to apply preset zone {}: {e}", zone_entry.zone),
+                            UiMessage::new("daemon.presets.applyZoneFailed")
+                                .param("zone", zone_entry.zone)
+                                .param("error", e),
+                        ));
                     }
                 }
             }
@@ -235,6 +243,18 @@ fn save_and_notify(
             info!("RGB preset '{name}' saved");
             IpcResponse::ok(serde_json::json!(null))
         }
-        Err(e) => IpcResponse::error(format!("failed to write presets: {e}")),
+        Err(e) => IpcResponse::error_ui(
+            format!("failed to write presets: {e}"),
+            UiMessage::new("daemon.presets.writeFailed").param("error", e),
+        ),
     }
+}
+
+fn preset_not_found(name: &str, device_id: &str) -> IpcResponse {
+    IpcResponse::error_ui(
+        format!("preset '{name}' not found for {device_id}"),
+        UiMessage::new("daemon.presets.notFound")
+            .param("name", name)
+            .param("device", device_id),
+    )
 }

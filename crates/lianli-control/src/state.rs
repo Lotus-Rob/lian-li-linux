@@ -341,8 +341,10 @@ impl StateSnapshot {
                 if report.issues.len() < MAX_ISSUES {
                     report.issues.push(AssetAccessIssue {
                         owner: dependency.owner.clone(),
+                        owner_ui: dependency.owner_ui.clone(),
                         path: Some(dependency.path.clone()),
                         error: error.clone(),
+                        error_ui: None,
                     });
                 }
             }

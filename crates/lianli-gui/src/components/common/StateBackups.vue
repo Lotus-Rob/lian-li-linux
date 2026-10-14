@@ -3,10 +3,11 @@ import { ref, watch } from "vue";
 import { useIpc } from "@/composables/useIpc";
 import { useDaemonStore } from "@/stores/daemon";
 import { useTranslate, type MessageKey } from "@/i18n";
+import { backendText, type UiMessage } from "@/utils/backendText";
 
 type Target = { kind: "configuration" | "templates" | "rgb_presets" } | { kind: "profile"; name: string };
-type Entry = { target: Target; preserved?: boolean; bytes: number; modified_unix_seconds: number | null; error: string | null };
-type Preview = { target: Target; preserved?: boolean; sha256: string; bytes: number; json: string; truncated: boolean; parse_error: string | null; validation_error?: string | null; warnings?: string[] };
+type Entry = { target: Target; preserved?: boolean; bytes: number; modified_unix_seconds: number | null; error: string | null; error_ui?: UiMessage | null };
+type Preview = { target: Target; preserved?: boolean; sha256: string; bytes: number; json: string; truncated: boolean; parse_error: string | null; parse_error_ui?: UiMessage | null; validation_error?: string | null; validation_error_ui?: UiMessage | null; warnings?: string[]; warnings_ui?: (UiMessage | null)[] };
 const t = useTranslate();
 const daemon = useDaemonStore();
 const ipc = useIpc();
@@ -93,7 +94,7 @@ async function remove() {
     <n-space v-for="entry in entries" :key="JSON.stringify([entry.target, entry.preserved])" justify="space-between" align="center">
       <div>{{ label(entry.target) }} · {{ t(entry.preserved ? 'service.stateBackups.beforeRestore' : 'service.stateBackups.previousSave') }} · {{ t("service.stateBackups.bytes", { count: entry.bytes.toLocaleString() }) }}
         <span v-if="entry.modified_unix_seconds"> · {{ new Date(entry.modified_unix_seconds * 1000).toLocaleString() }}</span>
-        <p v-if="entry.error">{{ entry.error }}</p>
+        <p v-if="entry.error">{{ backendText(entry.error, entry.error_ui) }}</p>
       </div>
       <n-button :disabled="busy || !!entry.error || !daemon.connected" @click="read(entry.target, entry.preserved)">{{ t("service.stateBackups.preview") }}</n-button>
     </n-space>
@@ -101,9 +102,9 @@ async function remove() {
       <p>{{ t("service.stateBackups.privacyNote") }}</p>
       <p>{{ t(preview?.preserved ? 'service.stateBackups.preservedState' : 'service.stateBackups.previousState') }}</p>
       <n-alert v-if="error" type="error">{{ error }}</n-alert>
-      <n-alert v-if="preview?.parse_error" type="error">{{ t("service.stateBackups.invalidJson", { error: preview.parse_error }) }}</n-alert>
-      <n-alert v-else-if="preview?.validation_error" type="error">{{ t("service.stateBackups.validationFailed", { error: preview.validation_error }) }}</n-alert>
-      <n-alert v-for="(warning, index) in preview?.warnings ?? []" :key="index" type="warning">{{ warning }}</n-alert>
+      <n-alert v-if="preview?.parse_error" type="error">{{ t("service.stateBackups.invalidJson", { error: backendText(preview.parse_error, preview.parse_error_ui) }) }}</n-alert>
+      <n-alert v-else-if="preview?.validation_error" type="error">{{ t("service.stateBackups.validationFailed", { error: backendText(preview.validation_error, preview.validation_error_ui) }) }}</n-alert>
+      <n-alert v-for="(warning, index) in preview?.warnings ?? []" :key="index" type="warning">{{ backendText(warning, preview?.warnings_ui?.[index]) }}</n-alert>
       <n-alert v-if="preview?.truncated" type="warning">{{ t("service.stateBackups.truncated") }}</n-alert>
       <n-input :value="preview?.json ?? ''" type="textarea" readonly :autosize="{ minRows: 10, maxRows: 22 }" />
       <template v-if="!preview?.preserved">

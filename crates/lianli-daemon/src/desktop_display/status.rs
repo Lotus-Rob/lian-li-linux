@@ -1,6 +1,7 @@
 use super::DeviceKey;
 use lianli_shared::display::DisplayVideoPolicy;
 use lianli_shared::ipc::{DesktopStreamState, DesktopStreamStatus};
+use lianli_shared::ui_message::UiText;
 use parking_lot::Mutex;
 
 pub(super) struct StreamStatus(Mutex<DesktopStreamStatus>);
@@ -15,6 +16,7 @@ impl StreamStatus {
             backend: None,
             fallback_reason: None,
             error: None,
+            error_ui: None,
             applied_generation: None,
             applied_policy: None,
             encoding: None,
@@ -35,6 +37,7 @@ impl StreamStatus {
         state.backend = None;
         state.fallback_reason = None;
         state.error = None;
+        state.error_ui = None;
         state.applied_generation = None;
         state.applied_policy = None;
         state.encoding = None;
@@ -63,10 +66,12 @@ impl StreamStatus {
         self.0.lock().state = DesktopStreamState::Paused;
     }
 
-    pub fn failed(&self, reason: &str) {
+    pub fn failed(&self, reason: UiText) {
+        let reason = reason.truncated(2048);
         let mut state = self.0.lock();
         state.state = DesktopStreamState::Failed;
-        state.error = Some(reason.chars().take(2048).collect());
+        state.error = Some(reason.english);
+        state.error_ui = reason.ui;
     }
 }
 
@@ -108,7 +113,7 @@ mod tests {
         status.paused();
         assert_eq!(status.snapshot().state, DesktopStreamState::Paused);
         assert_eq!(status.snapshot().applied_generation, Some(2));
-        status.failed(&"界".repeat(3000));
+        status.failed("界".repeat(3000).into());
         let failed = status.snapshot();
         assert_eq!(failed.state, DesktopStreamState::Failed);
         assert_eq!(failed.error.unwrap().chars().count(), 2048);

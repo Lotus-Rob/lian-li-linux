@@ -213,7 +213,7 @@ fn parse_cgroup(text: &str) -> Result<String> {
 fn belongs_to(process: &OwnerProcess, probe: &ServiceProbe<UnitState>) -> Result<bool> {
     let unit = match probe {
         ServiceProbe::Known { value } => value,
-        ServiceProbe::Unavailable { reason } => {
+        ServiceProbe::Unavailable { reason, .. } => {
             anyhow::bail!("Service ownership is unverified: {reason}")
         }
     };
@@ -394,6 +394,7 @@ mod tests {
     fn root_defers_boxed_ownership_to_ipc_without_a_user_bus() {
         let user = ServiceProbe::Unavailable {
             reason: "no root user bus".into(),
+            reason_ui: None,
         };
         let mut system = unit("/system.slice/lianli-daemon-system.service");
         let process = OwnerProcess {
@@ -417,6 +418,7 @@ mod tests {
     fn system_owner_is_verifiable_before_the_user_manager_starts() {
         let user = ServiceProbe::Unavailable {
             reason: "user bus not started".into(),
+            reason_ui: None,
         };
         let mut system = unit("/system.slice/lianli-daemon-system.service");
         let ServiceProbe::Known { value } = &mut system else {

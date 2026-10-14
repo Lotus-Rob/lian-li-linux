@@ -1,5 +1,6 @@
 use crate::ownership::{file_identity, host_identity_at};
 use crate::services::Route;
+use crate::ui_text::keyed;
 use anyhow::{ensure, Context, Result};
 use lianli_shared::daemon::FileIdentity;
 use lianli_shared::installation::{
@@ -186,9 +187,12 @@ pub(crate) fn operation_identity(
     context: &InstallationContext,
     route: &Route,
 ) -> Result<FileIdentity> {
-    let path = context
-        .service_operation_lock_path()
-        .context("Host service operation lock is unavailable")?;
+    let path = context.service_operation_lock_path().ok_or_else(|| {
+        keyed(
+            "control.route.operationLockUnavailable",
+            "Host service operation lock is unavailable",
+        )
+    })?;
     let require_root = matches!(context, InstallationContext::Native);
     let identity = file_identity(&path, require_root)?;
     if matches!(route, Route::Host { .. }) {
@@ -209,9 +213,12 @@ impl ServiceOperationLock {
         &self.0.identity
     }
     pub fn acquire(context: &InstallationContext) -> Result<Self> {
-        let path = context
-            .service_operation_lock_path()
-            .context("Host service operation lock is unavailable")?;
+        let path = context.service_operation_lock_path().ok_or_else(|| {
+            keyed(
+                "control.route.operationLockUnavailable",
+                "Host service operation lock is unavailable",
+            )
+        })?;
         let require_root = matches!(context, InstallationContext::Native);
         let identity = file_identity(&path, require_root).context(
             "Install the current tmpfiles rule and run sudo systemd-tmpfiles --create lianli.conf on the host before using service controls")?;

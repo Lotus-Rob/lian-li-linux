@@ -5,6 +5,7 @@ use crate::media::{
     DoublegaugeDescriptor, MediaFraming, MediaType, SensorDescriptor, SensorSourceConfig,
 };
 use crate::rgb::RgbAppConfig;
+use crate::ui_message::{ui_message_of, UiError, UiMessage, UiText};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::to_string;
@@ -342,13 +343,21 @@ impl AppConfig {
 
     /// Applies startup migrations and resolves media paths against the destination file.
     pub fn from_reader(reader: impl std::io::Read, path: &Path) -> Result<(Self, Vec<String>)> {
+        let (cfg, warnings) = Self::from_reader_ui(reader, path)?;
+        Ok((cfg, warnings.into_iter().map(|w| w.english).collect()))
+    }
+
+    pub fn from_reader_ui(reader: impl std::io::Read, path: &Path) -> Result<(Self, Vec<UiText>)> {
         use std::io::Read;
         const MAX_BYTES: u64 = 16 * 1024 * 1024;
         let mut bytes = Vec::new();
         reader.take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
         anyhow::ensure!(
             bytes.len() as u64 <= MAX_BYTES,
-            "Configuration exceeds 16 MiB"
+            UiError::new(
+                UiMessage::new("status.config.tooLarge"),
+                "Configuration exceeds 16 MiB"
+            )
         );
         let mut cfg: AppConfig = serde_json::from_slice(&bytes)
             .with_context(|| format!("parsing {}", path.display()))?;
@@ -380,14 +389,20 @@ impl AppConfig {
             let duplicate = !seen_serials.insert(bare.clone());
             let shadowed = !is_prefixed && prefixed_keys.contains(&bare);
             if duplicate || shadowed {
-                let kept = if !is_prefixed && prefixed_keys.contains(&bare) {
-                    " (kept hid:-prefixed form)"
+                warnings.push(if shadowed {
+                    UiText::new(
+                        UiMessage::new("status.config.duplicateLcdSerialKeptPrefixed")
+                            .param("serial", &bare),
+                        format!(
+                            "Removed duplicate LCD entry for serial '{bare}' (kept hid:-prefixed form)"
+                        ),
+                    )
                 } else {
-                    ""
-                };
-                warnings.push(format!(
-                    "Removed duplicate LCD entry for serial '{bare}'{kept}"
-                ));
+                    UiText::new(
+                        UiMessage::new("status.config.duplicateLcdSerial").param("serial", &bare),
+                        format!("Removed duplicate LCD entry for serial '{bare}'"),
+                    )
+                });
                 if shadowed {
                     // Free the key so the prefixed entry can claim it.
                     seen_serials.remove(&bare);
@@ -404,12 +419,19 @@ impl AppConfig {
             } else if let Some(index) = device.index {
                 format!("index:{index}")
             } else {
-                warnings.push("LCD entry missing both 'index' and 'serial'".to_string());
+                warnings.push(UiText::new(
+                    UiMessage::new("status.config.lcdEntryMissingIdentity"),
+                    "LCD entry missing both 'index' and 'serial'",
+                ));
                 continue;
             };
 
             if !seen.insert(identifier.clone()) {
-                warnings.push(format!("Duplicate LCD entry '{identifier}'"));
+                warnings.push(UiText::new(
+                    UiMessage::new("status.config.duplicateLcdEntry")
+                        .param("identifier", &identifier),
+                    format!("Duplicate LCD entry '{identifier}'"),
+                ));
             }
 
             match device.media_type {
@@ -434,7 +456,10 @@ impl AppConfig {
             }
 
             if let Err(e) = device.validate() {
-                warnings.push(format!("{e}"));
+                warnings.push(UiText {
+                    english: format!("{e}"),
+                    ui: ui_message_of(&e),
+                });
             }
         }
 

@@ -1,4 +1,5 @@
 use super::*;
+use lianli_shared::ui_message::UiMessage;
 
 impl WiredReceiverController {
     /// Send a full RGB frame (all fans' LEDs) using the per-PID transport.
@@ -219,6 +220,7 @@ impl RgbDevice for WiredReceiverController {
         (0..count)
             .map(|fan| RgbZoneInfo {
                 name: format!("Fan {}", fan + 1),
+                name_ui: Some(UiMessage::new("devices.zone.fan").param("number", fan + 1)),
                 led_count: self.params.leds_per_fan,
             })
             .collect()

@@ -238,6 +238,7 @@ impl crate::traits::RgbDevice for WirelessRgbDevice {
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
         vec![RgbZoneInfo {
             name: String::new(),
+            name_ui: None,
             led_count: self.led_state.lock().len() as u16,
         }]
     }

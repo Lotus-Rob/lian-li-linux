@@ -7,6 +7,7 @@ use lianli_display::buffer::EncodedBuffer;
 use lianli_shared::display::{
     CaptureCommand, CaptureReply, DisplayCodec, DisplayMode, OutputRequest,
 };
+use lianli_shared::ui_message::{UiError, UiMessage, UiText};
 use std::os::fd::{AsFd, AsRawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -44,7 +45,7 @@ pub(super) fn spawn_worker(
                 if stop_clone.load(Ordering::Relaxed) {
                     debug!("TURZX {pid:04x} at {key:?} worker stopped: {error:#}");
                 } else {
-                    status.failed(&format!("{error:#}"));
+                    status.failed(UiText::from_error(&error));
                     error!("TURZX {pid:04x} at {key:?} worker exited: {error:#}");
                 }
             }
@@ -111,7 +112,10 @@ fn run_worker(
             }
             EncodedBuffer::from_descriptor(ready.descriptors.pop().unwrap(), buffer_bytes)?
         }
-        CaptureReply::Failed { reason } => anyhow::bail!("Desktop setup failed: {reason}"),
+        CaptureReply::Failed { reason } => anyhow::bail!(UiError::new(
+            UiMessage::new("status.desktop.setupFailed").param("reason", &reason),
+            format!("Desktop setup failed: {reason}"),
+        )),
         _ => anyhow::bail!("Unexpected display startup response"),
     };
     let mut requested = video_policy.load();

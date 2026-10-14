@@ -5,6 +5,7 @@ import { ref } from "vue";
 import { useMessage } from "naive-ui";
 import { useIpc } from "@/composables/useIpc";
 import { useTranslate, type MessageKey } from "@/i18n";
+import { backendText } from "@/utils/backendText";
 
 const t = useTranslate();
 const daemon = useDaemonStore();
@@ -45,7 +46,7 @@ const labels: Record<DesktopStreamStatus["state"], MessageKey> = {
         <div><dt>{{ t("service.desktopStream.input") }}</dt><dd>{{ !stream.encoding ? '—' : stream.encoding.gpu_input ? 'GPU' : 'CPU' }}</dd></div>
         <div><dt>{{ t("service.desktopStream.hardwareVideo") }}</dt><dd>{{ !stream.applied_policy ? '—' : t(stream.applied_policy.hardware_video ? 'common.enabled' : 'common.disabled') }}</dd></div>
       </dl>
-      <p v-if="stream.error" class="failure">{{ stream.error }}</p>
+      <p v-if="stream.error" class="failure">{{ backendText(stream.error, stream.error_ui) }}</p>
       <details v-if="stream.fallback_reason || stream.encoding?.cpu_readback_reason || stream.encoding?.software_reason">
         <summary>{{ t("service.desktopStream.fallbackDetails") }}</summary>
         <p v-if="stream.encoding?.cpu_readback_reason">{{ t(stream.encoding.cpu_readback_reason === 'no_dma_buf' ? 'service.desktopStream.cpuOnlyBackend' : 'service.desktopStream.gpuFailed') }}</p>

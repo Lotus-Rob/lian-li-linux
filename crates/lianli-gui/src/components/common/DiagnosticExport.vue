@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/utils/backendText";
 import { useMessage } from "naive-ui";
 import { useInstallationStore } from "@/stores/installation";
 import { useDaemonStore } from "@/stores/daemon";

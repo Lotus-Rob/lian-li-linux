@@ -4,6 +4,7 @@ pub mod profile;
 pub use profile::{RgbPlaybackTiming, RgbRenderFamily, RgbRenderProfile, MAX_RGB_ANIMATION_FRAMES};
 
 use crate::device_id::DeviceFamily;
+use crate::ui_message::UiMessage;
 use serde::{Deserialize, Serialize};
 
 /// Supported RGB effect modes.
@@ -789,6 +790,8 @@ pub struct RgbPreset {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RgbZoneInfo {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_ui: Option<UiMessage>,
     pub led_count: u16,
 }
 
@@ -883,6 +886,8 @@ pub struct RgbDeviceCapabilities {
     pub fan_led_count_control: Option<RgbLedCountControl>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deferred_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deferred_reason_ui: Option<UiMessage>,
     #[serde(default)]
     pub hardware_group_effects: bool,
     #[serde(default)]

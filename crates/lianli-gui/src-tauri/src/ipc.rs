@@ -1,7 +1,9 @@
 //! Newline-delimited JSON over the selected daemon's Unix socket.
 
+use crate::command_error::CommandError;
 use lianli_shared::daemon::DaemonInfo;
 use lianli_shared::ipc::{IpcRequest, IpcResponse, TelemetrySnapshot};
+use lianli_shared::ui_message::{UiError, UiMessage};
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -68,18 +70,25 @@ pub struct PollResult {
     #[serde(default)]
     pub daemon_info: Option<DaemonInfo>,
     pub write_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub write_error_ui: Option<UiMessage>,
     pub devices: Vec<lianli_shared::ipc::DeviceInfo>,
     pub telemetry: TelemetrySnapshot,
 }
 
-fn send_raw(request: IpcRequest, expected: Option<&str>) -> Result<IpcResponse, String> {
-    let mut last_err: Option<String> = None;
+fn send_raw(request: IpcRequest, expected: Option<&str>) -> Result<IpcResponse, CommandError> {
+    let mut last_err: Option<CommandError> = None;
 
     for path in candidate_paths() {
         let stream = match UnixStream::connect(&path) {
             Ok(s) => s,
             Err(e) => {
-                last_err = Some(format!("cannot connect to daemon at {path}: {e}"));
+                last_err = Some(CommandError::ui(
+                    format!("cannot connect to daemon at {path}: {e}"),
+                    UiMessage::new("gui.ipc.connectFailed")
+                        .param("path", &path)
+                        .param("error", e),
+                ));
                 continue;
             }
         };
@@ -94,20 +103,28 @@ fn send_raw(request: IpcRequest, expected: Option<&str>) -> Result<IpcResponse, 
             }
             Err(e) => {
                 *active_lock().lock().unwrap() = None;
-                return Err(format!("Daemon response failed. The request was not retried because it may have been applied: {e}"));
+                return Err(CommandError::ui(
+                    format!("Daemon response failed. The request was not retried because it may have been applied: {e}"),
+                    UiMessage::new("gui.ipc.responseFailed").param("error", e),
+                ));
             }
         }
     }
 
     *active_lock().lock().unwrap() = None;
-    Err(last_err.unwrap_or_else(|| "no daemon socket candidates".to_string()))
+    Err(last_err.unwrap_or_else(|| {
+        CommandError::ui(
+            "no daemon socket candidates",
+            UiMessage::new("gui.ipc.noCandidates"),
+        )
+    }))
 }
 
 #[cfg(test)]
 fn prepare_request(
     request: IpcRequest,
     read_info: impl FnOnce() -> Result<IpcResponse, String>,
-) -> Result<IpcRequest, String> {
+) -> Result<IpcRequest, CommandError> {
     prepare_request_for(request, None, read_info)
 }
 
@@ -115,23 +132,36 @@ fn prepare_request_for(
     request: IpcRequest,
     expected: Option<&str>,
     read_info: impl FnOnce() -> Result<IpcResponse, String>,
-) -> Result<IpcRequest, String> {
+) -> Result<IpcRequest, CommandError> {
     if matches!(request, IpcRequest::Guarded { .. }) {
-        return Err("The GUI backend supplies compatibility checks".into());
+        return Err(CommandError::ui(
+            "The GUI backend supplies compatibility checks",
+            UiMessage::new("gui.ipc.guardSupplied"),
+        ));
     }
     if request.is_read_only() && expected.is_none() {
         return Ok(request);
     }
-    let info: DaemonInfo = serde_json::from_value(response_data(read_info()?)?)
-        .map_err(|error| format!("Cannot verify daemon compatibility: {error}"))?;
+    let info: DaemonInfo =
+        serde_json::from_value(response_data(read_info()?)?).map_err(|error| {
+            CommandError::ui(
+                format!("Cannot verify daemon compatibility: {error}"),
+                UiMessage::new("gui.ipc.compatibilityUnverified").param("error", error),
+            )
+        })?;
     if expected.is_some_and(|expected| expected != info.instance_id) {
-        return Err("The daemon changed. Review copied settings before saving".into());
+        return Err(CommandError::ui(
+            "The daemon changed. Review copied settings before saving",
+            UiMessage::new("gui.ipc.daemonChanged"),
+        ));
     }
     if request.is_read_only() {
         return Ok(request);
     }
     Ok(IpcRequest::Guarded {
-        guard: info.write_guard(env!("CARGO_PKG_VERSION"))?,
+        guard: info
+            .checked_write_guard(env!("CARGO_PKG_VERSION"))
+            .map_err(|error| CommandError::ui(error.to_string(), error.message))?,
         request: Box::new(request),
     })
 }
@@ -181,26 +211,35 @@ fn exchange(stream: &UnixStream, json: &str, finish: bool) -> Result<IpcResponse
 }
 
 pub fn request(method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
-    request_expected(method, params, None)
+    request_expected(method, params, None).map_err(|error| error.message)
 }
 
 pub fn request_expected(
     method: &str,
     params: serde_json::Value,
     expected: Option<&str>,
-) -> Result<serde_json::Value, String> {
-    let req: IpcRequest =
-        serde_json::from_value(serde_json::json!({ "method": method, "params": params }))
-            .map_err(|error| format!("Unsupported request: {error}"))?;
+) -> Result<serde_json::Value, crate::command_error::CommandError> {
+    let req: IpcRequest = serde_json::from_value(
+        serde_json::json!({ "method": method, "params": params }),
+    )
+    .map_err(|error| {
+        CommandError::ui(
+            format!("Unsupported request: {error}"),
+            UiMessage::new("gui.ipc.unsupportedRequest").param("error", error),
+        )
+    })?;
     if !req.is_read_only() && crate::service_operations::active() {
-        return Err(
-            "Wait for the service operation to finish before changing daemon settings.".into(),
-        );
+        return Err(CommandError::ui(
+            "Wait for the service operation to finish before changing daemon settings.",
+            UiMessage::new("gui.ipc.serviceBusy"),
+        ));
     }
     debug!("ipc -> {method}");
     match send_raw(req, expected)? {
         IpcResponse::Ok { data } => Ok(data),
-        IpcResponse::Error { message } => Err(message),
+        IpcResponse::Error { message, ui } => {
+            Err(crate::command_error::CommandError { message, ui })
+        }
     }
 }
 
@@ -245,26 +284,32 @@ fn poll_at(
         IpcResponse::Ok { data } => Some(
             serde_json::from_value(data).map_err(|e| format!("invalid daemon identity: {e}"))?,
         ),
-        IpcResponse::Error { message } if message.contains("unknown variant `GetDaemonInfo`") => {
+        IpcResponse::Error { message, .. }
+            if message.contains("unknown variant `GetDaemonInfo`") =>
+        {
             response_data(send("Ping")?)?;
             None
         }
-        IpcResponse::Error { message } => return Err(message),
+        IpcResponse::Error { message, .. } => return Err(message),
     };
     let devices = serde_json::from_value(response_data(send("ListDevices")?)?)
         .map_err(|e| format!("invalid device list: {e}"))?;
     let telemetry = serde_json::from_value(response_data(send("GetTelemetry")?)?)
         .map_err(|e| format!("invalid telemetry: {e}"))?;
     let write_error = match &daemon_info {
-        Some(info) => info.write_guard(env!("CARGO_PKG_VERSION")).err(),
-        None => Some("Changes are disabled: this daemon cannot report compatibility. Update both applications and restart the selected daemon cleanly.".into()),
+        Some(info) => info.checked_write_guard(env!("CARGO_PKG_VERSION")).err(),
+        None => Some(UiError::new(
+            UiMessage::new("gui.compatibility.unreported"),
+            "Changes are disabled: this daemon cannot report compatibility. Update both applications and restart the selected daemon cleanly.",
+        )),
     };
 
     Ok(PollResult {
         connected: true,
         socket_path: path.into(),
         daemon_info,
-        write_error,
+        write_error_ui: write_error.as_ref().map(|error| error.message.clone()),
+        write_error: write_error.map(|error| error.to_string()),
         devices,
         telemetry,
     })
@@ -273,7 +318,7 @@ fn poll_at(
 fn response_data(response: IpcResponse) -> Result<serde_json::Value, String> {
     match response {
         IpcResponse::Ok { data } => Ok(data),
-        IpcResponse::Error { message } => Err(message),
+        IpcResponse::Error { message, .. } => Err(message),
     }
 }
 

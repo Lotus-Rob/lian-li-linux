@@ -189,6 +189,8 @@ pub struct CatalogInstallStatus {
     pub template_id: String,
     pub finished: bool,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_ui: Option<crate::ui_message::UiMessage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -203,6 +205,8 @@ pub struct CatalogReviewStatus {
     pub finished: bool,
     pub review: Option<CatalogCleanupReview>,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_ui: Option<crate::ui_message::UiMessage>,
     #[serde(default)]
     pub removed: bool,
 }

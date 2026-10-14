@@ -2,6 +2,7 @@ use super::EventSender;
 
 use lianli_shared::ipc::IpcResponse;
 use lianli_shared::profile::DeviceProfile;
+use lianli_shared::ui_message::UiMessage;
 use tracing::info;
 
 use crate::ipc::{DaemonState, SharedState};
@@ -16,16 +17,23 @@ fn profiles_dir(state: &DaemonState) -> std::path::PathBuf {
         .join("profiles")
 }
 
-fn profile_path(state: &DaemonState, name: &str) -> Result<std::path::PathBuf, &'static str> {
+fn profile_path(state: &DaemonState, name: &str) -> Result<std::path::PathBuf, IpcResponse> {
     if name.is_empty()
         || name.len() > 250
         || name == "."
         || name == ".."
         || name.contains(['/', '\\', '\0'])
     {
-        return Err("Profile name must be a single filename, without path separators, and at most 250 bytes");
+        return Err(IpcResponse::error_ui("Profile name must be a single filename, without path separators, and at most 250 bytes", UiMessage::new("daemon.profiles.invalidName")));
     }
     Ok(profiles_dir(state).join(format!("{name}.json")))
+}
+
+fn profile_not_found(name: &str) -> IpcResponse {
+    IpcResponse::error_ui(
+        format!("profile '{name}' not found"),
+        UiMessage::new("daemon.profiles.notFound").param("name", name),
+    )
 }
 
 fn read_all_profiles(state: &DaemonState) -> Vec<DeviceProfile> {
@@ -59,15 +67,18 @@ pub fn save(state: &SharedState, tx: EventSender, name: String, device_id: Strin
         .unwrap_or_default();
     let config = match st.config.as_ref() {
         Some(c) => c,
-        None => return IpcResponse::error("no config loaded"),
+        None => return super::no_config_loaded(),
     };
     let profile = DeviceProfile::capture_from_config(config, &name, &device_id, &family);
     let path = match profile_path(&st, &name) {
         Ok(path) => path,
-        Err(error) => return IpcResponse::error(error),
+        Err(error) => return error,
     };
     if let Err(e) = write_json(&path, &profile) {
-        return IpcResponse::error(format!("failed to write profile: {e}"));
+        return IpcResponse::error_ui(
+            format!("failed to write profile: {e}"),
+            UiMessage::new("daemon.profiles.writeFailed").param("error", e),
+        );
     }
     drop(st);
     let _ = tx.send(DaemonEvent::IpcUpdate);
@@ -79,13 +90,16 @@ pub fn delete(state: &SharedState, tx: EventSender, name: String) -> IpcResponse
     let st = state.lock();
     let path = match profile_path(&st, &name) {
         Ok(path) => path,
-        Err(error) => return IpcResponse::error(error),
+        Err(error) => return error,
     };
     if !path.exists() {
-        return IpcResponse::error(format!("profile '{name}' not found"));
+        return profile_not_found(&name);
     }
     if let Err(e) = std::fs::remove_file(&path) {
-        return IpcResponse::error(format!("failed to delete profile: {e}"));
+        return IpcResponse::error_ui(
+            format!("failed to delete profile: {e}"),
+            UiMessage::new("daemon.profiles.deleteFailed").param("error", e),
+        );
     }
     drop(st);
     let _ = tx.send(DaemonEvent::IpcUpdate);
@@ -116,7 +130,7 @@ pub fn apply(state: &SharedState, tx: EventSender, name: String, device_id: Stri
         profiles.into_iter().find(|p| p.name == name)
     };
     let Some(mut profile) = profile else {
-        return IpcResponse::error(format!("profile '{name}' not found"));
+        return profile_not_found(&name);
     };
     profile.device_id = device_id.clone();
     let mut config = st.config.clone().unwrap_or_default();

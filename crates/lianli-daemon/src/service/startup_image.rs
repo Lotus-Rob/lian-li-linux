@@ -1,6 +1,7 @@
 use super::{runtime::ActiveTarget, ServiceManager};
 use anyhow::{ensure, Context, Result};
 use lianli_shared::startup_image::{StartupImageCapabilities, StartupImageState};
+use lianli_shared::ui_message::{UiError, UiMessage, UiText};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -13,6 +14,17 @@ fn journal_path(config: &std::path::Path) -> std::path::PathBuf {
 }
 
 pub(super) const RECOVERY_MESSAGE: &str = "Playback paused after an interrupted upload. Clear recovery in Installation Health or restart the daemon. Power-cycle the screen if it remains unresponsive.";
+
+pub(super) fn recovery_text() -> UiText {
+    UiText::new(
+        UiMessage::new("status.startupImage.recovery"),
+        RECOVERY_MESSAGE,
+    )
+}
+
+fn keyed(key: &str, english: &str) -> UiError {
+    UiError::new(UiMessage::new(key), english)
+}
 
 pub(super) fn clear_previous_recovery(config: &std::path::Path) -> Result<()> {
     match std::fs::remove_file(journal_path(config)) {
@@ -102,6 +114,7 @@ impl ServiceManager {
             {
                 status.startup_recovery_required = false;
                 status.error = None;
+                status.error_ui = None;
                 status.state = lianli_shared::ipc::MediaPreparationState::WaitingForDevice;
             }
         }
@@ -114,15 +127,17 @@ impl ServiceManager {
             .cached_usb_devices
             .iter()
             .find(|device| device.device_id == identity)
-            .context("LCD is no longer in the current USB inventory")?;
+            .context(keyed(
+                "status.startupImage.lcdNotInInventory",
+                "LCD is no longer in the current USB inventory",
+            ))?;
         if !matches!(lcd.pid, 0xa018 | 0xa019) || lcd.vid != 0x1cbe {
             return Ok(None);
         }
-        let location = self
-            .registry
-            .usb_locations
-            .get(identity)
-            .context("Flex LCD USB parent topology is unavailable")?;
+        let location = self.registry.usb_locations.get(identity).context(keyed(
+            "status.startupImage.flexTopologyUnavailable",
+            "Flex LCD USB parent topology is unavailable",
+        ))?;
         let mut candidates = self.registry.fan_device_info.iter().filter_map(|receiver| {
             if receiver.vid != 0x43a8
                 || !self.registry.fan_devices.contains_key(&receiver.device_id)
@@ -133,12 +148,16 @@ impl ServiceManager {
             let slot = flex_receiver_slot(lcd.pid, location, receiver.pid, receiver_location)?;
             Some((receiver.device_id.clone(), slot))
         });
-        let receiver = candidates.next().context(
+        let receiver = candidates.next().context(keyed(
+            "status.startupImage.connectFlexReceiver",
             "Connect the matching Flex LCD receiver on the same USB hub before uploading",
-        )?;
+        ))?;
         ensure!(
             candidates.next().is_none(),
-            "Flex receiver topology is ambiguous; startup upload was not started"
+            keyed(
+                "status.startupImage.flexReceiverAmbiguous",
+                "Flex receiver topology is ambiguous; startup upload was not started",
+            )
         );
         Ok(Some(receiver))
     }
@@ -209,19 +228,28 @@ impl ServiceManager {
             self.startup_image_job.is_none()
                 && self.display_switch.is_none()
                 && !self.lcd_group_recovery.busy(),
-            "Another LCD operation is running"
+            keyed(
+                "status.startupImage.busy",
+                "Another LCD operation is running"
+            )
         );
         ensure!(
             !self.startup_image_quarantine.contains(&identity),
-            RECOVERY_MESSAGE
+            keyed("status.startupImage.recovery", RECOVERY_MESSAGE)
         );
         ensure!(
             self.pixel_clean_sessions.is_empty() && self.pixel_clean_preparation.is_none(),
-            "Stop pixel cleaning before uploading a startup image"
+            keyed(
+                "status.startupImage.stopPixelCleaning",
+                "Stop pixel cleaning before uploading a startup image"
+            )
         );
         ensure!(
             !self.media_preparation.is_busy(),
-            "Wait for LCD media preparation to finish"
+            keyed(
+                "status.startupImage.waitForMedia",
+                "Wait for LCD media preparation to finish"
+            )
         );
         if let Some(mac) = identity
             .strip_prefix("wireless:")
@@ -234,13 +262,22 @@ impl ServiceManager {
         let mut targets = self
             .targets
             .try_lock_for(Duration::from_millis(100))
-            .context("LCD targets are busy")?;
+            .context(keyed(
+                "status.startupImage.targetsBusy",
+                "LCD targets are busy",
+            ))?;
         let index = targets.iter().find_map(|(index, target)| (target.device_identity == identity).then_some(*index))
-            .context("Configure a live image for this LCD in LCD settings before uploading its startup image")?;
+            .context(keyed(
+                "status.startupImage.configureLiveImage",
+                "Configure a live image for this LCD in LCD settings before uploading its startup image",
+            ))?;
         let screen = targets[&index].screen;
         ensure!(
             (screen.width, screen.height) == (caps.width, caps.height),
-            "LCD identity or dimensions changed; refresh devices"
+            keyed(
+                "status.startupImage.identityChanged",
+                "LCD identity or dimensions changed; refresh devices"
+            )
         );
         let (send, receive) = std::sync::mpsc::sync_channel::<ActiveTarget>(1);
         let worker_cancel = cancel.clone();
@@ -276,7 +313,10 @@ impl ServiceManager {
                     if let Some((receiver_id, slot)) = receiver {
                         fan_devices
                             .get(&receiver_id)
-                            .context("Flex receiver is no longer available")?
+                            .context(keyed(
+                                "status.startupImage.flexReceiverGone",
+                                "Flex receiver is no longer available",
+                            ))?
                             .set_lcd_startup_theme_enabled(
                                 slot,
                                 false,
@@ -303,7 +343,10 @@ impl ServiceManager {
         if let Err(error) = send.send(target) {
             targets.insert(index, error.0);
             let _ = worker.join();
-            anyhow::bail!("Startup image worker did not accept the target");
+            anyhow::bail!(keyed(
+                "status.startupImage.workerRejectedTarget",
+                "Startup image worker did not accept the target",
+            ));
         }
         self.startup_image_job = Some(StartupImageJob {
             id,
@@ -330,12 +373,18 @@ impl ServiceManager {
                 .devices()
                 .iter()
                 .any(|d| d.mac == mac && matches!(d.device_type, 10 | 11)),
-            "A bound HydroShift II Circle or Square is required"
+            keyed(
+                "status.startupImage.h2Required",
+                "A bound HydroShift II Circle or Square is required"
+            )
         );
         let mut targets = self
             .targets
             .try_lock_for(Duration::from_millis(100))
-            .context("LCD targets are busy")?;
+            .context(keyed(
+                "status.startupImage.targetsBusy",
+                "LCD targets are busy",
+            ))?;
         let mut matching = Vec::new();
         ensure!(
             !self
@@ -343,7 +392,10 @@ impl ServiceManager {
                 .cached_usb_devices
                 .iter()
                 .any(|d| d.vid == 0x1a86 && matches!(d.pid, 0xad20 | 0xad22)),
-            "Switch H2 from Desktop to LCD mode before uploading a startup image"
+            keyed(
+                "status.startupImage.switchH2ToLcd",
+                "Switch H2 from Desktop to LCD mode before uploading a startup image"
+            )
         );
         for (index, target) in targets.iter() {
             if !self.registry.cached_usb_devices.iter().any(|d| {
@@ -371,7 +423,10 @@ impl ServiceManager {
                 let result = (|| {
                     let caps =
                         lianli_shared::startup_image::capabilities(DeviceFamily::WirelessAio)
-                            .context("H2 wireless image capability is unavailable")?;
+                            .context(keyed(
+                                "status.startupImage.h2CapabilityUnavailable",
+                                "H2 wireless image capability is unavailable",
+                            ))?;
                     let image = lianli_media::startup_image::prepare(&jpeg, caps)?;
                     lianli_devices::startup_image::ensure_not_cancelled(&worker_cancel)?;
                     if let Some(target) = target.as_mut() {
@@ -386,7 +441,10 @@ impl ServiceManager {
                         lianli_devices::startup_image::ensure_not_cancelled(&worker_cancel)?;
                         ensure!(
                             sent_at.elapsed() < Duration::from_secs(3),
-                            "H2 did not confirm wireless display mode"
+                            keyed(
+                                "status.startupImage.h2NotConfirmed",
+                                "H2 did not confirm wireless display mode"
+                            )
                         );
                         std::thread::sleep(Duration::from_millis(50));
                     }
@@ -416,7 +474,10 @@ impl ServiceManager {
                 targets.insert(target.index, target);
             }
             let _ = worker.join();
-            anyhow::bail!("H2 wireless image worker did not accept the target");
+            anyhow::bail!(keyed(
+                "status.startupImage.h2WorkerRejectedTarget",
+                "H2 wireless image worker did not accept the target",
+            ));
         }
         self.startup_image_job = Some(StartupImageJob {
             id,
@@ -447,13 +508,14 @@ impl ServiceManager {
                     Err(_) if !outcome.recovery_required && job.cancel.load(Ordering::Acquire) => {
                         StartupImageState::Cancelled
                     }
-                    Err(error) => StartupImageState::Failed {
-                        message: if outcome.recovery_required {
-                            format!("{error:#}. {RECOVERY_MESSAGE}")
-                        } else {
-                            format!("{error:#}")
-                        },
-                    },
+                    Err(error) if outcome.recovery_required => {
+                        StartupImageState::failed(UiText::new(
+                            UiMessage::new("status.startupImage.failedWithRecovery")
+                                .param("error", format!("{error:#}")),
+                            format!("{error:#}. {RECOVERY_MESSAGE}"),
+                        ))
+                    }
+                    Err(error) => StartupImageState::failed(UiText::from_error(error)),
                 };
                 if let Some(mut target) = outcome.target {
                     if outcome.recovery_required && outcome.result.is_err() {
@@ -474,9 +536,10 @@ impl ServiceManager {
             }
             Err(_) => {
                 self.startup_image_quarantine.insert(job.identity.clone());
-                StartupImageState::Failed {
-                    message: format!("Startup upload worker failed. {RECOVERY_MESSAGE}"),
-                }
+                StartupImageState::failed(UiText::new(
+                    UiMessage::new("status.startupImage.workerFailed"),
+                    format!("Startup upload worker failed. {RECOVERY_MESSAGE}"),
+                ))
             }
         };
         if let Err(error) = crate::persistence::write_json(
@@ -485,7 +548,7 @@ impl ServiceManager {
         ) {
             tracing::warn!(%error, "Startup upload recovery journal retained; reconnect may be required after restart");
         }
-        if let StartupImageState::Failed { message } = &status {
+        if let StartupImageState::Failed { message, .. } = &status {
             tracing::warn!(device_id = %job.identity, error = %message, "Startup image upload failed");
         }
         self.finish_startup_status(job.id, status);
@@ -503,13 +566,17 @@ fn wireless_target_index(
 ) -> Result<Option<usize>> {
     let mut matching = None;
     for (index, linked_mac) in candidates {
-        let linked_mac = linked_mac.context(
+        let linked_mac = linked_mac.context(keyed(
+            "status.startupImage.h2IdentityPending",
             "H2 USB-to-wireless identity is not available yet. Wait for device telemetry and retry",
-        )?;
+        ))?;
         if linked_mac == mac {
             ensure!(
                 matching.is_none(),
-                "Multiple USB displays report the same H2 wireless identity"
+                keyed(
+                    "status.startupImage.h2IdentityDuplicate",
+                    "Multiple USB displays report the same H2 wireless identity"
+                )
             );
             matching = Some(index);
         }

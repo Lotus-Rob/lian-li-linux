@@ -85,7 +85,7 @@ pub fn prepare_media_asset(
     control.check()?;
     if cfg.media_type != MediaType::Custom {
         let dependencies = lianli_shared::media_dependencies::lcd_dependencies(cfg, user_templates)
-            .map_err(MediaError::InvalidConfig)?;
+            .map_err(|error| MediaError::InvalidConfig(error.to_string()))?;
         asset_access::validate_dependencies(&dependencies, &control)?;
     }
     let fps_cap = default_fps.min(screen.max_fps as f32).max(1.0);

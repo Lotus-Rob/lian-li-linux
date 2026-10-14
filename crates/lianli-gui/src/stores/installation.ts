@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/utils/backendText";
 import type { InstallationReport } from "@/types/installation";
 import { useDaemonStore } from "@/stores/daemon";
 import { tr } from "@/i18n";

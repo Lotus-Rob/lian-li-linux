@@ -9,6 +9,7 @@ import { useConfigStore } from "@/stores/config";
 import { useLcdStore, LCD_TEMPLATES_CHANGED_EVENT, type CatalogInstallStatus } from "@/stores/lcd";
 import { emit } from "@tauri-apps/api/event";
 import { boundedFetch } from "@/utils/boundedFetch";
+import { backendText } from "@/utils/backendText";
 import { useTranslate } from "@/i18n";
 
 const config = useConfigStore();
@@ -145,7 +146,7 @@ async function monitorInstall(initial: CatalogInstallStatus) {
       installState.value[status.template_id] = status.finished
         ? (status.error ? "error" : "installed") : "installing";
       if (status.finished) {
-        if (status.error) throw new Error(status.error);
+        if (status.error) throw new Error(backendText(status.error, status.error_ui));
         installProgress.value = t("editor.browser.installSaved", { id: status.template_id });
         await emit(LCD_TEMPLATES_CHANGED_EVENT);
         await config.load();

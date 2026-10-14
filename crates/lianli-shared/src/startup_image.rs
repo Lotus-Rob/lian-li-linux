@@ -37,8 +37,14 @@ pub fn capabilities(family: DeviceFamily) -> Option<StartupImageCapabilities> {
 pub enum StartupImageState {
     Pending,
     Transferring,
-    Transferred { response_received: bool },
-    Failed { message: String },
+    Transferred {
+        response_received: bool,
+    },
+    Failed {
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message_ui: Option<crate::ui_message::UiMessage>,
+    },
     Cancelled,
 }
 
@@ -50,6 +56,13 @@ pub struct StartupImageStatus {
 }
 
 impl StartupImageState {
+    pub fn failed(text: crate::ui_message::UiText) -> Self {
+        Self::Failed {
+            message: text.english,
+            message_ui: text.ui,
+        }
+    }
+
     pub fn is_pending(&self) -> bool {
         matches!(self, Self::Pending | Self::Transferring)
     }

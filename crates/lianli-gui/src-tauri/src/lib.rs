@@ -1,5 +1,6 @@
 //! Tauri command handlers + multi-window setup for the Lian Li Linux GUI.
 
+mod command_error;
 mod diagnostic_export;
 mod external_link;
 mod installation;
@@ -10,7 +11,9 @@ mod service_operations;
 mod session_worker;
 mod startup_image_input;
 
+use command_error::CommandError;
 use ipc::PollResult;
+use lianli_shared::ui_message::UiMessage;
 use serde_json::Value;
 use tauri::{Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
@@ -69,7 +72,7 @@ async fn ipc_request(
     method: String,
     params: Value,
     expected_instance: Option<String>,
-) -> Result<Value, String> {
+) -> Result<Value, command_error::CommandError> {
     // Delegate to the blocking socket client on a dedicated thread so the
     // async Tauri runtime is never blocked on socket I/O.
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -87,7 +90,8 @@ fn app_version() -> String {
 }
 
 #[tauri::command]
-async fn installation_health() -> Result<lianli_shared::installation::InstallationReport, String> {
+async fn installation_health(
+) -> Result<lianli_shared::installation::InstallationReport, CommandError> {
     tauri::async_runtime::spawn_blocking(installation::check)
         .await
         .map_err(|error| format!("Installation check failed: {error}"))?
@@ -97,12 +101,15 @@ async fn installation_health() -> Result<lianli_shared::installation::Installati
 async fn diagnostic_preview(
     window: WebviewWindow,
     input: diagnostic_export::Input,
-) -> Result<diagnostic_export::Preview, String> {
+) -> Result<diagnostic_export::Preview, CommandError> {
     if window.label() != "main" {
-        return Err("Open diagnostic export from the main window".into());
+        return Err(CommandError::ui(
+            "Open diagnostic export from the main window",
+            UiMessage::new("gui.diagnostics.previewMainWindow"),
+        ));
     }
     tauri::async_runtime::spawn_blocking(move || {
-        diagnostic_export::preview(input).map_err(|error| format!("{error:#}"))
+        diagnostic_export::preview(input).map_err(CommandError::from)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -113,12 +120,15 @@ async fn diagnostic_save(
     window: WebviewWindow,
     app: tauri::AppHandle,
     id: u64,
-) -> Result<bool, String> {
+) -> Result<bool, CommandError> {
     if window.label() != "main" {
-        return Err("Save diagnostic exports from the main window".into());
+        return Err(CommandError::ui(
+            "Save diagnostic exports from the main window",
+            UiMessage::new("gui.diagnostics.saveMainWindow"),
+        ));
     }
     tauri::async_runtime::spawn_blocking(move || {
-        diagnostic_export::save(&app, id).map_err(|error| format!("{error:#}"))
+        diagnostic_export::save(&app, id).map_err(CommandError::from)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -130,13 +140,16 @@ async fn diagnostic_preview_file(
     app: tauri::AppHandle,
     input: diagnostic_export::Input,
     title: Option<String>,
-) -> Result<Option<diagnostic_export::Preview>, String> {
+) -> Result<Option<diagnostic_export::Preview>, CommandError> {
     if window.label() != "main" {
-        return Err("Choose daemon logs from the main window".into());
+        return Err(CommandError::ui(
+            "Choose daemon logs from the main window",
+            UiMessage::new("gui.diagnostics.logsMainWindow"),
+        ));
     }
     let title = ui_text(title, "Choose saved daemon logs");
     tauri::async_runtime::spawn_blocking(move || {
-        diagnostic_export::preview_file(&app, input, &title).map_err(|error| format!("{error:#}"))
+        diagnostic_export::preview_file(&app, input, &title).map_err(CommandError::from)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -155,9 +168,9 @@ async fn managed_import_start(
     instance: String,
     lcds: Vec<lianli_shared::config::LcdConfig>,
     templates: Vec<lianli_shared::template::LcdTemplate>,
-) -> Result<String, String> {
+) -> Result<String, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
-        managed_import::start(&instance, lcds, templates).map_err(|error| format!("{error:#}"))
+        managed_import::start(&instance, lcds, templates).map_err(CommandError::from)
     })
     .await
     .map_err(|error| format!("Import submission worker failed: {error}"))?
@@ -174,14 +187,14 @@ async fn managed_import_status() -> Result<Option<lianli_control::media_import_j
 }
 
 #[tauri::command]
-async fn open_external(url: String) -> Result<(), String> {
+async fn open_external(url: String) -> Result<(), CommandError> {
     tauri::async_runtime::spawn_blocking(move || external_link::open(&url))
         .await
         .map_err(|error| format!("Link worker failed: {error}"))?
 }
 
 #[tauri::command]
-async fn media_preview(path: String) -> Result<tauri::ipc::Response, String> {
+async fn media_preview(path: String) -> Result<tauri::ipc::Response, CommandError> {
     tauri::async_runtime::spawn_blocking(move || media_preview::read(std::path::Path::new(&path)))
         .await
         .map_err(|error| format!("Preview worker failed: {error}"))?
@@ -192,7 +205,7 @@ async fn media_preview(path: String) -> Result<tauri::ipc::Response, String> {
 async fn service_action(
     app: tauri::AppHandle,
     request: lianli_shared::services::ServiceActionRequest,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let operation = service_operations::Operation::begin(app)?;
     tauri::async_runtime::spawn_blocking(move || operation.run(request))
         .await
@@ -203,9 +216,9 @@ async fn service_action(
 async fn managed_import_result(
     instance: String,
     id: String,
-) -> Result<lianli_control::media_import::PublishedSelection, String> {
+) -> Result<lianli_control::media_import::PublishedSelection, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
-        managed_import::result(&instance, &id).map_err(|error| format!("{error:#}"))
+        managed_import::result(&instance, &id).map_err(CommandError::from)
     })
     .await
     .map_err(|error| format!("Import result worker failed: {error}"))?
@@ -215,7 +228,7 @@ async fn managed_import_result(
 async fn service_change(
     app: tauri::AppHandle,
     request: lianli_shared::services::ServiceChangeRequest,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let operation = service_operations::Operation::begin(app)?;
     tauri::async_runtime::spawn_blocking(move || operation.run_change(request))
         .await
@@ -238,7 +251,7 @@ async fn container_setup_proposal(
 async fn container_setup(
     app: tauri::AppHandle,
     deployment: lianli_control::container_deployment::Deployment,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let operation = service_operations::Operation::begin(app)?;
     tauri::async_runtime::spawn_blocking(move || operation.run_setup(deployment))
         .await
@@ -293,11 +306,12 @@ async fn open_editor_window(
     app: tauri::AppHandle,
     template_id: Option<String>,
     title: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     if service_operations::active() {
-        return Err(
-            "Wait for the service operation to finish before opening the template editor.".into(),
-        );
+        return Err(CommandError::ui(
+            "Wait for the service operation to finish before opening the template editor.",
+            UiMessage::new("gui.service.editorBlocked"),
+        ));
     }
     let hash = match &template_id {
         Some(id) if !id.is_empty() => format!("#/editor?template={id}"),
@@ -309,7 +323,9 @@ async fn open_editor_window(
         return Ok(());
     }
     let title = ui_text(title, "Template Editor");
-    open_secondary_window(&app, "editor", &title, &hash, 1280, 800)
+    Ok(open_secondary_window(
+        &app, "editor", &title, &hash, 1280, 800,
+    )?)
 }
 
 /// Open (or focus) the template browser as a separate webview window.

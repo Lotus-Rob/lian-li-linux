@@ -8,6 +8,7 @@ use lianli_shared::ipc::IpcResponse;
 use lianli_shared::media::{MediaType, SensorDescriptor};
 use lianli_shared::screen::ScreenInfo;
 use lianli_shared::sensors::SensorInfo;
+use lianli_shared::ui_message::{UiError, UiMessage};
 use parking_lot::Mutex;
 use std::path::Path;
 use std::sync::Arc;
@@ -38,16 +39,25 @@ pub fn upload_startup_image(
             .and_then(|device| lianli_shared::startup_image::capabilities(device.family))
     };
     let Some(capabilities) = capabilities else {
-        return IpcResponse::error(
+        return IpcResponse::error_ui(
             "Startup image upload is not supported for this attached device",
+            UiMessage::new("daemon.startupImage.unsupported"),
         );
     };
     if encoded.len() > capabilities.max_jpeg_bytes.div_ceil(3) * 4 {
-        return IpcResponse::error("Startup image exceeds the device payload limit");
+        return IpcResponse::error_ui(
+            "Startup image exceeds the device payload limit",
+            UiMessage::new("daemon.startupImage.tooLarge"),
+        );
     }
     let jpeg = match base64::engine::general_purpose::STANDARD.decode(encoded) {
         Ok(jpeg) if !jpeg.is_empty() && jpeg.len() <= capabilities.max_jpeg_bytes => jpeg,
-        _ => return IpcResponse::error("Invalid or oversized startup JPEG"),
+        _ => {
+            return IpcResponse::error_ui(
+                "Invalid or oversized startup JPEG",
+                UiMessage::new("daemon.startupImage.invalidJpeg"),
+            )
+        }
     };
     let mut state = state.lock();
     if state
@@ -55,7 +65,10 @@ pub fn upload_startup_image(
         .as_ref()
         .is_some_and(|job| job.status.is_pending())
     {
-        return IpcResponse::error("Another startup image upload is still running");
+        return IpcResponse::error_ui(
+            "Another startup image upload is still running",
+            UiMessage::new("daemon.startupImage.alreadyRunning"),
+        );
     }
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let cancel = Arc::new(AtomicBool::new(false));
@@ -77,7 +90,10 @@ pub fn upload_startup_image(
     {
         state.startup_image = None;
         state.startup_image_cancel = None;
-        return IpcResponse::error("Daemon stopped; startup image was not queued");
+        return IpcResponse::error_ui(
+            "Daemon stopped; startup image was not queued",
+            UiMessage::new("daemon.startupImage.notQueued"),
+        );
     }
     IpcResponse::ok(serde_json::json!({ "id": id }))
 }
@@ -85,7 +101,10 @@ pub fn upload_startup_image(
 pub fn cancel_startup_image(state: &SharedState, id: u64) -> IpcResponse {
     let state = state.lock();
     if state.startup_image.as_ref().is_none_or(|job| job.id != id) {
-        return IpcResponse::error("Startup image job is no longer current");
+        return IpcResponse::error_ui(
+            "Startup image job is no longer current",
+            UiMessage::new("daemon.startupImage.jobNotCurrent"),
+        );
     }
     if let Some(cancel) = &state.startup_image_cancel {
         cancel.store(true, std::sync::atomic::Ordering::Release);
@@ -107,8 +126,9 @@ pub fn retry_desktop(
             && stream.state == lianli_shared::ipc::DesktopStreamState::Failed
     });
     if !failed {
-        return IpcResponse::error(
+        return IpcResponse::error_ui(
             "The selected desktop display is no longer failed. Refresh its status.",
+            UiMessage::new("daemon.desktop.notFailed"),
         );
     }
     match tx.send(DaemonEvent::RetryDesktopDisplay {
@@ -117,8 +137,18 @@ pub fn retry_desktop(
         product_id,
     }) {
         Ok(()) => IpcResponse::ok(serde_json::json!({"accepted": true})),
-        Err(_) => IpcResponse::error("The daemon is stopping. Retry was not queued"),
+        Err(_) => IpcResponse::error_ui(
+            "The daemon is stopping. Retry was not queued",
+            UiMessage::new("daemon.desktop.retryNotQueued"),
+        ),
     }
+}
+
+fn mode_switch_not_queued() -> IpcResponse {
+    IpcResponse::error_ui(
+        "The daemon is stopping. Mode switch was not queued",
+        UiMessage::new("daemon.displayMode.notQueued"),
+    )
 }
 
 pub fn switch_display_mode(state: &SharedState, tx: EventSender, device_id: String) -> IpcResponse {
@@ -132,14 +162,17 @@ pub fn switch_display_mode(state: &SharedState, tx: EventSender, device_id: Stri
     match family {
         Some(f) if f.is_desktop_mode() => {
             if pid == 0 {
-                return IpcResponse::error("device PID not available");
+                return IpcResponse::error_ui(
+                    "device PID not available",
+                    UiMessage::new("daemon.displayMode.pidUnavailable"),
+                );
             }
             tracing::info!("LCD mode switch requested for {device_id}");
             if tx
                 .send(DaemonEvent::DisplaySwitchToLcd { device_id, pid })
                 .is_err()
             {
-                return IpcResponse::error("The daemon is stopping. Mode switch was not queued");
+                return mode_switch_not_queued();
             }
             IpcResponse::ok(serde_json::json!({
                 "accepted": true,
@@ -149,15 +182,21 @@ pub fn switch_display_mode(state: &SharedState, tx: EventSender, device_id: Stri
         Some(f) if f.supports_display_mode_switch() => {
             tracing::info!("Desktop mode switch requested for {device_id}");
             if tx.send(DaemonEvent::DisplaySwitch { device_id }).is_err() {
-                return IpcResponse::error("The daemon is stopping. Mode switch was not queued");
+                return mode_switch_not_queued();
             }
             IpcResponse::ok(serde_json::json!({
                 "accepted": true,
                 "message": "Desktop mode switch queued. Wait for the device to reconnect."
             }))
         }
-        Some(_) => IpcResponse::error("device does not support display mode switching"),
-        None => IpcResponse::error(format!("device not found: {device_id}")),
+        Some(_) => IpcResponse::error_ui(
+            "device does not support display mode switching",
+            UiMessage::new("daemon.displayMode.unsupported"),
+        ),
+        None => IpcResponse::error_ui(
+            format!("device not found: {device_id}"),
+            UiMessage::new("daemon.request.deviceNotFound").param("device", &device_id),
+        ),
     }
 }
 
@@ -172,12 +211,15 @@ pub fn render_template_preview(
     let usage = match catalog_runtime.enter(|| {
         anyhow::ensure!(
             std::time::Instant::now() < deadline,
-            "Catalog review is busy. Retry this template preview shortly"
+            UiError::new(
+                UiMessage::new("daemon.preview.templateCatalogBusy"),
+                "Catalog review is busy. Retry this template preview shortly",
+            )
         );
         Ok(())
     }) {
         Ok(usage) => usage,
-        Err(error) => return IpcResponse::error(error.to_string()),
+        Err(error) => return super::outer_error(&error),
     };
     let dependencies = lianli_shared::media_dependencies::template_dependencies(&template);
     usage.record(&dependencies);
@@ -214,10 +256,16 @@ pub fn render_template_preview(
                         "jpeg_base64": super::server::base64_encode(&blank.data),
                     }))
                 }
-                Err(e) => IpcResponse::error(format!("preview render failed: {e}")),
+                Err(e) => IpcResponse::error_ui(
+                    format!("preview render failed: {e}"),
+                    UiMessage::new("daemon.preview.renderFailed").param("error", e),
+                ),
             }
         }
-        Err(e) => IpcResponse::error(format!("preview asset creation failed: {e}")),
+        Err(e) => IpcResponse::error_ui(
+            format!("preview asset creation failed: {e}"),
+            UiMessage::new("daemon.preview.assetFailed").param("error", e),
+        ),
     };
     usage.record(&dependencies);
     response
@@ -275,6 +323,13 @@ fn sensor_preview_asset(
     Ok(asset)
 }
 
+fn sensor_preview_failed(error: impl std::fmt::Display) -> IpcResponse {
+    IpcResponse::error_ui(
+        format!("Sensor preview failed: {error}"),
+        UiMessage::new("daemon.preview.sensorFailed").param("error", error),
+    )
+}
+
 pub fn render_sensor_preview(
     state: &SharedState,
     mut lcd: LcdConfig,
@@ -282,14 +337,19 @@ pub fn render_sensor_preview(
     height: u32,
 ) -> IpcResponse {
     if lcd.media_type != MediaType::Sensor {
-        return IpcResponse::error("Sensor preview requires a sensor gauge LCD entry");
+        return IpcResponse::error_ui(
+            "Sensor preview requires a sensor gauge LCD entry",
+            UiMessage::new("daemon.preview.sensorEntryRequired"),
+        );
     }
     if !(1..=SENSOR_PREVIEW_MAX_EDGE).contains(&width)
         || !(1..=SENSOR_PREVIEW_MAX_EDGE).contains(&height)
     {
-        return IpcResponse::error(format!(
-            "Sensor preview size must be between 1 and {SENSOR_PREVIEW_MAX_EDGE} pixels"
-        ));
+        return IpcResponse::error_ui(
+            format!("Sensor preview size must be between 1 and {SENSOR_PREVIEW_MAX_EDGE} pixels"),
+            UiMessage::new("daemon.preview.sensorSizeInvalid")
+                .param("max", SENSOR_PREVIEW_MAX_EDGE),
+        );
     }
     let (config_directory, catalog_runtime) = {
         let state = state.lock();
@@ -304,10 +364,13 @@ pub fn render_sensor_preview(
     };
     lcd.resolve_paths(&config_directory);
     let Some(descriptor) = lcd.sensor.clone() else {
-        return IpcResponse::error("Sensor preview requires sensor settings");
+        return IpcResponse::error_ui(
+            "Sensor preview requires sensor settings",
+            UiMessage::new("daemon.preview.sensorSettingsRequired"),
+        );
     };
     if let Err(error) = descriptor.validate() {
-        return IpcResponse::error(error.to_string());
+        return super::outer_error(&error);
     }
     let dependencies = lianli_shared::media_dependencies::stored_lcd_dependencies(&lcd);
     if let Err(error) = lianli_shared::media_dependencies::validate_dependency_paths(&dependencies)
@@ -318,12 +381,15 @@ pub fn render_sensor_preview(
     let usage = match catalog_runtime.enter(|| {
         anyhow::ensure!(
             Instant::now() < deadline,
-            "Catalog review is busy. Retry this sensor preview shortly"
+            UiError::new(
+                UiMessage::new("daemon.preview.sensorCatalogBusy"),
+                "Catalog review is busy. Retry this sensor preview shortly",
+            )
         );
         Ok(())
     }) {
         Ok(usage) => usage,
-        Err(error) => return IpcResponse::error(error.to_string()),
+        Err(error) => return super::outer_error(&error),
     };
     usage.record(&dependencies);
 
@@ -349,10 +415,13 @@ pub fn render_sensor_preview(
             Ok(Some(frame)) => IpcResponse::ok(serde_json::json!({
                 "jpeg_base64": super::server::base64_encode(&frame.data),
             })),
-            Ok(None) => IpcResponse::error("Sensor preview produced no frame"),
-            Err(error) => IpcResponse::error(format!("Sensor preview failed: {error}")),
+            Ok(None) => IpcResponse::error_ui(
+                "Sensor preview produced no frame",
+                UiMessage::new("daemon.preview.sensorNoFrame"),
+            ),
+            Err(error) => sensor_preview_failed(error),
         },
-        Err(error) => IpcResponse::error(format!("Sensor preview failed: {error}")),
+        Err(error) => sensor_preview_failed(error),
     };
     usage.record(&dependencies);
     response
@@ -378,7 +447,7 @@ mod tests {
                     .unwrap();
                 Ok(image::load_from_memory(&bytes).unwrap())
             }
-            IpcResponse::Error { message } => Err(message),
+            IpcResponse::Error { message, .. } => Err(message),
         }
     }
 
@@ -517,7 +586,7 @@ mod tests {
         drop(receiver);
         assert!(matches!(
             switch_display_mode(&state, sender.into(), "desktop-test".into()),
-            IpcResponse::Error { message } if message.contains("not queued")
+            IpcResponse::Error { message, .. } if message.contains("not queued")
         ));
     }
 }

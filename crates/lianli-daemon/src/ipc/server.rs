@@ -11,6 +11,7 @@ use lianli_shared::daemon::{DaemonInfo, DaemonMode, IPC_PROTOCOL_VERSION};
 use lianli_shared::ipc::{DeviceInfo, IpcRequest, IpcResponse, TelemetrySnapshot};
 use lianli_shared::rgb::RgbPreset;
 use lianli_shared::template::LcdTemplate;
+use lianli_shared::ui_message::UiMessage;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs;
@@ -61,7 +62,7 @@ pub struct DaemonState {
     pub user_templates: Vec<LcdTemplate>,
     pub rgb_presets: Vec<RgbPreset>,
     pub pixel_clean_states: Vec<PixelCleanState>,
-    pub pixel_clean_preparation: Option<(u64, bool, Option<String>)>,
+    pub pixel_clean_preparation: Option<(u64, bool, Option<lianli_shared::ui_message::UiText>)>,
 }
 
 pub fn build_info() -> lianli_shared::daemon::DaemonBuildInfo {
@@ -274,7 +275,10 @@ fn handle_connection(
         let request: IpcRequest = match serde_json::from_str(&line) {
             Ok(req) => req,
             Err(e) => {
-                let resp = IpcResponse::error(format!("invalid request: {e}"));
+                let resp = IpcResponse::error_ui(
+                    format!("invalid request: {e}"),
+                    UiMessage::new("daemon.request.invalid").param("error", e),
+                );
                 write_response(&mut writer, &resp)?;
                 continue;
             }
@@ -297,14 +301,14 @@ fn handle_connection(
                     let sender = super::EventSender::new(tx.clone(), permit);
                     let response = handle_request(request, &state, sender.clone());
                     if sender.delivery_failed() && matches!(response, IpcResponse::Ok { .. }) {
-                        IpcResponse::error("The daemon stopped before applying the request. Changes may be saved. Reconnect and check settings before retrying.")
+                        IpcResponse::error_ui("The daemon stopped before applying the request. Changes may be saved. Reconnect and check settings before retrying.", UiMessage::new("daemon.request.stoppedBeforeApply"))
                     } else {
                         response
                     }
                 }
-                Err(error) => IpcResponse::error(format!("{error:#}")),
+                Err(error) => IpcResponse::from_error(&error),
             },
-            Err(message) => IpcResponse::error(message),
+            Err(error) => IpcResponse::error_ui(error.to_string(), error.message),
         };
         write_response(&mut writer, &response)?;
     }
@@ -330,15 +334,20 @@ fn handle_request(
         .as_ref()
         .is_some_and(|job| job.status.is_pending())
     {
-        return IpcResponse::error(
+        return IpcResponse::error_ui(
             "Wait for the startup image upload to finish before changing LCD state",
+            UiMessage::new("daemon.lcd.startupUploadBusy"),
         );
     }
     match request {
-        IpcRequest::Guarded { .. } => IpcResponse::error("Request was not authorized"),
-        IpcRequest::StopService { .. } => {
-            IpcResponse::error("Service stop requires authenticated peer credentials")
-        }
+        IpcRequest::Guarded { .. } => IpcResponse::error_ui(
+            "Request was not authorized",
+            UiMessage::new("daemon.request.notAuthorized"),
+        ),
+        IpcRequest::StopService { .. } => IpcResponse::error_ui(
+            "Service stop requires authenticated peer credentials",
+            UiMessage::new("daemon.serviceStop.credentialsRequired"),
+        ),
         IpcRequest::Ping => super::system::ping(),
         IpcRequest::RetryOpenRgb => super::system::retry_openrgb(state, tx),
         IpcRequest::RetryMedia => super::system::retry_media(state, tx),
@@ -390,14 +399,14 @@ fn handle_request(
                 config_directory,
             }) {
                 Ok(report) => IpcResponse::ok(report),
-                Err(error) => IpcResponse::error(format!("{error:#}")),
+                Err(error) => IpcResponse::from_error(&error),
             }
         }
         IpcRequest::GetTelemetry => super::system::get_telemetry(state),
 
         IpcRequest::SetConfig { config } => {
             if let Some(error) = super::fan::validate_quantities(&config, &state.lock().devices) {
-                return IpcResponse::error(error);
+                return error;
             }
             if let Some(rgb_config) = &config.rgb {
                 if let Some(response) = super::rgb::validate_saved_config(state, rgb_config) {
@@ -408,7 +417,7 @@ fn handle_request(
             if let Some(error) =
                 super::config::validate_aio_modes(&config, state.config.as_ref(), &state.devices)
             {
-                return IpcResponse::error(error);
+                return error;
             }
             super::persist_and_notify(&mut state, &tx, "SetConfig", *config)
         }
@@ -485,7 +494,7 @@ fn handle_request(
                     .merge_lighting = Some(config);
                 super::persist_and_notify(&mut state, &tx, "SetMergeLightingConfig", app_config)
             } else {
-                IpcResponse::error("no config loaded")
+                super::no_config_loaded()
             }
         }
         IpcRequest::GetMergeLightingConfig => {
@@ -508,10 +517,16 @@ fn handle_request(
             request_id,
         } => {
             if brightness > 100 {
-                return IpcResponse::error("LCD brightness must be between 0 and 100");
+                return IpcResponse::error_ui(
+                    "LCD brightness must be between 0 and 100",
+                    UiMessage::new("daemon.lcd.brightnessOutOfRange"),
+                );
             }
             if request_id.as_ref().is_some_and(|id| id.len() > 128) {
-                return IpcResponse::error("LCD brightness request ID is too long");
+                return IpcResponse::error_ui(
+                    "LCD brightness request ID is too long",
+                    UiMessage::new("daemon.lcd.brightnessRequestIdTooLong"),
+                );
             }
             let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
             if tx
@@ -524,16 +539,17 @@ fn handle_request(
                 })
                 .is_err()
             {
-                return IpcResponse::error("daemon service not running");
+                return super::service_unavailable();
             }
             match reply_rx.recv_timeout(Duration::from_secs(4)) {
                 Ok(Ok(applied)) => IpcResponse::ok(serde_json::json!({
                     "accepted": true, "applied": applied
                 })),
                 Ok(Err(error)) => IpcResponse::error(error),
-                Err(error) => {
-                    IpcResponse::error(format!("LCD brightness delivery not confirmed: {error}"))
-                }
+                Err(error) => IpcResponse::error_ui(
+                    format!("LCD brightness delivery not confirmed: {error}"),
+                    UiMessage::new("daemon.lcd.brightnessUnconfirmed").param("error", error),
+                ),
             }
         }
         IpcRequest::StartPixelClean {
@@ -542,7 +558,10 @@ fn handle_request(
             preparation_id,
         } => {
             if duration_minutes == 0 {
-                return IpcResponse::error("Duration must be positive");
+                return IpcResponse::error_ui(
+                    "Duration must be positive",
+                    UiMessage::new("daemon.request.durationNotPositive"),
+                );
             }
             let duration_minutes = duration_minutes.clamp(1, lianli_shared::ipc::MAX_CLEAN_MINUTES);
             let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
@@ -556,14 +575,17 @@ fn handle_request(
                 })
                 .is_err()
             {
-                return IpcResponse::error("daemon service not running");
+                return super::service_unavailable();
             }
             match reply_rx.recv_timeout(Duration::from_secs(4)) {
                 Ok(Ok((session_id, started))) => IpcResponse::ok(
                     serde_json::json!({ "started": started, "session_id": session_id }),
                 ),
-                Ok(Err(err)) => IpcResponse::error(err),
-                Err(e) => IpcResponse::error(format!("timeout starting pixel cleaner: {e}")),
+                Ok(Err(err)) => IpcResponse::error_ui(err.to_string(), err.message),
+                Err(e) => IpcResponse::error_ui(
+                    format!("timeout starting pixel cleaner: {e}"),
+                    UiMessage::new("daemon.pixelClean.startTimeout").param("error", e),
+                ),
             }
         }
         IpcRequest::StopPixelClean {
@@ -571,7 +593,10 @@ fn handle_request(
             session_id,
         } => {
             if session_id.is_none() {
-                return IpcResponse::error("session_id is required");
+                return IpcResponse::error_ui(
+                    "session_id is required",
+                    UiMessage::new("daemon.pixelClean.sessionIdRequired"),
+                );
             }
             let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
             if tx
@@ -582,19 +607,28 @@ fn handle_request(
                 })
                 .is_err()
             {
-                return IpcResponse::error("daemon service not running");
+                return super::service_unavailable();
             }
             match reply_rx.recv_timeout(Duration::from_secs(5)) {
                 Ok(stopped) => IpcResponse::ok(serde_json::json!({ "stopped": stopped })),
-                Err(e) => IpcResponse::error(format!("timeout stopping pixel cleaner: {e}")),
+                Err(e) => IpcResponse::error_ui(
+                    format!("timeout stopping pixel cleaner: {e}"),
+                    UiMessage::new("daemon.pixelClean.stopTimeout").param("error", e),
+                ),
             }
         }
         IpcRequest::GetPixelCleanPreparation { session_id } => {
             match &state.lock().pixel_clean_preparation {
                 Some((id, ready, error)) if *id == session_id => {
-                    IpcResponse::ok(serde_json::json!({ "ready": ready, "error": error }))
+                    let (error, error_ui) = lianli_shared::ui_message::UiText::split(error.clone());
+                    IpcResponse::ok(
+                        serde_json::json!({ "ready": ready, "error": error, "error_ui": error_ui }),
+                    )
                 }
-                _ => IpcResponse::error("Unknown or expired pixel cleaner preparation"),
+                _ => IpcResponse::error_ui(
+                    "Unknown or expired pixel cleaner preparation",
+                    UiMessage::new("daemon.pixelClean.preparationExpired"),
+                ),
             }
         }
         IpcRequest::UploadStartupImage {
@@ -615,10 +649,10 @@ fn handle_request(
             if let Some(ref controller) = rgb.rgb_controller {
                 match controller.lock().ping(&device_id, zone) {
                     Ok(()) => IpcResponse::ok(serde_json::json!({ "pinged": true })),
-                    Err(e) => IpcResponse::error(format!("{e}")),
+                    Err(e) => super::outer_error(&e),
                 }
             } else {
-                IpcResponse::error("RGB controller not initialized")
+                super::rgb_controller_missing()
             }
         }
 
@@ -878,7 +912,9 @@ mod tests {
                         serde_json::json!({"accepted": true, "applied": applied})
                     );
                 }
-                (Err(expected), IpcResponse::Error { message }) => assert_eq!(message, expected),
+                (Err(expected), IpcResponse::Error { message, .. }) => {
+                    assert_eq!(message, expected)
+                }
                 result => panic!("unexpected brightness response: {result:?}"),
             }
             worker.join().unwrap();

@@ -2,6 +2,11 @@
 //! `GetTelemetry`.
 
 use lianli_shared::ipc::IpcResponse;
+use lianli_shared::ui_message::UiMessage;
+
+fn refused(english: &str, key: &str) -> IpcResponse {
+    IpcResponse::error_ui(english, UiMessage::new(key))
+}
 
 pub fn clear_startup_recovery(
     state: &super::SharedState,
@@ -15,11 +20,17 @@ pub fn clear_startup_recovery(
         .values()
         .any(|status| status.device_id == device_id && status.startup_recovery_required)
     {
-        return IpcResponse::error("This LCD has no startup recovery block. Refresh its status");
+        return refused(
+            "This LCD has no startup recovery block. Refresh its status",
+            "daemon.recovery.noStartupBlock",
+        );
     }
     match tx.send(crate::service::DaemonEvent::ClearStartupImageRecovery { device_id }) {
         Ok(()) => IpcResponse::ok(serde_json::json!(null)),
-        Err(_) => IpcResponse::error("The daemon stopped before accepting recovery clearance"),
+        Err(_) => refused(
+            "The daemon stopped before accepting recovery clearance",
+            "daemon.recovery.clearNotAccepted",
+        ),
     }
 }
 
@@ -33,15 +44,24 @@ pub fn retry_media(state: &super::SharedState, tx: super::EventSender) -> IpcRes
                 .as_ref()
                 .is_some_and(|runtime| runtime.stage == MediaRuntimeStage::Failed)
     }) {
-        return IpcResponse::error("No failed media is available to retry. Refresh its status");
+        return refused(
+            "No failed media is available to retry. Refresh its status",
+            "daemon.recovery.noFailedMedia",
+        );
     }
     if state.media_retry_pending {
-        return IpcResponse::error("A media retry is already queued");
+        return refused(
+            "A media retry is already queued",
+            "daemon.recovery.mediaRetryQueued",
+        );
     }
     state.media_retry_pending = true;
     if tx.send(crate::service::DaemonEvent::RetryMedia).is_err() {
         state.media_retry_pending = false;
-        return IpcResponse::error("The daemon stopped before accepting the media retry");
+        return refused(
+            "The daemon stopped before accepting the media retry",
+            "daemon.recovery.mediaRetryNotAccepted",
+        );
     }
     IpcResponse::ok(serde_json::json!(null))
 }
@@ -50,15 +70,24 @@ pub fn retry_openrgb(state: &super::SharedState, tx: super::EventSender) -> IpcR
     let mut state = state.lock();
     let status = &state.telemetry.openrgb_status;
     if !status.enabled || status.running || status.error.is_none() {
-        return IpcResponse::error("OpenRGB is not in a failed enabled state. Refresh its status");
+        return refused(
+            "OpenRGB is not in a failed enabled state. Refresh its status",
+            "daemon.recovery.openRgbNotFailed",
+        );
     }
     if state.openrgb_retry_pending {
-        return IpcResponse::error("An OpenRGB retry is already queued");
+        return refused(
+            "An OpenRGB retry is already queued",
+            "daemon.recovery.openRgbRetryQueued",
+        );
     }
     state.openrgb_retry_pending = true;
     if tx.send(crate::service::DaemonEvent::RetryOpenRgb).is_err() {
         state.openrgb_retry_pending = false;
-        return IpcResponse::error("The daemon stopped before accepting the OpenRGB retry");
+        return refused(
+            "The daemon stopped before accepting the OpenRGB retry",
+            "daemon.recovery.openRgbRetryNotAccepted",
+        );
     }
     IpcResponse::ok(serde_json::json!(null))
 }
@@ -197,8 +226,10 @@ mod tests {
                 device_id: "fixture".into(),
                 state: MediaPreparationState::Failed,
                 error: Some("Missing media".into()),
+                error_ui: None,
                 runtime: None,
                 last_playback_error: None,
+                last_playback_error_ui: None,
             },
         );
         assert!(matches!(
@@ -221,6 +252,7 @@ mod tests {
                 fps_limit: 30.0,
                 hardware_video_allowed: false,
                 fallback_reason: None,
+                fallback_reason_ui: None,
                 encoder: None,
                 h264_transfer_started: None,
             });

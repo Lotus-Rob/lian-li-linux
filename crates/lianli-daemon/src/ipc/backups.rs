@@ -2,6 +2,7 @@ use super::SharedState;
 use crate::state_backups::{self, Locations};
 use lianli_shared::backups::BackupTarget;
 use lianli_shared::ipc::IpcResponse;
+use lianli_shared::ui_message::{UiError, UiMessage};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -35,7 +36,10 @@ pub fn run(state: &SharedState, operation: Operation, tx: super::EventSender) ->
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
     {
-        return IpcResponse::error("A backup operation is already running. Try again shortly.");
+        return IpcResponse::error_ui(
+            "A backup operation is already running. Try again shortly.",
+            UiMessage::new("daemon.backups.alreadyRunning"),
+        );
     }
     let running = Running;
     let locations = {
@@ -54,7 +58,7 @@ pub fn run(state: &SharedState, operation: Operation, tx: super::EventSender) ->
             let result = match operation {
                 Operation::Restore { target, sha256 } => state_backups::restore(&locations, target, &sha256)
                     .and_then(|()| {
-                        tx.send(crate::service::DaemonEvent::IpcUpdate).map_err(|_| anyhow::anyhow!("Backup was restored on disk, but the daemon stopped before reload. Reconnect and review settings"))?;
+                        tx.send(crate::service::DaemonEvent::IpcUpdate).map_err(|_| UiError::new(UiMessage::new("daemon.backups.reloadNotConfirmed"), "Backup was restored on disk, but the daemon stopped before reload. Reconnect and review settings"))?;
                         Ok(IpcResponse::ok(serde_json::json!(null)))
                     }),
                 Operation::Preview { target, preserved } => {
@@ -68,11 +72,14 @@ pub fn run(state: &SharedState, operation: Operation, tx: super::EventSender) ->
             };
             drop(tx);
             let _ = sender
-                .send(result.unwrap_or_else(|error| IpcResponse::error(format!("{error:#}"))));
+                .send(result.unwrap_or_else(|error| IpcResponse::from_error(&error)));
         })
     {
-        return IpcResponse::error(format!("Could not start backup worker: {error}"));
+        return IpcResponse::error_ui(
+            format!("Could not start backup worker: {error}"),
+            UiMessage::new("daemon.backups.workerStartFailed").param("error", error),
+        );
     }
     // A stalled operation retains its worker and write permit after the IPC deadline.
-    receiver.recv_timeout(Duration::from_secs(3)).unwrap_or_else(|_| IpcResponse::error("Backup operation did not finish within three seconds and may still complete. Check state storage and reconnect to review settings before retrying"))
+    receiver.recv_timeout(Duration::from_secs(3)).unwrap_or_else(|_| IpcResponse::error_ui("Backup operation did not finish within three seconds and may still complete. Check state storage and reconnect to review settings before retrying", UiMessage::new("daemon.backups.unconfirmed")))
 }

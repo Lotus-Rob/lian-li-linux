@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use lianli_shared::rgb::{
     RgbEffect, RgbMode, RgbPlaybackTiming, RgbRenderFamily, RgbRenderProfile, RgbZoneInfo,
 };
+use lianli_shared::ui_message::UiMessage;
 use lianli_transport::usb::{RusbBulk, EP_IN, LCD_WRITE_TIMEOUT, SHUTTING_DOWN};
 use lianli_transport::TransportError;
 use lianli_transport::UsbContext;
@@ -399,6 +400,7 @@ impl RgbDevice for Hs2OledLedController {
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
         vec![RgbZoneInfo {
             name: "Ring".to_string(),
+            name_ui: Some(UiMessage::new("devices.zone.ring")),
             led_count: RGB_LED_COUNT as u16,
         }]
     }

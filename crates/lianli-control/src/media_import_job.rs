@@ -1,6 +1,8 @@
 use crate::media_import::PublishedSelection;
 use crate::media_publication::Directory;
+use crate::ui_text::text;
 use anyhow::{ensure, Context, Result};
+use lianli_shared::ui_message::UiMessage;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -18,6 +20,8 @@ pub struct Status {
     pub active: bool,
     pub result: Option<PublishedSelection>,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_ui: Option<UiMessage>,
 }
 
 struct Lock(File);
@@ -119,6 +123,7 @@ impl Job {
                 active: true,
                 result: None,
                 error: None,
+                error_ui: None,
             },
         )?;
         Ok(job)
@@ -131,14 +136,17 @@ impl Job {
             active: false,
             result: None,
             error: None,
+            error_ui: None,
         };
         match result {
             Ok(result) if result.import_id == self.id => status.result = Some(result),
             Ok(_) => {
-                status.error = Some(
-                    "Import helper returned a different identity. Inspect storage before retrying"
-                        .into(),
-                )
+                let mismatch = text(
+                    "control.mediaImport.identityMismatch",
+                    "Import helper returned a different identity. Inspect storage before retrying",
+                );
+                status.error = Some(mismatch.english);
+                status.error_ui = mismatch.ui;
             }
             Err(error) => status.error = Some(format!("{error:#}").chars().take(2048).collect()),
         }
@@ -203,12 +211,18 @@ pub fn read(path: &Path) -> Result<Option<Status>> {
     if inactive {
         if status.active {
             status.active = false;
-            status.error = Some("Import worker stopped. Files may have been copied. Inspect storage before retrying.".into());
+            let stopped = text(
+                "control.mediaImport.workerStopped",
+                "Import worker stopped. Files may have been copied. Inspect storage before retrying.",
+            );
+            status.error = Some(stopped.english);
+            status.error_ui = stopped.ui;
         }
     } else {
         status.active = true;
         status.result = None;
         status.error = None;
+        status.error_ui = None;
     }
     Ok(Some(status))
 }

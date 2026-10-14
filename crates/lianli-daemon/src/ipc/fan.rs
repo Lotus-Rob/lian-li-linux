@@ -3,13 +3,14 @@
 use super::EventSender;
 
 use lianli_shared::ipc::IpcResponse;
+use lianli_shared::ui_message::UiMessage;
 
 use crate::service::DaemonEvent;
 
 pub fn validate_quantities(
     config: &lianli_shared::config::AppConfig,
     devices: &[lianli_shared::ipc::DeviceInfo],
-) -> Option<String> {
+) -> Option<IpcResponse> {
     for (serial, controller) in &config.ene6k77 {
         let max = devices
             .iter()
@@ -28,8 +29,11 @@ pub fn validate_quantities(
             .iter()
             .any(|(&port, &quantity)| port >= 4 || quantity > max)
         {
-            return Some(format!(
-                "Invalid ENE fan quantities for {serial}: ports must be 0–3 and quantities 0–{max}"
+            return Some(IpcResponse::error_ui(
+                format!("Invalid ENE fan quantities for {serial}: ports must be 0–3 and quantities 0–{max}"),
+                UiMessage::new("daemon.fan.invalidQuantities")
+                    .param("serial", serial)
+                    .param("max", max),
             ));
         }
     }
@@ -46,12 +50,15 @@ pub fn set_ene6k77_fan_quantity(tx: EventSender, device_id: String, quantity: u8
         })
         .is_err()
     {
-        return IpcResponse::error("Daemon service is not running");
+        return IpcResponse::error_ui(
+            "Daemon service is not running",
+            UiMessage::new("daemon.request.serviceNotRunning"),
+        );
     }
     match received.recv_timeout(std::time::Duration::from_secs(3)) {
         Ok(Ok(())) => IpcResponse::ok(serde_json::json!({"message": "Fan quantity saved and applied."})),
-        Ok(Err(error)) => IpcResponse::error(error),
-        Err(_) => IpcResponse::error("Fan quantity update is unconfirmed and may still complete. Refresh device state before retrying."),
+        Ok(Err(error)) => IpcResponse::from_error(&error),
+        Err(_) => IpcResponse::error_ui("Fan quantity update is unconfirmed and may still complete. Refresh device state before retrying.", UiMessage::new("daemon.fan.quantityUnconfirmed")),
     }
 }
 
@@ -63,7 +70,7 @@ mod tests {
 
     #[test]
     fn quantity_response_reports_service_result_and_disconnection() {
-        for result in [Ok(()), Err("USB write failed".to_string())] {
+        for result in [Ok(()), Err(anyhow::anyhow!("USB write failed"))] {
             let (tx, rx) = mpsc::channel();
             let expected_ok = result.is_ok();
             let worker = std::thread::spawn(move || {

@@ -4,6 +4,7 @@ use super::EventSender;
 
 use super::SharedState;
 use lianli_shared::ipc::{IpcResponse, WirelessOperationStatus};
+use lianli_shared::ui_message::{ui_message_of, UiError, UiMessage};
 use std::collections::BTreeMap;
 
 use crate::service::DaemonEvent;
@@ -45,14 +46,20 @@ impl WirelessOperations {
             let completed = self.entries.iter().find_map(|(id, status)| {
                 (!matches!(status, WirelessOperationStatus::Pending)).then(|| id.clone())
             });
-            let id =
-                completed.ok_or_else(|| anyhow::anyhow!("wireless operation queue is full"))?;
+            let id = completed.ok_or_else(|| {
+                UiError::new(
+                    UiMessage::new("daemon.wireless.queueFull"),
+                    "wireless operation queue is full",
+                )
+            })?;
             self.entries.remove(&id);
         }
-        self.next_id = self
-            .next_id
-            .checked_add(1)
-            .ok_or_else(|| anyhow::anyhow!("wireless operation IDs exhausted"))?;
+        self.next_id = self.next_id.checked_add(1).ok_or_else(|| {
+            UiError::new(
+                UiMessage::new("daemon.wireless.idsExhausted"),
+                "wireless operation IDs exhausted",
+            )
+        })?;
         let id = format!("{}-{}", self.session, self.next_id);
         self.entries
             .insert(id.clone(), WirelessOperationStatus::Pending);
@@ -65,6 +72,7 @@ impl WirelessOperations {
                 Ok(()) => WirelessOperationStatus::Succeeded,
                 Err(error) => WirelessOperationStatus::Failed {
                     message: format!("{error:#}"),
+                    message_ui: ui_message_of(&error),
                 },
             };
         }
@@ -74,8 +82,32 @@ impl WirelessOperations {
 pub fn operation(state: &SharedState, id: String) -> IpcResponse {
     match state.lock().wireless_operations.entries.get(&id) {
         Some(status) => IpcResponse::ok(status),
-        None => IpcResponse::error("wireless operation not found or expired"),
+        None => IpcResponse::error_ui(
+            "wireless operation not found or expired",
+            UiMessage::new("daemon.wireless.operationNotFound"),
+        ),
     }
+}
+
+pub(crate) fn invalid_mac() -> UiError {
+    UiError::new(
+        UiMessage::new("daemon.wireless.invalidMac"),
+        "invalid wireless MAC address",
+    )
+}
+
+fn invalid_device_id() -> IpcResponse {
+    IpcResponse::error_ui(
+        "invalid device_id format",
+        UiMessage::new("daemon.wireless.invalidDeviceId"),
+    )
+}
+
+fn queue_disconnected() -> IpcResponse {
+    IpcResponse::error_ui(
+        "wireless command queue is disconnected",
+        UiMessage::new("daemon.wireless.queueDisconnected"),
+    )
 }
 
 pub fn bind(state: &SharedState, tx: EventSender, mac: String) -> IpcResponse {
@@ -88,12 +120,12 @@ pub fn unbind(state: &SharedState, tx: EventSender, mac: String) -> IpcResponse 
 
 fn queue_binding(state: &SharedState, tx: EventSender, mac: String, bind: bool) -> IpcResponse {
     if parse_mac(&format!("wireless:{mac}")).is_none() {
-        return IpcResponse::error("invalid wireless MAC address");
+        return IpcResponse::from_error(&invalid_mac().into());
     }
     let mut state = state.lock();
     let operation_id = match state.wireless_operations.reserve() {
         Ok(id) => id,
-        Err(error) => return IpcResponse::error(error.to_string()),
+        Err(error) => return IpcResponse::from_error(&error),
     };
     let event = if bind {
         DaemonEvent::Bind {
@@ -108,7 +140,7 @@ fn queue_binding(state: &SharedState, tx: EventSender, mac: String, bind: bool) 
     };
     if tx.send(event).is_err() {
         state.wireless_operations.entries.remove(&operation_id);
-        return IpcResponse::error("wireless command queue is disconnected");
+        return queue_disconnected();
     }
     IpcResponse::ok(
         serde_json::json!({ "operation_id": operation_id, "message": "Wireless command queued." }),
@@ -117,37 +149,37 @@ fn queue_binding(state: &SharedState, tx: EventSender, mac: String, bind: bool) 
 
 pub fn reboot_lcd(tx: EventSender, device_id: String) -> IpcResponse {
     let Some(mac) = parse_mac(&device_id) else {
-        return IpcResponse::error("invalid device_id format");
+        return invalid_device_id();
     };
     if tx.send(DaemonEvent::RebootWirelessLcd { mac }).is_err() {
-        return IpcResponse::error("wireless command queue is disconnected");
+        return queue_disconnected();
     }
     IpcResponse::ok(serde_json::json!({"message": "LCD reboot queued."}))
 }
 
 pub fn disable_lc217_wifi(tx: EventSender, device_id: String, disable: bool) -> IpcResponse {
     let Some(mac) = parse_mac(&device_id) else {
-        return IpcResponse::error("invalid device_id format");
+        return invalid_device_id();
     };
     if tx
         .send(DaemonEvent::DisableLc217Wifi { mac, disable })
         .is_err()
     {
-        return IpcResponse::error("wireless command queue is disconnected");
+        return queue_disconnected();
     }
     IpcResponse::ok(serde_json::json!({"message": "LC217 wifi toggle queued."}))
 }
 
 pub fn bind_all(tx: EventSender) -> IpcResponse {
     if tx.send(DaemonEvent::BindAll).is_err() {
-        return IpcResponse::error("wireless command queue is disconnected");
+        return queue_disconnected();
     }
     IpcResponse::ok(serde_json::json!({"message": "Bind all queued."}))
 }
 
 pub fn unbind_all(tx: EventSender) -> IpcResponse {
     if tx.send(DaemonEvent::UnbindAll).is_err() {
-        return IpcResponse::error("wireless command queue is disconnected");
+        return queue_disconnected();
     }
     IpcResponse::ok(serde_json::json!({"message": "Unbind all queued."}))
 }
@@ -161,7 +193,10 @@ pub fn get_channel(state: &std::sync::Arc<parking_lot::Mutex<super::DaemonState>
     {
         IpcResponse::ok(serde_json::json!({"channel": dev.serial}))
     } else {
-        IpcResponse::error("no wireless device found")
+        IpcResponse::error_ui(
+            "no wireless device found",
+            UiMessage::new("daemon.wireless.noDevice"),
+        )
     }
 }
 

@@ -23,6 +23,7 @@ impl RgbDevice for CountedFan {
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
         vec![RgbZoneInfo {
             name: "Fans".into(),
+            name_ui: None,
             led_count: self.count.load(std::sync::atomic::Ordering::Relaxed),
         }]
     }
@@ -122,6 +123,7 @@ impl RgbDevice for Screen {
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
         vec![RgbZoneInfo {
             name: "ring".into(),
+            name_ui: None,
             led_count: 60,
         }]
     }
@@ -256,6 +258,7 @@ impl RgbDevice for SharedPort {
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
         vec![RgbZoneInfo {
             name: "fan".into(),
+            name_ui: None,
             led_count: 1,
         }]
     }
@@ -362,6 +365,7 @@ impl RgbDevice for UnavailableDevice {
     fn zone_info(&self) -> Vec<RgbZoneInfo> {
         vec![RgbZoneInfo {
             name: "zone".into(),
+            name_ui: None,
             led_count: 1,
         }]
     }

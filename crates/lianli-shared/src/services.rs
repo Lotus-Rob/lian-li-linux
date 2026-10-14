@@ -1,4 +1,5 @@
 use crate::installation::InstallationContext;
+use crate::ui_message::UiMessage;
 use serde::{Deserialize, Serialize};
 
 pub const USER_UNIT: &str = "lianli-daemon.service";
@@ -7,8 +8,14 @@ pub const SYSTEM_UNIT: &str = "lianli-daemon-system.service";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ServiceProbe<T> {
-    Known { value: T },
-    Unavailable { reason: String },
+    Known {
+        value: T,
+    },
+    Unavailable {
+        reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason_ui: Option<UiMessage>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,6 +137,8 @@ pub enum ServiceChangeRequest {
 pub struct ServiceOperationStatus {
     pub active: bool,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_ui: Option<UiMessage>,
     pub success: Option<bool>,
 }
 

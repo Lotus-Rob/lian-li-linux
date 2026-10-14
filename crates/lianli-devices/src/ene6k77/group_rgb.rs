@@ -6,6 +6,7 @@ use lianli_shared::rgb::{
     RgbDeviceConfig, RgbDirection, RgbEffect, RgbEffectParameters, RgbMode, RgbRegionParameters,
     RgbScope, RgbZoneInfo,
 };
+use lianli_shared::ui_message::UiMessage;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::thread;
@@ -241,6 +242,7 @@ impl RgbDevice for Ene6k77GroupDevice {
         (0..fans)
             .map(|fan| RgbZoneInfo {
                 name: format!("Fan {}", fan + 1),
+                name_ui: Some(UiMessage::new("devices.zone.fan").param("number", fan + 1)),
                 led_count: leds_per_fan,
             })
             .collect()

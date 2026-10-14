@@ -1,5 +1,6 @@
 use crate::reservation::{HardwareReservation, ServiceOperationLock};
 use crate::services::Route;
+use crate::ui_text::keyed;
 use anyhow::{ensure, Context, Result};
 use lianli_shared::installation::InstallationContext;
 use lianli_shared::services::{ServiceScope, ServiceSelection};
@@ -117,8 +118,12 @@ impl Record {
 
 pub fn inspect(context: &InstallationContext) -> Result<Option<ServiceSelection>> {
     let record = inspect_record(context)?;
-    ensure!(record.as_ref().is_none_or(|record| record.operation.is_none()),
-        "Daemon startup is paused for an unfinished service switch. Recover the switch before starting either mode");
+    ensure!(
+        record
+            .as_ref()
+            .is_none_or(|record| record.operation.is_none()),
+        keyed("control.route.startupPaused", "Daemon startup is paused for an unfinished service switch. Recover the switch before starting either mode")
+    );
     Ok(record.and_then(|record| record.selection))
 }
 

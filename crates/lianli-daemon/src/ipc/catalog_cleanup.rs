@@ -5,6 +5,7 @@ use lianli_shared::ipc::IpcResponse;
 use lianli_shared::template::catalog::{
     self, CatalogCleanupReview, CatalogReviewStatus, CatalogStorageEntry,
 };
+use lianli_shared::ui_message::{UiError, UiMessage, UiText};
 use parking_lot::Mutex;
 use std::path::Path;
 use std::sync::{
@@ -15,10 +16,32 @@ use std::sync::{
 static NEXT_REVIEW: AtomicU64 = AtomicU64::new(1);
 type Job = Arc<Mutex<Option<CatalogReviewStatus>>>;
 
+fn keyed(key: &str, english: &str) -> UiError {
+    UiError::new(UiMessage::new(key), english)
+}
+
+fn keyed_response(key: &str, english: &str) -> IpcResponse {
+    IpcResponse::error_ui(english, UiMessage::new(key))
+}
+
+fn start_failed(key: &str, prefix: &str, error: &std::io::Error) -> UiError {
+    UiError::new(
+        UiMessage::new(key).param("error", error),
+        format!("{prefix}: {error}"),
+    )
+}
+
+fn record_error(status: &mut CatalogReviewStatus, error: Option<&anyhow::Error>) {
+    let (english, ui) = UiText::split(error.map(|error| UiText::from_error(error).truncated(2048)));
+    status.error = english;
+    status.error_ui = ui;
+}
+
 fn reserve(job: &Job, instance: &str) -> Result<CatalogReviewStatus, IpcResponse> {
     let mut slot = job.lock();
     if slot.as_ref().is_some_and(|status| !status.finished) {
-        return Err(IpcResponse::error(
+        return Err(keyed_response(
+            "status.catalog.reviewRunning",
             "A media content review is already running. Wait before reviewing another directory",
         ));
     }
@@ -27,6 +50,7 @@ fn reserve(job: &Job, instance: &str) -> Result<CatalogReviewStatus, IpcResponse
         finished: false,
         review: None,
         error: None,
+        error_ui: None,
         removed: false,
     };
     *slot = Some(status.clone());
@@ -38,7 +62,7 @@ fn finish(job: &Job, result: anyhow::Result<CatalogCleanupReview>) {
         status.finished = true;
         match result {
             Ok(review) => status.review = Some(review),
-            Err(error) => status.error = Some(format!("{error:#}").chars().take(2048).collect()),
+            Err(error) => record_error(status, Some(&error)),
         }
     }
 }
@@ -77,7 +101,10 @@ fn review(
 
 pub fn start(state: &SharedState, directory: String, managed: bool) -> IpcResponse {
     if directory.is_empty() || directory.len() > 160 || directory.contains(['/', '\\', '\0']) {
-        return IpcResponse::error("Select a single media directory name");
+        return keyed_response(
+            "status.catalog.selectDirectory",
+            "Select a single media directory name",
+        );
     }
     let (job, instance, locations, runtime) = {
         let state = state.lock();
@@ -109,18 +136,23 @@ pub fn start(state: &SharedState, directory: String, managed: bool) -> IpcRespon
                 review(&locations, &runtime, &directory, managed)
             }))
             .unwrap_or_else(|_| {
-                Err(anyhow::anyhow!(
-                    "Media content review worker stopped unexpectedly"
-                ))
+                Err(keyed(
+                    "status.catalog.reviewWorkerStopped",
+                    "Media content review worker stopped unexpectedly",
+                )
+                .into())
             });
             finish(&worker_job, result);
         })
     {
-        finish(
-            &job,
-            Err(anyhow::anyhow!("Could not start media review: {error}")),
-        );
-        return IpcResponse::error(format!("Could not start media review: {error}"));
+        let error = anyhow::Error::from(start_failed(
+            "status.catalog.reviewStartFailed",
+            "Could not start media review",
+            &error,
+        ));
+        let response = IpcResponse::from_error(&error);
+        finish(&job, Err(error));
+        return response;
     }
     IpcResponse::ok(&initial)
 }
@@ -137,7 +169,8 @@ pub fn status(state: &SharedState, operation_id: &str, managed: bool) -> IpcResp
     let snapshot = job.lock().clone();
     match snapshot {
         Some(status) if status.operation_id == operation_id => IpcResponse::ok(&status),
-        _ => IpcResponse::error(
+        _ => keyed_response(
+            "status.catalog.reviewReplaced",
             "Media review was replaced or the daemon restarted. Review the directory again",
         ),
     }
@@ -168,7 +201,10 @@ fn remove_reviewed(
                 && references.runtime_references_checked
                 && references.saved_reference_count == 0
                 && !references.runtime_referenced,
-            "Media assets are referenced. Preserve them and review again after removing references"
+            keyed(
+                "status.catalog.assetsReferenced",
+                "Media assets are referenced. Preserve them and review again after removing references"
+            )
         );
         Ok(())
     };
@@ -198,14 +234,19 @@ fn consume_review(
         .as_mut()
         .filter(|status| status.operation_id == operation_id && status.finished)
         .ok_or_else(|| {
-            anyhow::anyhow!("Media review is running, replaced or missing. Review again")
+            keyed(
+                "status.catalog.reviewMissing",
+                "Media review is running, replaced or missing. Review again",
+            )
         })?;
-    let review = status
-        .review
-        .take()
-        .ok_or_else(|| anyhow::anyhow!("Review media files again before removal"))?;
+    let review = status.review.take().ok_or_else(|| {
+        keyed(
+            "status.catalog.reviewAgain",
+            "Review media files again before removal",
+        )
+    })?;
     status.finished = false;
-    status.error = None;
+    record_error(status, None);
     status.removed = false;
     Ok((status.clone(), review))
 }
@@ -234,7 +275,7 @@ pub fn remove(
     };
     let (initial, review) = match consume_review(&job, operation_id) {
         Ok(review) => review,
-        Err(error) => return IpcResponse::error(error.to_string()),
+        Err(error) => return IpcResponse::from_error(&error),
     };
     let worker_job = job.clone();
     // Retain the exclusive write permit until filesystem work ends, even after IPC disconnects.
@@ -246,25 +287,28 @@ pub fn remove(
                 remove_reviewed(&locations, &runtime, &review, managed)
             }))
             .unwrap_or_else(|_| {
-                Err(anyhow::anyhow!(
-                    "Media removal worker stopped unexpectedly. Inspect remaining files"
-                ))
+                Err(keyed(
+                    "status.catalog.removalWorkerStopped",
+                    "Media removal worker stopped unexpectedly. Inspect remaining files",
+                )
+                .into())
             });
             let mut slot = worker_job.lock();
             if let Some(status) = slot.as_mut() {
                 status.finished = true;
                 status.removed = result.is_ok();
-                status.error = result
-                    .err()
-                    .map(|error| format!("{error:#}").chars().take(2048).collect());
+                record_error(status, result.as_ref().err());
             }
         })
     {
-        finish(
-            &job,
-            Err(anyhow::anyhow!("Could not start media removal: {error}")),
-        );
-        return IpcResponse::error(format!("Could not start media removal: {error}"));
+        let error = anyhow::Error::from(start_failed(
+            "status.catalog.removalStartFailed",
+            "Could not start media removal",
+            &error,
+        ));
+        let response = IpcResponse::from_error(&error);
+        finish(&job, Err(error));
+        return response;
     }
     IpcResponse::ok(&initial)
 }
@@ -345,6 +389,7 @@ mod tests {
         usage.record(&[lianli_shared::media_dependencies::AssetDependency {
             path: asset,
             owner: "orphan fixture".into(),
+            owner_ui: None,
             kind: lianli_shared::media_dependencies::AssetKind::Image,
         }]);
         drop(usage);
@@ -398,6 +443,7 @@ mod tests {
         usage.record(&[lianli_shared::media_dependencies::AssetDependency {
             path: asset.clone(),
             owner: "fixture".into(),
+            owner_ui: None,
             kind: lianli_shared::media_dependencies::AssetKind::Image,
         }]);
         drop(usage);

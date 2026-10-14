@@ -34,6 +34,7 @@ pub(crate) use event_sender::EventSender;
 pub use server::{build_info, start_ipc_server, DaemonState, PixelCleanState};
 
 use lianli_shared::ipc::IpcResponse;
+use lianli_shared::ui_message::UiMessage;
 use parking_lot::Mutex;
 use std::sync::Arc;
 
@@ -58,6 +59,42 @@ pub(crate) fn persist_and_notify(
             info!("{label}: config persisted, notified daemon");
             IpcResponse::ok(serde_json::json!(null))
         }
-        Err(e) => IpcResponse::error(format!("failed to write config: {e}")),
+        Err(e) => config_write_failed(e),
     }
+}
+
+/// Like `IpcResponse::from_error`, but with only the outermost English layer.
+pub(crate) fn outer_error(error: &anyhow::Error) -> IpcResponse {
+    IpcResponse::Error {
+        message: error.to_string(),
+        ui: lianli_shared::ui_message::ui_message_of(error),
+    }
+}
+
+pub(crate) fn config_write_failed(error: impl std::fmt::Display) -> IpcResponse {
+    IpcResponse::error_ui(
+        format!("failed to write config: {error}"),
+        UiMessage::new("daemon.config.writeFailed").param("error", error),
+    )
+}
+
+pub(crate) fn no_config_loaded() -> IpcResponse {
+    IpcResponse::error_ui(
+        "no config loaded",
+        UiMessage::new("daemon.config.notLoaded"),
+    )
+}
+
+pub(crate) fn rgb_controller_missing() -> IpcResponse {
+    IpcResponse::error_ui(
+        "RGB controller not initialized",
+        UiMessage::new("daemon.rgb.controllerMissing"),
+    )
+}
+
+pub(crate) fn service_unavailable() -> IpcResponse {
+    IpcResponse::error_ui(
+        "daemon service not running",
+        UiMessage::new("daemon.request.serviceUnavailable"),
+    )
 }

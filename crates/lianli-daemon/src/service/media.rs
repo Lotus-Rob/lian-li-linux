@@ -9,6 +9,7 @@ use lianli_shared::ipc::{MediaPreparationState, MediaPreparationStatus};
 use lianli_shared::media::MediaType;
 use lianli_shared::screen::{screen_info_for, ScreenInfo};
 use lianli_shared::template::LcdTemplate;
+use lianli_shared::ui_message::{UiMessage, UiText};
 use rusb::Device;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
@@ -134,12 +135,15 @@ impl ServiceManager {
                         .iter()
                         .any(|id| lcd_id_matches(serial, id))
                 });
+                let (error, error_ui) =
+                    UiText::split(recovery.then(super::startup_image::recovery_text));
                 (
                     index,
                     MediaPreparationStatus {
                         startup_recovery_required: recovery,
                         runtime: None,
                         last_playback_error: None,
+                        last_playback_error_ui: None,
                         generation,
                         device_id: cfg.device_id(),
                         state: if recovery {
@@ -151,7 +155,8 @@ impl ServiceManager {
                         } else {
                             MediaPreparationState::Ready
                         },
-                        error: recovery.then(|| super::startup_image::RECOVERY_MESSAGE.into()),
+                        error,
+                        error_ui,
                     },
                 )
             })
@@ -198,6 +203,7 @@ impl ServiceManager {
                         "Media preparation stopped before producing a result. Save again to retry."
                             .into(),
                     );
+                    status.error_ui = Some(UiMessage::new("status.media.preparationStopped"));
                 }
             }
         }
@@ -241,11 +247,12 @@ impl ServiceManager {
             {
                 status.state = new_state;
                 status.error = error;
+                status.error_ui = None;
             }
         }
     }
 
-    pub(super) fn record_playback_failure(&self, index: usize, key: &str, error: String) {
+    pub(super) fn record_playback_failure(&self, index: usize, key: &str, error: UiText) {
         if self
             .media_requested_keys
             .get(index)
@@ -261,7 +268,9 @@ impl ServiceManager {
             .media_preparation
             .get_mut(&index)
         {
-            status.last_playback_error = Some(error.chars().take(2048).collect());
+            let error = error.truncated(2048);
+            status.last_playback_error = Some(error.english);
+            status.last_playback_error_ui = error.ui;
         }
     }
 
@@ -851,10 +860,12 @@ mod tests {
                 startup_recovery_required: false,
                 runtime: None,
                 last_playback_error: None,
+                last_playback_error_ui: None,
                 generation: 2,
                 device_id: "hid:panel-a".into(),
                 state: MediaPreparationState::Preparing,
                 error: None,
+                error_ui: None,
             },
         );
         service.media_requested_keys = vec!["new".into()];
@@ -862,7 +873,7 @@ mod tests {
         assert!(service.ipc.state.lock().telemetry.media_preparation[&0]
             .last_playback_error
             .is_none());
-        service.record_playback_failure(0, "new", "界".repeat(3000));
+        service.record_playback_failure(0, "new", "界".repeat(3000).into());
         assert_eq!(
             service.ipc.state.lock().telemetry.media_preparation[&0]
                 .last_playback_error

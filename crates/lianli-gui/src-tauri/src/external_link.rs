@@ -2,15 +2,17 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use crate::command_error::CommandError;
 use gio::glib::{ToVariant, Variant, VariantDict, VariantTy};
 use lianli_control::services::host_spawn_bridge;
 use lianli_shared::installation::InstallationContext;
+use lianli_shared::ui_message::UiMessage;
 
 const EXIT_WAIT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const PORTAL_TIMEOUT_MS: i32 = 5_000;
 
-pub fn open(url: &str) -> Result<(), String> {
+pub fn open(url: &str) -> Result<(), CommandError> {
     validate(url)?;
     let context = InstallationContext::detect();
     if matches!(context, InstallationContext::Native) {
@@ -22,8 +24,14 @@ pub fn open(url: &str) -> Result<(), String> {
         Ok(()) => return Ok(()),
         Err(error) => error,
     };
-    open_with_xdg(&context, url)
-        .map_err(|error| format!("Desktop portal failed ({portal_error}); {error}"))
+    open_with_xdg(&context, url).map_err(|error| {
+        CommandError::ui(
+            format!("Desktop portal failed ({portal_error}); {}", error.message),
+            UiMessage::new("gui.externalLink.portalFailed")
+                .param("portal", &portal_error)
+                .param("error", &error.message),
+        )
+    })
 }
 
 fn open_with_portal(url: &str) -> Result<(), String> {
@@ -52,20 +60,28 @@ fn portal_arguments(url: &str) -> Variant {
     ])
 }
 
-fn open_with_xdg(context: &InstallationContext, url: &str) -> Result<(), String> {
+fn open_with_xdg(context: &InstallationContext, url: &str) -> Result<(), CommandError> {
     let mut command = launcher(context, url, host_spawn_bridge)?;
     let child = command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|error| format!("Cannot start xdg-open: {error}"))?;
+        .map_err(|error| {
+            CommandError::ui(
+                format!("Cannot start xdg-open: {error}"),
+                UiMessage::new("gui.externalLink.startFailed").param("error", error),
+            )
+        })?;
     wait_for_launcher(child)
 }
 
-fn validate(url: &str) -> Result<(), String> {
+fn validate(url: &str) -> Result<(), CommandError> {
     if !url.starts_with("https://") || url.chars().any(|c| c.is_control() || c.is_whitespace()) {
-        return Err("Only https links can be opened".into());
+        return Err(CommandError::ui(
+            "Only https links can be opened",
+            UiMessage::new("gui.externalLink.httpsOnly"),
+        ));
     }
     Ok(())
 }
@@ -74,12 +90,15 @@ fn launcher(
     context: &InstallationContext,
     url: &str,
     bridge: impl FnOnce() -> Option<PathBuf>,
-) -> Result<Command, String> {
+) -> Result<Command, CommandError> {
     let mut command = match context {
         InstallationContext::Distrobox { .. } => {
-            let bridge = bridge().ok_or(
-                "host-spawn is not installed in this box. Run distrobox-host-exec true once inside the box, then try again",
-            )?;
+            let bridge = bridge().ok_or_else(|| {
+                CommandError::ui(
+                    "host-spawn is not installed in this box. Run distrobox-host-exec true once inside the box, then try again",
+                    UiMessage::new("gui.externalLink.hostSpawnMissing"),
+                )
+            })?;
             let mut command = Command::new(bridge);
             command.arg("xdg-open");
             command
@@ -92,18 +111,28 @@ fn launcher(
     Ok(command)
 }
 
-fn wait_for_launcher(mut child: Child) -> Result<(), String> {
+fn wait_for_launcher(mut child: Child) -> Result<(), CommandError> {
     let deadline = Instant::now() + EXIT_WAIT;
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(status)) => return Err(format!("xdg-open failed ({status})")),
+            Ok(Some(status)) => {
+                return Err(CommandError::ui(
+                    format!("xdg-open failed ({status})"),
+                    UiMessage::new("gui.externalLink.launcherFailed").param("status", status),
+                ))
+            }
             Ok(None) if Instant::now() < deadline => std::thread::sleep(POLL_INTERVAL),
             Ok(None) => {
                 std::thread::spawn(move || child.wait());
                 return Ok(());
             }
-            Err(error) => return Err(format!("Cannot check xdg-open: {error}")),
+            Err(error) => {
+                return Err(CommandError::ui(
+                    format!("Cannot check xdg-open: {error}"),
+                    UiMessage::new("gui.externalLink.checkFailed").param("error", error),
+                ))
+            }
         }
     }
 }

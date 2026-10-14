@@ -6,6 +6,7 @@ import { useIpc } from "@/composables/useIpc";
 import { useDaemonStore } from "@/stores/daemon";
 import type { AssetAccessReport, DaemonInfo, LcdConfig, LcdTemplate } from "@/types";
 import { useTranslate, type MessageKey } from "@/i18n";
+import { backendText } from "@/utils/backendText";
 
 const props = defineProps<{ lcds: LcdConfig[]; templates: LcdTemplate[] }>();
 const emit = defineEmits<{ issues: [present: boolean] }>();
@@ -100,7 +101,7 @@ onUnmounted(() => {
         <p>{{ t("lcd.mediaAccess.needsAccess", { mode: daemon.info ? t(DAEMON_MODE_LABELS[daemon.info.mode]) : "", uid: report.uid }) }}</p>
         <ul>
           <li v-for="(issue, index) in report.issues" :key="index">
-            <strong>{{ issue.owner }}</strong><span v-if="issue.path"> — {{ issue.path }}</span>: {{ issue.error }}
+            <strong>{{ backendText(issue.owner, issue.owner_ui) }}</strong><span v-if="issue.path"> — {{ issue.path }}</span>: {{ backendText(issue.error, issue.error_ui) }}
           </li>
         </ul>
         <p v-if="report.failed > report.issues.length">{{ t("lcd.mediaAccess.showing", { shown: report.issues.length, total: report.failed }) }}</p>

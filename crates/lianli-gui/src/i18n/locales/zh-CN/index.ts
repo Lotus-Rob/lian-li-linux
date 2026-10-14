@@ -11,6 +11,7 @@ import fans from "./fans";
 import rgb from "./rgb";
 import editor from "./editor";
 import findings from "./findings";
+import backend from "./backend";
 
 const messages: typeof en = {
   common,
@@ -25,6 +26,7 @@ const messages: typeof en = {
   rgb,
   editor,
   findings,
+  backend,
 };
 
 export default messages;

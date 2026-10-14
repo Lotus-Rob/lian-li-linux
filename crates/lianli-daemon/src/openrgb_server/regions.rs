@@ -392,6 +392,7 @@ impl RegionGroup {
             cap.zones = (0..self.count())
                 .map(|index| RgbZoneInfo {
                     name: format!("Fan {} {label}", index + 1),
+                    name_ui: None,
                     led_count: 1,
                 })
                 .collect();
@@ -408,6 +409,7 @@ impl RegionGroup {
             cap.zones = ["Inner", "Outer"]
                 .map(|name| RgbZoneInfo {
                     name: name.into(),
+                    name_ui: None,
                     led_count: self.count() as u16,
                 })
                 .to_vec();

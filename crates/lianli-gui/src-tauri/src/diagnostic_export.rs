@@ -1,8 +1,10 @@
 use anyhow::{ensure, Context, Result};
 use lianli_control::diagnostic_logs::LogSource;
+use lianli_control::ui_text::keyed;
 use lianli_shared::daemon::DaemonInfo;
 use lianli_shared::installation::{InstallationContext, InstallationReport};
 use lianli_shared::services::{ServiceProbe, UnitState};
+use lianli_shared::ui_message::{UiError, UiMessage};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{Read, Write};
@@ -129,7 +131,7 @@ fn unit(probe: &ServiceProbe<UnitState>) -> Value {
             "active_state": redact(&value.active_state), "sub_state": redact(&value.sub_state),
             "startup": redact(&value.unit_file_state), "pid": value.main_pid,
         }),
-        ServiceProbe::Unavailable { reason } => json!({"unavailable": redact(reason)}),
+        ServiceProbe::Unavailable { reason, .. } => json!({"unavailable": redact(reason)}),
     }
 }
 
@@ -192,7 +194,7 @@ fn summary(input: &Input, logs: Option<Result<Vec<String>>>) -> Result<String> {
             "user": unit(&report.user), "system": unit(&report.system),
             "global_user_startup": match &report.global_user {
                 ServiceProbe::Known { value } => redact(value),
-                ServiceProbe::Unavailable { reason } => redact(reason),
+                ServiceProbe::Unavailable { reason, .. } => redact(reason),
             },
         })
     });
@@ -263,7 +265,10 @@ fn start(input: Input, saved: Option<std::path::PathBuf>) -> Result<Preview> {
         RUNNING
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok(),
-        "Another diagnostic preview is still running"
+        keyed(
+            "gui.diagnostics.previewRunning",
+            "Another diagnostic preview is still running"
+        )
     );
     let running = Running;
     let (sender, receiver) = mpsc::sync_channel(1);
@@ -276,9 +281,11 @@ fn start(input: Input, saved: Option<std::path::PathBuf>) -> Result<Preview> {
             let source = match (saved.as_ref(), input.log_source) {
                 (Some(_), _) => LogSource::SavedDaemonLog,
                 (None, Some(LogSource::SessionWorker | LogSource::SavedDaemonLog)) => {
-                    let _ = sender.send(Err(anyhow::anyhow!(
-                        "Select daemon logs. Session-worker logs alone are insufficient"
-                    )));
+                    let _ = sender.send(Err(keyed(
+                        "gui.diagnostics.selectDaemonLogs",
+                        "Select daemon logs. Session-worker logs alone are insufficient",
+                    )
+                    .into()));
                     return;
                 }
                 (None, Some(source)) => source,
@@ -304,7 +311,12 @@ fn start(input: Input, saved: Option<std::path::PathBuf>) -> Result<Preview> {
         })?;
     let (text, can_save) = receiver
         .recv_timeout(Duration::from_secs(24))
-        .context("Diagnostic preview timed out. Repair journal access and retry")??;
+        .map_err(|error| {
+            UiError::new(
+                UiMessage::new("gui.diagnostics.previewTimedOut").param("error", error),
+                format!("Diagnostic preview timed out. Repair journal access and retry: {error}"),
+            )
+        })??;
     let preview = Preview {
         id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
         text,
@@ -337,8 +349,16 @@ pub fn save(app: &tauri::AppHandle, id: u64) -> Result<bool> {
         .as_ref()
         .filter(|preview| preview.id == id)
         .cloned()
-        .context("The preview changed. Generate and review it again before saving")?;
-    ensure!(preview.can_save, "Daemon logs are required. Restore journal access and generate another preview before saving");
+        .ok_or_else(|| {
+            keyed(
+                "gui.diagnostics.previewChanged",
+                "The preview changed. Generate and review it again before saving",
+            )
+        })?;
+    ensure!(
+        preview.can_save,
+        keyed("gui.diagnostics.logsRequired", "Daemon logs are required. Restore journal access and generate another preview before saving")
+    );
     let Some(selected) = app
         .dialog()
         .file()
@@ -510,6 +530,7 @@ mod tests {
                 backend: Some("evdi".into()),
                 fallback_reason: Some("Hermes unavailable".into()),
                 error: Some("Unable to open /home/private/display".into()),
+                error_ui: None,
                 applied_generation: None,
                 applied_policy: None,
                 encoding: None,

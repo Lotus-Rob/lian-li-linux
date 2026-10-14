@@ -8,6 +8,7 @@ mod worker;
 pub use enumerate::{enumerate_turzx, TurzxDeviceMatch};
 
 use lianli_devices::turzx;
+use lianli_shared::ui_message::{UiMessage, UiText};
 use policy::SharedVideoPolicy;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -183,9 +184,10 @@ impl DesktopDisplayRegistry {
                     if worker.status.snapshot().state
                         != lianli_shared::ipc::DesktopStreamState::Failed
                     {
-                        worker
-                            .status
-                            .failed("Desktop worker exited without a completion result");
+                        worker.status.failed(UiText::new(
+                            UiMessage::new("status.desktop.workerExited"),
+                            "Desktop worker exited without a completion result",
+                        ));
                     }
                     if healthy {
                         worker.retry = RetryState::new(now);
@@ -222,7 +224,7 @@ impl DesktopDisplayRegistry {
                     worker.handle = Some(handle);
                 }
                 Err(error) => {
-                    worker.status.failed(&format!("{error:#}"));
+                    worker.status.failed(UiText::from_error(&error));
                     worker.retry.failed(now);
                     warn!(
                         "TURZX {:04x}:{:04x} at {:?} spawn failed: {error:#}",
@@ -345,7 +347,7 @@ mod tests {
         let (release, wait) = std::sync::mpsc::channel();
         let mut registry = DesktopDisplayRegistry::new();
         let status = Arc::new(status::StreamStatus::new((1, 2), 0xad21));
-        status.failed("Capture failed");
+        status.failed("Capture failed".into());
         registry.workers.insert(
             (1, 2),
             DisplayWorker {

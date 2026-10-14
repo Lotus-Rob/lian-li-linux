@@ -6,6 +6,7 @@ use crate::registry::SharedHid;
 use crate::traits::RgbDevice;
 use anyhow::{bail, Context, Result};
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
+use lianli_shared::ui_message::UiMessage;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
@@ -270,16 +271,19 @@ fn zones(variant: AioLcdVariant, fan_led_count: u16) -> Vec<RgbZoneInfo> {
         vec![
             RgbZoneInfo {
                 name: "Pump Head".to_string(),
+                name_ui: Some(UiMessage::new("devices.zone.pumpHead")),
                 led_count: 12,
             },
             RgbZoneInfo {
                 name: "Fans".to_string(),
+                name_ui: Some(UiMessage::new("devices.zone.fans")),
                 led_count: fan_led_count,
             },
         ]
     } else {
         vec![RgbZoneInfo {
             name: "Fans".to_string(),
+            name_ui: Some(UiMessage::new("devices.zone.fans")),
             led_count: FAN_LED_COUNT,
         }]
     }

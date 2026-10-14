@@ -3,6 +3,7 @@ use super::LEDS_PER_FAN;
 use crate::traits::RgbDevice;
 use anyhow::{bail, Result};
 use lianli_shared::rgb::{RgbEffect, RgbMode, RgbScope, RgbZoneInfo};
+use lianli_shared::ui_message::UiMessage;
 use std::sync::Arc;
 use tracing::debug;
 
@@ -140,6 +141,7 @@ impl RgbDevice for TlFanPortDevice {
         (0..self.fan_count)
             .map(|fan| RgbZoneInfo {
                 name: format!("Fan {}", fan + 1),
+                name_ui: Some(UiMessage::new("devices.zone.fan").param("number", fan + 1)),
                 led_count: LEDS_PER_FAN,
             })
             .collect()

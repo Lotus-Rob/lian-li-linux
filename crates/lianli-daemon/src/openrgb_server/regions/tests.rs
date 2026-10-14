@@ -14,6 +14,7 @@ fn capabilities(fans: usize) -> RgbDeviceCapabilities {
     cap.zones = (0..fans)
         .map(|i| RgbZoneInfo {
             name: format!("Fan {i}"),
+            name_ui: None,
             led_count: 20,
         })
         .collect();

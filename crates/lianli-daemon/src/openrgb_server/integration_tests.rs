@@ -21,10 +21,12 @@ impl RgbDevice for Device {
         vec![
             RgbZoneInfo {
                 name: "First".into(),
+                name_ui: None,
                 led_count: 2,
             },
             RgbZoneInfo {
                 name: "Second".into(),
+                name_ui: None,
                 led_count: 2,
             },
         ]

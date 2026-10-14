@@ -87,7 +87,7 @@ impl Drop for SignalHandlers {
 fn response_data(response: IpcResponse) -> Result<serde_json::Value> {
     match response {
         IpcResponse::Ok { data } => Ok(data),
-        IpcResponse::Error { message } => anyhow::bail!("{message}"),
+        IpcResponse::Error { message, .. } => anyhow::bail!("{message}"),
     }
 }
 
@@ -163,7 +163,7 @@ fn prepare_and_start(
             },
         ) {
             Ok(IpcResponse::Ok { .. }) => {}
-            Ok(IpcResponse::Error { message }) => {
+            Ok(IpcResponse::Error { message, .. }) => {
                 eprintln!("Could not cancel preparation: {message}")
             }
             Err(error) => eprintln!("Could not cancel preparation: {error:#}"),

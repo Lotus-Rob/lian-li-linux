@@ -178,7 +178,8 @@ mod tests {
         assert!(system_mode_required(
             &unit,
             Some(&ServiceProbe::Unavailable {
-                reason: "unknown".into()
+                reason: "unknown".into(),
+                reason_ui: None,
             })
         ));
         unit.unit_file_state = "enabled".into();

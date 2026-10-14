@@ -4,6 +4,7 @@ use super::{
     WirelessFanType, RF_CHUNKS, RF_CHUNK_SIZE, RF_DATA_SIZE, RF_PWM_CMD, RF_SELECT, USB_CMD_SEND_RF,
 };
 use anyhow::{bail, Context, Result};
+use lianli_shared::ui_message::{UiError, UiMessage};
 use lianli_transport::usb::USB_TIMEOUT;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -33,12 +34,18 @@ impl WirelessController {
         let _order = self.command_order.lock();
         anyhow::ensure!(
             self.picture_target.lock().is_none(),
-            "Wait for the wireless image upload to finish before changing binding"
+            UiError::new(
+                UiMessage::new("devices.wireless.imageUploadRunning"),
+                "Wait for the wireless image upload to finish before changing binding"
+            )
         );
         let mut binding = self.binding_mac.lock();
         anyhow::ensure!(
             binding.is_none(),
-            "another wireless binding operation is pending"
+            UiError::new(
+                UiMessage::new("devices.wireless.bindingPending"),
+                "another wireless binding operation is pending"
+            )
         );
         *binding = Some(*mac);
         if let Some(queue) = &self.pending_commands {
@@ -57,16 +64,20 @@ impl WirelessController {
         };
 
         if dead {
-            bail!("device is offline");
+            bail!(UiError::new(
+                UiMessage::new("devices.wireless.deviceOffline"),
+                "device is offline"
+            ));
         }
 
         let local = *self.master_mac.lock();
         if raw_master != [0u8; 6] && raw_master != local && self.foreign_master_online(&raw_master)
         {
-            bail!(
-                "device {:02x?} is bound to another controller that is currently online",
-                mac
-            );
+            let mac = format!("{mac:02x?}");
+            bail!(UiError::new(
+                UiMessage::new("devices.wireless.boundToOnlineController").param("mac", &mac),
+                format!("device {mac} is bound to another controller that is currently online")
+            ));
         }
 
         let bound: Vec<WirelessFanType> = {
@@ -79,7 +90,10 @@ impl WirelessController {
         };
 
         if bound.len() >= 10 {
-            bail!("at most 10 wireless devices can be bound");
+            bail!(UiError::new(
+                UiMessage::new("devices.wireless.deviceLimit"),
+                "at most 10 wireless devices can be bound"
+            ));
         }
         match fan_type {
             WirelessFanType::Strimer(_)
@@ -89,21 +103,30 @@ impl WirelessController {
                     .count()
                     >= 3 =>
             {
-                bail!("at most 3 strimer devices can be bound");
+                bail!(UiError::new(
+                    UiMessage::new("devices.wireless.strimerLimit"),
+                    "at most 3 strimer devices can be bound"
+                ));
             }
             WirelessFanType::WaterBlock
                 if bound
                     .iter()
                     .any(|t| matches!(t, WirelessFanType::WaterBlock)) =>
             {
-                bail!("only one HydroShift II LCD-C can be bound");
+                bail!(UiError::new(
+                    UiMessage::new("devices.wireless.lcdCLimit"),
+                    "only one HydroShift II LCD-C can be bound"
+                ));
             }
             WirelessFanType::WaterBlock2
                 if bound
                     .iter()
                     .any(|t| matches!(t, WirelessFanType::WaterBlock2)) =>
             {
-                bail!("only one HydroShift II LCD-S can be bound");
+                bail!(UiError::new(
+                    UiMessage::new("devices.wireless.lcdSLimit"),
+                    "only one HydroShift II LCD-S can be bound"
+                ));
             }
             _ => {}
         }
@@ -118,10 +141,11 @@ impl WirelessController {
         let local = *self.master_mac.lock();
         if raw_master != [0u8; 6] && raw_master != local && self.foreign_master_online(&raw_master)
         {
-            bail!(
-                "device {:02x?} belongs to another controller that is currently online",
-                mac
-            );
+            let mac = format!("{mac:02x?}");
+            bail!(UiError::new(
+                UiMessage::new("devices.wireless.ownedByOnlineController").param("mac", &mac),
+                format!("device {mac} belongs to another controller that is currently online")
+            ));
         }
         Ok(())
     }
@@ -135,13 +159,21 @@ impl WirelessController {
         const CONVERGE_TIMEOUT: Duration = Duration::from_secs(5);
         const POLL_GAP: Duration = Duration::from_millis(150);
 
-        let rx = self.rx.as_ref().context("RX not connected")?;
+        let rx = self.rx.as_ref().ok_or_else(|| {
+            UiError::new(
+                UiMessage::new("devices.wireless.rxNotConnected"),
+                "RX not connected",
+            )
+        })?;
         let deadline = Instant::now() + CONVERGE_TIMEOUT;
         let mut attempts = 0u32;
         loop {
             anyhow::ensure!(
                 !self.poll_stop.load(std::sync::atomic::Ordering::Acquire),
-                "wireless controller is stopping"
+                UiError::new(
+                    UiMessage::new("devices.wireless.stopping"),
+                    "wireless controller is stopping"
+                )
             );
             let sent_at = Instant::now();
             self.send_bind_packet(mac, target_master_mac, target_rx)?;
@@ -193,7 +225,12 @@ impl WirelessController {
             .iter()
             .find(|d| d.mac == *mac)
             .cloned()
-            .context("device not found in discovery")?;
+            .ok_or_else(|| {
+                UiError::new(
+                    UiMessage::new("devices.wireless.notDiscovered"),
+                    "device not found in discovery",
+                )
+            })?;
 
         let master_ch = *self.master_channel.lock();
         let slot = if target_rx == 0 {
@@ -255,7 +292,10 @@ impl WirelessController {
                 return Ok(rx);
             }
         }
-        bail!("no free RX slot: all slots on this dongle are in use")
+        bail!(UiError::new(
+            UiMessage::new("devices.wireless.noFreeRxSlot"),
+            "no free RX slot: all slots on this dongle are in use"
+        ))
     }
 
     pub(super) fn save_rf_config(&self) -> Result<()> {
