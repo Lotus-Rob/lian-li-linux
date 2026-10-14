@@ -115,10 +115,8 @@ impl RusbBulk {
         })
     }
 
-    /// Detach any kernel driver, set the active configuration, and claim
-    /// interface 0 (plus any other vendor interfaces). Recovers from a busy
-    /// state by retrying with short delays rather than USB reset (which can
-    /// destabilise other devices on the same hub).
+    /// Detaches kernel drivers, selects configuration 1 and claims the vendor
+    /// interfaces. Does not send SET_INTERFACE: the dongles drop the next OUT packet after it.
     pub fn detach_and_configure(&mut self, name: &str) -> Result<(), TransportError> {
         self.detach_and_configure_with_cancel(name, || false)
     }
@@ -159,7 +157,6 @@ impl RusbBulk {
 
         match self.handle.claim_interface(0) {
             Ok(()) => {
-                let _ = self.handle.set_alternate_setting(0, 0);
                 self.claimed.push(0);
             }
             Err(rusb::Error::Busy) => {
@@ -199,7 +196,6 @@ impl RusbBulk {
                 if !claimed {
                     return Err(rusb::Error::Busy.into());
                 }
-                let _ = self.handle.set_alternate_setting(0, 0);
                 self.claimed.push(0);
             }
             Err(e) => return Err(e.into()),
@@ -380,6 +376,13 @@ impl RusbBulk {
 
     pub fn clear_halt(&self, endpoint: u8) -> Result<(), TransportError> {
         Ok(self.handle.clear_halt(endpoint)?)
+    }
+
+    /// Clears halts on both bulk endpoints; a reopen alone does not.
+    pub fn clear_halts(&self) -> Result<(), TransportError> {
+        let out = self.clear_halt(self.ep_out);
+        let input = self.clear_halt(self.ep_in);
+        out.and(input)
     }
 
     pub fn inner(&self) -> &DeviceHandle<UsbContext> {

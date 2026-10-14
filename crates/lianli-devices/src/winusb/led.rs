@@ -67,6 +67,12 @@ impl WinUsbLedDevice {
         new_transport
             .detach_and_configure(&self.name)
             .map_err(transport_to_anyhow)?;
+        if let Err(error) = new_transport.clear_halts() {
+            debug!(
+                "{}: clearing endpoint halts after reopen failed: {error}",
+                self.name
+            );
+        }
         *self.transport.lock() = new_transport;
         Ok(())
     }

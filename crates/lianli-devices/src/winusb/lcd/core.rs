@@ -288,6 +288,9 @@ impl LcdLink {
         let mut t = RusbBulk::open_device(raw.clone()).context("reopening device")?;
         t.detach_and_configure_with_cancel(name, || Instant::now() >= deadline || cancelled())
             .context("configuring reopened device")?;
+        if let Err(error) = t.clear_halts() {
+            debug!("{name}: clearing endpoint halts after reopen failed: {error}");
+        }
         *bulk = t;
         self.h264_chunk_size.clear();
         Ok(())

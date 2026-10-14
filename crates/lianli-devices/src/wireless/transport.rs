@@ -7,7 +7,7 @@ use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 pub(super) type SharedTransport = Arc<Mutex<TransportState<RusbBulk>>>;
 
@@ -230,6 +230,9 @@ fn reopen_transport(
             replacement
                 .detach_and_configure_with_cancel(name, || stop.load(Ordering::Acquire))
                 .context("claiming replacement wireless transport")?;
+            if let Err(error) = replacement.clear_halts() {
+                debug!("{name}: clearing endpoint halts after reopen failed: {error}");
+            }
             anyhow::ensure!(
                 !stop.load(Ordering::Acquire)
                     && !lianli_transport::usb::SHUTTING_DOWN.load(Ordering::Relaxed),
