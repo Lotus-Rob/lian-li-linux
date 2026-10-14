@@ -111,8 +111,9 @@ the widget level:
 }
 ```
 
-On install, the client walks widgets and rewrites each `source` to whatever
-matches the user's actual hardware:
+On install, the Template Browser lists each category the template uses with
+the sensor detected on the user's machine, and the user can change any of
+them. The detected defaults are:
 
 | `sensor_category` | Resolves to                                                               |
 |-------------------|---------------------------------------------------------------------------|
@@ -122,9 +123,10 @@ matches the user's actual hardware:
 | `gpu_usage`       | NVIDIA GPU utilization, or AMD sysfs `gpu_busy_percent` (amdgpu driver)   |
 | `mem_usage`       | virtual `mem_usage` sensor                                                |
 
-If a category has no match on the local machine, the widget keeps its
-placeholder `source` — so make sure the placeholder would at least render
-something sane.
+If a category has no match on the local machine, or the user chooses
+**Not available**, the widget keeps its `sensor_category` and shows N/A (text)
+or an empty gauge until a sensor is chosen in the editor. The placeholder
+`source` is never read.
 
 Widgets that intentionally bind to a specific sensor (custom shell command,
 a particular hwmon label) should omit `sensor_category`.

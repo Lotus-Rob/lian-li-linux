@@ -4,17 +4,21 @@ import { RefreshCw, Download, CheckCircle, AlertCircle, Loader2, X, ExternalLink
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useExternalLink } from "@/composables/useExternalLink";
 import { getVersion } from "@tauri-apps/api/app";
-import type { CatalogManifest, CatalogTemplate } from "@/types";
+import type { CatalogManifest, CatalogTemplate, LcdTemplate, SensorBindings, SensorCategory, SensorInfo } from "@/types";
 import { useConfigStore } from "@/stores/config";
 import { useLcdStore, LCD_TEMPLATES_CHANGED_EVENT, type CatalogInstallStatus } from "@/stores/lcd";
 import { emit } from "@tauri-apps/api/event";
 import { boundedFetch } from "@/utils/boundedFetch";
 import { backendText } from "@/utils/backendText";
 import { useTranslate } from "@/i18n";
+import { useIpc } from "@/composables/useIpc";
+import { isSensorCategory } from "@/stores/sensorOptions";
+import SensorBindingDialog, { type SensorBindingRequest } from "@/components/editor/SensorBindingDialog.vue";
 
 const config = useConfigStore();
 const lcd = useLcdStore();
 const openExternal = useExternalLink();
+const ipc = useIpc();
 const t = useTranslate();
 
 const CATALOG_URL =
@@ -41,6 +45,9 @@ const installedIds = ref<Set<string>>(new Set());
 const monitoringInstall = ref(false);
 const startingInstall = ref(false);
 const installProgress = ref("");
+const preparingId = ref("");
+const bindingRequest = ref<SensorBindingRequest | null>(null);
+let bindingEntry: CatalogTemplate | null = null;
 
 onMounted(async () => {
   await config.load().catch(() => undefined);
@@ -113,11 +120,71 @@ async function loadPreviews(items: CatalogTemplate[], controller: AbortControlle
 }
 
 async function install(entry: CatalogTemplate) {
-  if (startingInstall.value || monitoringInstall.value || installState.value[entry.id] === "installing") return;
+  if (startingInstall.value || monitoringInstall.value || bindingRequest.value || installState.value[entry.id] === "installing") return;
+  startingInstall.value = true;
+  preparingId.value = entry.id;
+  try {
+    const request = await sensorBindingRequest(entry, downloads.signal);
+    if (request) {
+      bindingEntry = entry;
+      bindingRequest.value = request;
+      return;
+    }
+  } catch (e) {
+    if (!downloads.signal.aborted) installProgress.value = t("editor.browser.sensorsUnavailable", { error: String(e) });
+    return;
+  } finally {
+    startingInstall.value = false;
+    preparingId.value = "";
+  }
+  await startInstall(entry, {});
+}
+
+async function sensorBindingRequest(entry: CatalogTemplate, signal: AbortSignal): Promise<SensorBindingRequest | null> {
+  const blob = await boundedFetch(`${ASSET_BASE}/${entry.folder}/${entry.template_file}`, 1024 * 1024, signal);
+  const bytes = await blob.arrayBuffer();
+  if (await sha256Hex(bytes) !== entry.template_sha256.toLowerCase()) throw new Error(t("editor.browser.templateChecksum"));
+  const template = JSON.parse(new TextDecoder().decode(bytes)) as LcdTemplate;
+  const categories = new Set<SensorCategory>();
+  for (const widget of template.widgets ?? []) {
+    if (widget?.kind?.source && isSensorCategory(widget.sensor_category)) categories.add(widget.sensor_category);
+  }
+  if (!categories.size) return null;
+  const ordered = [...categories];
+  const [sensors, suggestions] = await Promise.all([
+    ipc.request<SensorInfo[]>("ListSensors"),
+    lcd.suggestSensorSources(ordered),
+  ]);
+  signal.throwIfAborted();
+  return {
+    templateName: entry.name,
+    sensors,
+    rows: ordered.map((category, index) => ({ category, suggested: suggestions[index] ?? null })),
+  };
+}
+
+async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function onBindingsConfirmed(bindings: SensorBindings) {
+  const entry = bindingEntry;
+  closeBindings();
+  if (entry) void startInstall(entry, bindings);
+}
+
+function closeBindings() {
+  bindingRequest.value = null;
+  bindingEntry = null;
+}
+
+async function startInstall(entry: CatalogTemplate, bindings: SensorBindings) {
+  if (startingInstall.value || monitoringInstall.value) return;
   startingInstall.value = true;
   installState.value[entry.id] = "installing";
   try {
-    await monitorInstall(await lcd.installTemplate(entry));
+    await monitorInstall(await lcd.installTemplate(entry, bindings));
   } catch (e) {
     installState.value[entry.id] = "error";
     error.value = t("editor.browser.installUnconfirmedMayFinish", { error: String(e) });
@@ -234,7 +301,7 @@ function previewAspect(t: CatalogTemplate): string {
               size="small"
               type="primary"
               :disabled="installedIds.has(tpl.id) || startingInstall || monitoringInstall"
-              :loading="installState[tpl.id] === 'installing'"
+              :loading="installState[tpl.id] === 'installing' || preparingId === tpl.id"
               @click="install(tpl)"
             >
               <template v-if="installState[tpl.id] === 'installing'" #icon><Loader2 :size="14" class="spin" /></template>
@@ -246,6 +313,7 @@ function previewAspect(t: CatalogTemplate): string {
         </div>
       </div>
     </div>
+    <SensorBindingDialog :request="bindingRequest" @confirm="onBindingsConfirmed" @cancel="closeBindings" />
   </div>
 </template>
 

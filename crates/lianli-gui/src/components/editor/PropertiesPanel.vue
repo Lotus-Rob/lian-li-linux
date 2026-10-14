@@ -5,6 +5,7 @@ import { FolderOpen, Plus, Trash2 } from "lucide-vue-next";
 import type { Widget, RGBA, RGB, SensorSourceConfig, SensorRange, GradientStop } from "@/types";
 import { pickMediaFile } from "@/utils/mediaPicker";
 import SensorSelect from "@/components/common/SensorSelect.vue";
+import { SENSOR_CATEGORY_LABELS } from "@/stores/sensorOptions";
 import { useTranslate, type MessageKey } from "@/i18n";
 
 const props = defineProps<{
@@ -279,9 +280,16 @@ function sourceLabel(src: SensorSourceConfig | null | undefined): string {
   }
 }
 
+const UNBOUND = "unbound";
+
 function sourceOptionsFor(key: string) {
   const src = (current.value.kind as any)[key] as SensorSourceConfig | undefined;
   const opts = [...props.sensorOptions];
+  const category = current.value.sensor_category;
+  if (category) {
+    const label = t("editor.properties.sources.unbound", { category: t(SENSOR_CATEGORY_LABELS[category]) });
+    return [{ label, value: UNBOUND }, ...opts];
+  }
   if (src?.type === "command") return opts;
   const json = src ? JSON.stringify(src) : "";
   if (json && !opts.some((o) => o.value === json)) {
@@ -291,12 +299,15 @@ function sourceOptionsFor(key: string) {
 }
 
 function sourceSelectValue(key: string): string {
+  if (current.value.sensor_category) return UNBOUND;
   const src = (current.value.kind as any)[key] as SensorSourceConfig | undefined;
   if (src?.type === "command") return "command";
   return src ? JSON.stringify(src) : "";
 }
 
 function onSourceSelect(key: string, v: string) {
+  if (v === UNBOUND) return;
+  if (current.value.sensor_category) emit("patchCommon", current.value.id, "sensor_category", null);
   if (v === "command") {
     const src = (current.value.kind as any)[key] as SensorSourceConfig | undefined;
     const cmd = src?.type === "command" ? src.cmd : "";

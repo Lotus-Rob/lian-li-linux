@@ -5,7 +5,7 @@ pub use super::catalog_review::{
 };
 pub use super::catalog_storage::{inspect_storage, CatalogStorageEntry};
 use crate::sensors::SensorInfo;
-use crate::template::{resolve_sensor_categories, LcdTemplate};
+use crate::template::{resolve_sensor_categories, LcdTemplate, SensorBindings};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -332,6 +332,7 @@ fn remaining_download_time(deadline: Instant, now: Instant) -> Result<Duration> 
 
 pub fn install_template(
     template: &CatalogTemplate,
+    bindings: &SensorBindings,
     sensors: &[SensorInfo],
     config_dir: &Path,
     cancelled: impl Fn() -> bool,
@@ -392,7 +393,7 @@ pub fn install_template(
     }
 
     rewrite_asset_paths(&mut lcd_template, &directory.target);
-    resolve_sensor_categories(&mut lcd_template, sensors);
+    resolve_sensor_categories(&mut lcd_template, bindings, sensors);
     lcd_template.validate().map_err(|e| anyhow!("{e}"))?;
 
     check_cancelled(&cancelled)?;

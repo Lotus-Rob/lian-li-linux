@@ -16,7 +16,7 @@ use crate::PreparationControl;
 use ab_glyph::FontVec;
 use helpers::{
     fast_overlay, fit_image, format_sensor_readout, load_font_from_disk, resolve_sensor_source,
-    widget_sensor_source, widget_size_px,
+    widget_size_px,
 };
 use image::imageops::FilterType;
 use image::{Rgba, RgbaImage};
@@ -37,6 +37,7 @@ use tracing::{debug, warn};
 use widgets::{draw_widget, WidgetState};
 
 const SENSOR_RESOLVE_RETRY: Duration = Duration::from_secs(2);
+const UNBOUND_SENSOR_TEXT: &str = "N/A";
 
 fn default_sample_interval(kind: &WidgetKind, explicit_ms: Option<u64>) -> Duration {
     let default_ms = match kind {
@@ -203,7 +204,11 @@ impl CustomAsset {
             state.sample_interval =
                 default_sample_interval(&widget.kind, widget.update_interval_ms);
 
-            if let Some(source) = widget_sensor_source(&widget.kind) {
+            if widget.sensor_category.is_some() {
+                if let WidgetKind::ValueText { .. } = &widget.kind {
+                    state.last_render_text = Some(UNBOUND_SENSOR_TEXT.into());
+                }
+            } else if let Some(source) = widget.bound_sensor_source() {
                 state.resolved_sensor = resolve_sensor_source(source, all_sensors);
                 if state.resolved_sensor.is_none() {
                     state.next_resolve_at = Some(Instant::now() + SENSOR_RESOLVE_RETRY);
@@ -404,7 +409,7 @@ impl CustomAsset {
                 .unwrap_or(true);
 
             if state.resolved_sensor.is_none() && state.next_resolve_at.is_none_or(|at| now >= at) {
-                if let Some(source) = widget_sensor_source(&widget.kind) {
+                if let Some(source) = widget.bound_sensor_source() {
                     state.resolved_sensor = resolve_sensor_source(source, &self.sensors);
                     if state.resolved_sensor.is_some() {
                         state.next_resolve_at = None;
@@ -607,6 +612,25 @@ mod tests {
             .render_frame_rgba_with(false, |_| panic!("unchanged value redrew the frame"))
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn unbound_placeholder_never_reports_its_placeholder_reading() {
+        let asset = test_asset(vec![serde_json::json!({
+            "id": "gpu", "x": 4, "y": 4, "width": 8, "height": 8,
+            "sensor_category": "gpu_temp",
+            "kind": {
+                "type": "horizontal_bar", "source": {"type": "constant", "value": 50},
+                "value_min": 0, "value_max": 100, "background_color": [0, 0, 0, 255]
+            }
+        })]);
+        asset.widget_states.lock()[0].next_resolve_at = Some(Instant::now());
+        asset
+            .render_frame_rgba_with(true, |bytes| bytes.to_vec())
+            .unwrap();
+        let states = asset.widget_states.lock();
+        assert!(states[0].resolved_sensor.is_none());
+        assert_eq!(states[0].cached_value, 0.0);
     }
 
     #[test]

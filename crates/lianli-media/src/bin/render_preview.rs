@@ -102,6 +102,7 @@ fn stub_sensor_sources(template: &mut LcdTemplate) {
         let value = mock_value_for_widget(widget);
         if let Some(source) = widget.kind.source_config_mut() {
             *source = SensorSourceConfig::Constant { value };
+            widget.sensor_category = None;
         }
     }
 }

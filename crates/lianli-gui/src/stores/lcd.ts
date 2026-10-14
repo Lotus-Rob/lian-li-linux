@@ -6,7 +6,15 @@ import { PIXEL_CLEANER_DURATION_OPTIONS } from "@/constants";
 import { useDebounce } from "@/composables/useDebounce";
 import { brightnessConfirmed, createBrightnessControl } from "@/utils/brightnessControl";
 import { useDevicesStore } from "@/stores/devices";
-import type { CatalogTemplate, LcdConfig, LcdTemplate, PixelCleanStatus } from "@/types";
+import type {
+  CatalogTemplate,
+  LcdConfig,
+  LcdTemplate,
+  PixelCleanStatus,
+  SensorBindings,
+  SensorCategory,
+  SensorSourceConfig,
+} from "@/types";
 import { tr } from "@/i18n";
 import { backendText, type UiMessage } from "@/utils/backendText";
 
@@ -120,8 +128,12 @@ export const useLcdStore = defineStore("lcd", () => {
     await emit(LCD_TEMPLATES_CHANGED_EVENT);
   }
 
-  async function installTemplate(template: CatalogTemplate) {
-    return ipc.request<CatalogInstallStatus>("StartCatalogInstall", { template });
+  async function installTemplate(template: CatalogTemplate, sensorBindings: SensorBindings = {}) {
+    return ipc.request<CatalogInstallStatus>("StartCatalogInstall", { template, sensor_bindings: sensorBindings });
+  }
+
+  async function suggestSensorSources(categories: SensorCategory[]) {
+    return ipc.request<(SensorSourceConfig | null)[]>("SuggestSensorSources", { categories });
   }
 
   async function catalogInstallStatus() {
@@ -369,6 +381,7 @@ export const useLcdStore = defineStore("lcd", () => {
     setLcdMedia,
     setTemplates,
     installTemplate,
+    suggestSensorSources,
     catalogInstallStatus,
     setBrightness,
     brightnessErrors,

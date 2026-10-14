@@ -2,6 +2,7 @@
 //! `GetTelemetry`.
 
 use lianli_shared::ipc::IpcResponse;
+use lianli_shared::sensors::SensorCategory;
 use lianli_shared::ui_message::UiMessage;
 
 fn refused(english: &str, key: &str) -> IpcResponse {
@@ -130,6 +131,22 @@ pub fn list_sensors(state: &SharedState) -> IpcResponse {
         });
     }
     IpcResponse::ok(&sensors)
+}
+
+pub fn suggest_sensor_sources(categories: &[SensorCategory]) -> IpcResponse {
+    const MAX_CATEGORIES: usize = 32;
+    if categories.len() > MAX_CATEGORIES {
+        return IpcResponse::error_ui(
+            format!("At most {MAX_CATEGORIES} sensor categories can be suggested at once"),
+            UiMessage::new("daemon.sensors.tooManyCategories").param("limit", MAX_CATEGORIES),
+        );
+    }
+    let sensors = lianli_shared::sensors::enumerate_sensors();
+    let suggestions: Vec<_> = categories
+        .iter()
+        .map(|category| lianli_shared::sensors::pick_source_for_category(*category, &sensors))
+        .collect();
+    IpcResponse::ok(&suggestions)
 }
 
 pub fn list_pwm_headers() -> IpcResponse {

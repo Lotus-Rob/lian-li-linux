@@ -383,6 +383,9 @@ fn handle_request(
         ),
         IpcRequest::GetInstallationHealth => super::installation::check(state),
         IpcRequest::ListSensors => super::system::list_sensors(state),
+        IpcRequest::SuggestSensorSources { categories } => {
+            super::system::suggest_sensor_sources(&categories)
+        }
         IpcRequest::ListPwmHeaders => super::system::list_pwm_headers(),
         IpcRequest::ListDevices => super::system::list_devices(state),
         IpcRequest::GetConfig => super::system::get_config(state),
@@ -662,7 +665,10 @@ fn handle_request(
             super::templates::merge(state, tx, originals, copies)
         }
         IpcRequest::InstallTemplate { template } => super::catalog::install(state, tx, template),
-        IpcRequest::StartCatalogInstall { template } => super::catalog::start(state, tx, template),
+        IpcRequest::StartCatalogInstall {
+            template,
+            sensor_bindings,
+        } => super::catalog::start(state, tx, template, sensor_bindings),
         IpcRequest::GetCatalogInstallStatus => super::catalog::status(state),
         IpcRequest::GetCatalogStorage => super::catalog::storage(state, false),
         IpcRequest::GetManagedMediaStorage => super::catalog::storage(state, true),

@@ -27,7 +27,7 @@ pub(in super::super) fn draw(
     if text.is_empty() {
         return;
     }
-    let resolved_color = if ranges.is_empty() {
+    let resolved_color = if ranges.is_empty() || state.resolved_sensor.is_none() {
         color
     } else {
         let raw = state

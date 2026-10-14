@@ -92,6 +92,7 @@ const messages: typeof en = {
       diskRead: "磁盘 {device}：读取（MB/s）",
       diskWrite: "磁盘 {device}：写入（MB/s）",
       fallback: "数据源",
+      unbound: "不可用（{category}）",
     },
     fields: {
       text: "文本",
@@ -210,6 +211,27 @@ const messages: typeof en = {
     installSaved: "已保存 {id}。",
     installing: "正在安装 {id}…关闭此窗口不会中断守护进程的安装。",
     installChanged: "守护进程或安装任务已变化。请重新加载模板并检查最新的安装状态",
+    sensorsUnavailable: "无法读取模板的传感器：{error}。请重新安装以重试。",
+    templateChecksum: "下载的模板与目录不匹配。请刷新目录后重试",
+  },
+  sensorBinding: {
+    title: "{name} 的传感器",
+    hint: "已预先选择检测到的传感器。设为“不可用”的读数会显示 N/A，直到您在编辑器中选择传感器。",
+    unavailable: "不可用（显示 N/A）",
+    detected: "检测到的传感器",
+    categories: {
+      cpuTemp: "CPU 温度",
+      gpuTemp: "GPU 温度",
+      cpuUsage: "CPU 使用率",
+      gpuUsage: "GPU 使用率",
+      memUsage: "内存使用率",
+      memUsed: "已用内存",
+      memFree: "可用内存",
+      networkRx: "网络下载",
+      networkTx: "网络上传",
+      diskRead: "磁盘读取",
+      diskWrite: "磁盘写入",
+    },
   },
 };
 

@@ -193,9 +193,9 @@ pub enum ResolvedSensor {
 }
 
 /// Abstract sensor categories used by downloadable templates to bind widgets
-/// to whichever concrete sensor the user's machine exposes. Resolved once at
-/// template install time into a concrete `SensorSourceConfig`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+/// to whichever concrete sensor the user's machine exposes. A widget keeps its
+/// category until it is bound to a sensor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SensorCategory {
     CpuTemp,

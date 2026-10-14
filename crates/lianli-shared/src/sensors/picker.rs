@@ -70,7 +70,7 @@ pub fn find_default_gpu_temp(sensors: &[SensorInfo]) -> Option<SensorSource> {
 
 /// Resolve a `SensorCategory` to a concrete `SensorSourceConfig` based on
 /// what the current machine exposes. Returns `None` when no suitable sensor
-/// is available so the caller can leave the widget's existing source intact.
+/// is available.
 pub fn pick_source_for_category(
     category: SensorCategory,
     sensors: &[SensorInfo],

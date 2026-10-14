@@ -2,8 +2,9 @@ use crate::config::{AppConfig, LcdConfig};
 use crate::device_id::DeviceFamily;
 use crate::fan::FanConfig;
 use crate::rgb::{RgbAppConfig, RgbEffect};
+use crate::sensors::SensorCategory;
 use crate::template::catalog::CatalogTemplate;
-use crate::template::LcdTemplate;
+use crate::template::{LcdTemplate, SensorBindings};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -166,6 +167,10 @@ pub enum IpcRequest {
         quantity: u8,
     },
     ListSensors,
+    /// Returns the detected source for each category, `null` when none matches.
+    SuggestSensorSources {
+        categories: Vec<SensorCategory>,
+    },
     ListPwmHeaders,
     GetLcdTemplates,
     SetLcdTemplates {
@@ -183,6 +188,8 @@ pub enum IpcRequest {
     },
     StartCatalogInstall {
         template: CatalogTemplate,
+        #[serde(default)]
+        sensor_bindings: SensorBindings,
     },
     GetCatalogInstallStatus,
     GetCatalogStorage,
@@ -291,6 +298,7 @@ impl IpcRequest {
             | Self::ListRgbPresets
             | Self::GetWirelessOperation { .. }
             | Self::ListSensors
+            | Self::SuggestSensorSources { .. }
             | Self::ListPwmHeaders
             | Self::GetLcdTemplates
             | Self::RenderTemplatePreview { .. }

@@ -20,6 +20,9 @@ const messages: typeof en = {
     otherInvocation: "该守护进程不属于此服务调用，未将其停止",
     signalFailed: "无法请求正常关闭：{error}",
   },
+  sensors: {
+    tooManyCategories: "一次最多只能推荐 {limit} 个传感器类别",
+  },
   config: {
     notLoaded: "未加载配置",
     writeFailed: "写入配置失败：{error}",

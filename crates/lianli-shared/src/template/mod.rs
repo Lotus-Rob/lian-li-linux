@@ -1,7 +1,9 @@
 //! Data model for the `MediaType::Custom` template system.
 
+use crate::media::SensorSourceConfig;
 use crate::sensors::{pick_source_for_category, SensorCategory, SensorInfo};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 pub mod catalog;
@@ -85,8 +87,18 @@ pub struct Widget {
     pub update_interval_ms: Option<u64>,
     #[serde(default)]
     pub fps: Option<f32>,
+    /// While set, `kind`'s source is a portable placeholder that is not bound
+    /// to a sensor on this machine, so the widget renders as unavailable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensor_category: Option<SensorCategory>,
+}
+
+impl Widget {
+    pub fn bound_sensor_source(&self) -> Option<&SensorSourceConfig> {
+        self.kind
+            .source_config()
+            .filter(|_| self.sensor_category.is_none())
+    }
 }
 
 fn default_true() -> bool {
@@ -125,16 +137,30 @@ pub struct FontRef {
     pub path: Option<PathBuf>,
 }
 
-pub fn resolve_sensor_categories(template: &mut LcdTemplate, sensors: &[SensorInfo]) {
+/// The user's sensor choice per category; `None` leaves the category unbound.
+pub type SensorBindings = BTreeMap<SensorCategory, Option<SensorSourceConfig>>;
+
+/// Binds each placeholder widget to the chosen sensor, or to the detected one
+/// when no choice was made. A category without a sensor stays unbound.
+pub fn resolve_sensor_categories(
+    template: &mut LcdTemplate,
+    bindings: &SensorBindings,
+    sensors: &[SensorInfo],
+) {
     for widget in template.widgets.iter_mut() {
-        let Some(category) = widget.sensor_category.take() else {
+        let Some(category) = widget.sensor_category else {
             continue;
         };
-        let Some(source_ref) = widget.kind.source_config_mut() else {
+        let Some(source) = widget.kind.source_config_mut() else {
             continue;
         };
-        if let Some(new_source) = pick_source_for_category(category, sensors) {
-            *source_ref = new_source;
+        let chosen = match bindings.get(&category) {
+            Some(choice) => choice.clone(),
+            None => pick_source_for_category(category, sensors),
+        };
+        if let Some(chosen) = chosen {
+            *source = chosen;
+            widget.sensor_category = None;
         }
     }
 }
@@ -170,5 +196,135 @@ impl LcdTemplate {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sensors::{NvidiaMetric, SensorSource, Unit};
+
+    const CATEGORIES: [&str; 4] = ["cpu_temp", "gpu_temp", "gpu_usage", "cpu_usage"];
+
+    fn portable_template() -> LcdTemplate {
+        let widgets: Vec<_> = CATEGORIES
+            .iter()
+            .map(|category| {
+                serde_json::json!({
+                    "id": category, "x": 0, "y": 0, "width": 10, "height": 10,
+                    "sensor_category": category,
+                    "kind": {"type": "value_text", "source": {"type": "cpu_usage"},
+                        "font_size": 12, "color": [255, 255, 255]}
+                })
+            })
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "id": "portable", "name": "Portable", "base_width": 100, "base_height": 100,
+            "background": {"type": "color", "rgb": [0, 0, 0]},
+            "widgets": widgets
+        }))
+        .unwrap()
+    }
+
+    fn sensor(source: SensorSource, unit: Unit) -> SensorInfo {
+        SensorInfo {
+            source,
+            sensor_name: None,
+            display_name: None,
+            divider: 1,
+            unit,
+            current_value: None,
+        }
+    }
+
+    fn detected_sensors() -> Vec<SensorInfo> {
+        vec![
+            sensor(
+                SensorSource::Hwmon {
+                    name: "k10temp".into(),
+                    label: "Tctl".into(),
+                    device_path: String::new(),
+                },
+                Unit::C,
+            ),
+            sensor(
+                SensorSource::NvidiaGpu {
+                    gpu_index: 0,
+                    metric: NvidiaMetric::Temp,
+                },
+                Unit::C,
+            ),
+            sensor(
+                SensorSource::NvidiaGpu {
+                    gpu_index: 0,
+                    metric: NvidiaMetric::Usage,
+                },
+                Unit::PERCENT,
+            ),
+        ]
+    }
+
+    fn widget<'a>(template: &'a LcdTemplate, id: &str) -> &'a Widget {
+        template.widgets.iter().find(|w| w.id == id).unwrap()
+    }
+
+    #[test]
+    fn missing_sensors_leave_placeholders_unbound() {
+        let mut template = portable_template();
+        resolve_sensor_categories(&mut template, &SensorBindings::new(), &[]);
+        for id in ["cpu_temp", "gpu_temp", "gpu_usage"] {
+            let unbound = widget(&template, id);
+            assert!(unbound.sensor_category.is_some(), "{id} lost its category");
+            assert!(
+                unbound.bound_sensor_source().is_none(),
+                "{id} reads its placeholder"
+            );
+        }
+        let cpu = widget(&template, "cpu_usage");
+        assert_eq!(cpu.sensor_category, None);
+        assert!(matches!(
+            cpu.bound_sensor_source(),
+            Some(SensorSourceConfig::CpuUsage)
+        ));
+    }
+
+    #[test]
+    fn detected_sensors_bind_every_category() {
+        let mut template = portable_template();
+        resolve_sensor_categories(&mut template, &SensorBindings::new(), &detected_sensors());
+        assert!(template.widgets.iter().all(|w| w.sensor_category.is_none()));
+        assert!(matches!(
+            widget(&template, "gpu_usage").bound_sensor_source(),
+            Some(SensorSourceConfig::NvidiaGpu {
+                metric: NvidiaMetric::Usage,
+                ..
+            })
+        ));
+        assert!(matches!(
+            widget(&template, "cpu_temp").bound_sensor_source(),
+            Some(SensorSourceConfig::Hwmon { name, .. }) if name == "k10temp"
+        ));
+    }
+
+    #[test]
+    fn user_choices_override_detection_and_can_leave_a_category_unbound() {
+        let mut template = portable_template();
+        let bindings: SensorBindings = serde_json::from_value(serde_json::json!({
+            "cpu_temp": null,
+            "gpu_temp": {"type": "hwmon", "name": "amdgpu", "label": "edge"}
+        }))
+        .unwrap();
+        resolve_sensor_categories(&mut template, &bindings, &detected_sensors());
+        let cpu_temp = widget(&template, "cpu_temp");
+        assert_eq!(cpu_temp.sensor_category, Some(SensorCategory::CpuTemp));
+        assert!(cpu_temp.bound_sensor_source().is_none());
+        assert!(matches!(
+            widget(&template, "gpu_temp").bound_sensor_source(),
+            Some(SensorSourceConfig::Hwmon { name, .. }) if name == "amdgpu"
+        ));
+        assert!(matches!(
+            widget(&template, "gpu_usage").bound_sensor_source(),
+            Some(SensorSourceConfig::NvidiaGpu { .. })
+        ));
     }
 }

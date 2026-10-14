@@ -205,6 +205,22 @@ export type MediaType =
   | "cooler"
   | "custom";
 
+export type SensorCategory =
+  | "cpu_temp"
+  | "gpu_temp"
+  | "cpu_usage"
+  | "gpu_usage"
+  | "mem_usage"
+  | "mem_used"
+  | "mem_free"
+  | "network_rx"
+  | "network_tx"
+  | "disk_read"
+  | "disk_write";
+
+/** A sensor per category for a catalog install; `null` leaves the category unbound. */
+export type SensorBindings = Partial<Record<SensorCategory, SensorSourceConfig | null>>;
+
 export type SensorSourceConfig =
   | { type: "constant"; value: number }
   | { type: "command"; cmd: string }
@@ -543,7 +559,7 @@ export interface Widget {
   visible?: boolean;
   update_interval_ms?: number | null;
   fps?: number | null;
-  sensor_category?: string | null;
+  sensor_category?: SensorCategory | null;
 }
 
 export type TemplateBackground =

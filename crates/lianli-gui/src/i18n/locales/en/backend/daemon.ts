@@ -18,6 +18,9 @@ export default {
     otherInvocation: "The daemon does not belong to this service invocation. It was not stopped",
     signalFailed: "Cannot request graceful shutdown: {error}",
   },
+  sensors: {
+    tooManyCategories: "At most {limit} sensor categories can be suggested at once",
+  },
   config: {
     notLoaded: "no config loaded",
     writeFailed: "failed to write config: {error}",

@@ -592,6 +592,18 @@ impl WidgetKind {
         ]
     }
 
+    pub fn source_config(&self) -> Option<&SensorSourceConfig> {
+        match self {
+            Self::ValueText { source, .. }
+            | Self::RadialGauge { source, .. }
+            | Self::VerticalBar { source, .. }
+            | Self::HorizontalBar { source, .. }
+            | Self::Speedometer { source, .. }
+            | Self::Sparkline { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+
     pub fn source_config_mut(&mut self) -> Option<&mut SensorSourceConfig> {
         match self {
             Self::ValueText { source, .. }

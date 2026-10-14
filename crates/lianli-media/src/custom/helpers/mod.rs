@@ -15,19 +15,7 @@ pub(super) use text::draw_text_widget;
 
 use lianli_shared::media::SensorSourceConfig;
 use lianli_shared::sensors::{resolve_sensor, ResolvedSensor, SensorInfo};
-use lianli_shared::template::{Widget, WidgetKind};
-
-pub(super) fn widget_sensor_source(kind: &WidgetKind) -> Option<&SensorSourceConfig> {
-    match kind {
-        WidgetKind::ValueText { source, .. }
-        | WidgetKind::RadialGauge { source, .. }
-        | WidgetKind::VerticalBar { source, .. }
-        | WidgetKind::HorizontalBar { source, .. }
-        | WidgetKind::Speedometer { source, .. }
-        | WidgetKind::Sparkline { source, .. } => Some(source),
-        _ => None,
-    }
-}
+use lianli_shared::template::Widget;
 
 pub(super) fn resolve_sensor_source(
     source: &SensorSourceConfig,

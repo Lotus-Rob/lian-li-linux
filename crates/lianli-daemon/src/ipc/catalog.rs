@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use lianli_shared::ipc::IpcResponse;
 use lianli_shared::template::catalog::CatalogInstallStatus;
 use lianli_shared::template::catalog::{self, CatalogTemplate};
+use lianli_shared::template::SensorBindings;
 use lianli_shared::ui_message::UiMessage;
 use parking_lot::Mutex;
 use std::sync::{
@@ -180,7 +181,12 @@ pub fn status(state: &SharedState) -> IpcResponse {
     IpcResponse::ok(&status)
 }
 
-pub fn start(state: &SharedState, tx: EventSender, template: CatalogTemplate) -> IpcResponse {
+pub fn start(
+    state: &SharedState,
+    tx: EventSender,
+    template: CatalogTemplate,
+    bindings: SensorBindings,
+) -> IpcResponse {
     let (job, initial) = match begin(state, &template) {
         Ok(value) => value,
         Err(error) => return error,
@@ -191,7 +197,7 @@ pub fn start(state: &SharedState, tx: EventSender, template: CatalogTemplate) ->
     let spawned = std::thread::Builder::new()
         .name("catalog-install".into())
         .spawn(move || {
-            let response = run(&state, tx, template);
+            let response = run(&state, tx, template, &bindings);
             finish(&worker_job, &response);
         });
     if let Err(error) = spawned {
@@ -210,17 +216,27 @@ pub fn install(state: &SharedState, tx: EventSender, template: CatalogTemplate) 
         Ok(value) => value,
         Err(error) => return error,
     };
-    let response = run(state, tx, template);
+    let response = run(state, tx, template, &SensorBindings::default());
     finish(&job, &response);
     response
 }
 
-fn run(state: &SharedState, tx: EventSender, template: CatalogTemplate) -> IpcResponse {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| install_inner(state, tx, template)))
+fn run(
+    state: &SharedState,
+    tx: EventSender,
+    template: CatalogTemplate,
+    bindings: &SensorBindings,
+) -> IpcResponse {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| install_inner(state, tx, template, bindings)))
         .unwrap_or_else(|_| IpcResponse::error_ui("Catalog worker stopped unexpectedly. Reload templates before retrying. Publication may have completed.", UiMessage::new("daemon.catalog.workerStopped")))
 }
 
-fn install_inner(state: &SharedState, tx: EventSender, template: CatalogTemplate) -> IpcResponse {
+fn install_inner(
+    state: &SharedState,
+    tx: EventSender,
+    template: CatalogTemplate,
+    bindings: &SensorBindings,
+) -> IpcResponse {
     let control = state.lock().catalog_control.clone();
     if control.stopped() {
         return IpcResponse::error_ui(
@@ -238,7 +254,9 @@ fn install_inner(state: &SharedState, tx: EventSender, template: CatalogTemplate
     let sensors = lianli_shared::sensors::enumerate_sensors();
 
     let prepared =
-        match catalog::install_template(&template, &sensors, &config_dir, || control.stopped()) {
+        match catalog::install_template(&template, bindings, &sensors, &config_dir, || {
+            control.stopped()
+        }) {
             Ok(t) => t,
             Err(e) => {
                 return IpcResponse::error_ui(
@@ -331,9 +349,27 @@ mod tests {
             serde_json::from_str(include_str!("../../../../templates/default_templates.json"))
                 .unwrap();
         assert!(!lianli_shared::ipc::IpcRequest::StartCatalogInstall {
-            template: manifest.templates[0].clone()
+            template: manifest.templates[0].clone(),
+            sensor_bindings: Default::default(),
         }
         .is_read_only());
         assert!(lianli_shared::ipc::IpcRequest::GetCatalogInstallStatus.is_read_only());
+    }
+
+    #[test]
+    fn install_request_without_sensor_choices_uses_detection() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../templates/default_templates.json"))
+                .unwrap();
+        let request: lianli_shared::ipc::IpcRequest = serde_json::from_value(serde_json::json!({
+            "method": "StartCatalogInstall",
+            "params": {"template": manifest["templates"][0]}
+        }))
+        .unwrap();
+        assert!(matches!(
+            request,
+            lianli_shared::ipc::IpcRequest::StartCatalogInstall { sensor_bindings, .. }
+                if sensor_bindings.is_empty()
+        ));
     }
 }
