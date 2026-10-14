@@ -3,6 +3,29 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v1.2.1 — 2026-10-14
+
+### Documentation
+- Add localization guidance to AGENTS.md  (`9609f72`)
+
+### Features
+- **packaging**: Publish a release AUR package  (`14b59ad`)
+- **gui**: Add Simplified Chinese translation and a language setting  (`a4ea14f`)
+- **ipc**: Send daemon messages as translation keys  (`7358b27`)
+- **gui**: Enlarge catalog previews before installation  ([#254](https://github.com/sgtaziz/lian-li-linux/pull/254))
+
+### Fixes
+- **gui**: Open links through the desktop portal from containers  (`076c054`)
+- **usb**: Stop sending SET_INTERFACE when claiming devices  (`db391ed`)
+- **packaging**: Follow Arch Rust guidelines and move the git PKGBUILD  (`841e1d6`)
+- **packaging**: Pass ssh paths explicitly when publishing to the AUR  (`ca531d9`)
+- **gui**: Move saved GUI preferences to the lianli-linux prefix  (`c4c277e`)
+- **lcd**: Choose template sensors on install instead of showing placeholders (fixes [#256](https://github.com/sgtaziz/lian-li-linux/issues/256))
+
+### Other changes
+- [TEMPLATE] add Cyber Rain mustard dashboard  ([#255](https://github.com/sgtaziz/lian-li-linux/pull/255))
+- [TEMPLATE] add Maneki Neko ivory dashboard  ([#252](https://github.com/sgtaziz/lian-li-linux/pull/252))
+
 ## v1.2.0 — 2026-10-12
 
 ### Features
