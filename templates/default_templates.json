@@ -267,6 +267,28 @@
           "sha256": "e8f378cd5662a86b853ac608522a9aedbbe26b8b6f89b1ea3eb6a8aeeda286cf"
         }
       ]
+    },
+    {
+      "id": "maneki-neko-horizontal",
+      "name": "Maneki Neko / Ivory",
+      "description": "Light ivory lucky-cat dashboard with CPU/GPU temperature and load bars, RAM usage and a seconds clock.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.1.6",
+      "folder": "maneki-neko-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "45b392edea4ad8e7e744d18e92b25694369e3464e60d287d0a0538c9cb3491dc",
+      "preview": "preview.png",
+      "preview_sha256": "3143cb9cdc8ffb5cd7eb0f801573eb03a0d59596caddc18d94bba6d194ea8d20",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "files": [
+        { "path": "background.png", "sha256": "ab27c265143d3bad98bf21ad4d55d4cf2ebb5a98771e647b58bff67a81751653" },
+        { "path": "maneki-neko.png", "sha256": "3fab58644f8b07be4f6c1079a7397b9bb248a9a72f0c374baa26c5f70fd2eceb" },
+        { "path": "Lato-Heavy.ttf", "sha256": "4ce7ec20cd9c391b271b4149ad8cf5a71301d98965403f14fc5530d017146dbb" },
+        { "path": "Lato-OFL.txt", "sha256": "ea02980578560b53a6853c0846e411978e171132e336e8baf2c1a71e9e0eb94b" },
+        { "path": "CREDITS.md", "sha256": "68bc81a2bfac3094f921087dd0cdfaea3ac51a00bbb8153e82a5a28d06df5492" }
+      ]
     }
   ]
 }
