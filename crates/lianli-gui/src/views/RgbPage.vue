@@ -9,7 +9,7 @@ import { useDevicesStore } from "@/stores/devices";
 import { rgbDeviceLabels } from "@/utils/deviceNames";
 import RgbDeviceCard from "@/components/rgb/RgbDeviceCard.vue";
 import RgbSyncEditor from "@/components/rgb/RgbSyncEditor.vue";
-import OpenRgbRegionsToggle from "@/components/rgb/OpenRgbRegionsToggle.vue";
+import OpenRgbOptions from "@/components/rgb/OpenRgbOptions.vue";
 import StatusDot from "@/components/common/StatusDot.vue";
 import { motherboardSyncEnabled, quickSyncControls } from "@/components/rgb/syncSettings";
 import { useTranslate } from "@/i18n";
@@ -117,7 +117,7 @@ function capSummary(cap: RgbDeviceCapabilities): string {
       </div>
       <template v-if="openrgbEnabled">
         <p class="hint">{{ t("rgb.page.openrgbWarning") }}</p>
-        <OpenRgbRegionsToggle />
+        <OpenRgbOptions />
       </template>
     </section>
 

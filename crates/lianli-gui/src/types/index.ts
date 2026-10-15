@@ -420,6 +420,7 @@ export interface RgbAppConfig {
   openrgb_server: boolean;
   openrgb_port: number;
   openrgb_regions?: boolean;
+  openrgb_per_fan_zones?: boolean;
   devices: RgbDeviceConfig[];
   merge_lighting?: MergeLightingConfig | null;
 }

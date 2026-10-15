@@ -329,6 +329,7 @@ fn capability_revision_disconnects_and_reenumerates_clients() {
         buffer.clone(),
         port,
         true,
+        false,
         stop.clone(),
         state.clone(),
     );

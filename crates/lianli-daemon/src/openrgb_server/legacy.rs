@@ -1,3 +1,4 @@
+use super::fan_groups::{FanGroup, FanGroups};
 use super::*;
 use std::collections::HashMap;
 
@@ -17,19 +18,32 @@ pub(super) fn capabilities(cap: &RgbDeviceCapabilities) -> RgbDeviceCapabilities
 pub(super) fn states(
     caps: &[RgbDeviceCapabilities],
     previous: &States,
+    fan_groups: &FanGroups,
     rgb: &RgbController,
 ) -> States {
     caps.iter()
         .map(|cap| {
+            let group = fan_groups.get(&cap.device_id).cloned();
             let state = previous
                 .get(&cap.device_id)
-                .filter(|state| state.lock().cap == capabilities(cap))
+                .filter(|state| {
+                    let state = state.lock();
+                    state.cap == capabilities(cap) && state.group == group
+                })
                 .cloned()
                 .unwrap_or_else(|| {
-                    Arc::new(Mutex::new(State::from_saved(
-                        cap.clone(),
-                        &rgb.saved_zone_effects(&cap.device_id),
-                    )))
+                    let mut saved = rgb.saved_zone_effects(&cap.device_id);
+                    if group.is_some() {
+                        // Native settings are per fan; one shared effect maps onto the group zone.
+                        let shared = saved
+                            .first()
+                            .filter(|(_, first)| saved.iter().all(|(_, effect)| effect == first))
+                            .map(|(_, effect)| effect.clone());
+                        saved = shared.map(|effect| (0, effect)).into_iter().collect();
+                    }
+                    let mut state = State::from_saved(cap.clone(), &saved);
+                    state.group = group;
+                    Arc::new(Mutex::new(state))
                 });
             (cap.device_id.clone(), state)
         })
@@ -308,6 +322,7 @@ pub(super) struct State {
     zones: Vec<ZoneModeData>,
     colors: Vec<[u8; 3]>,
     revision: u64,
+    group: Option<Arc<FanGroup>>,
 }
 
 impl State {
@@ -435,6 +450,7 @@ impl State {
             zones,
             colors,
             revision: 0,
+            group: None,
         }
     }
 
@@ -626,6 +642,22 @@ impl State {
 
     pub(super) fn queue_colors(&self, buffer: &Mutex<DirectColorBuffer>, selected: Option<usize>) {
         // Profile loading also sends stored colours after selecting a hardware effect.
+        if let Some(group) = &self.group {
+            if self.effective_mode(0).name == "Direct" {
+                match group.project(&self.colors) {
+                    Ok(zones) => {
+                        let mut buffer = buffer.lock();
+                        for (zone, colors) in zones {
+                            buffer.set(self.cap.device_id.clone(), zone, colors);
+                        }
+                    }
+                    Err(error) => {
+                        debug!(device = %self.cap.device_id, %error, "OpenRGB fan group colours do not fit the layout");
+                    }
+                }
+            }
+            return;
+        }
         let mut buffer = buffer.lock();
         for zone in 0..self.cap.zones.len() {
             if self.effective_mode(zone).name == "Direct"

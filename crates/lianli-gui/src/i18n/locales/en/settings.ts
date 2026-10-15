@@ -39,7 +39,7 @@ export default {
     retryHint: "Retry uses the saved port. Save to apply edits.",
     retryQueued: "Retry queued using the saved OpenRGB settings. Check the server status for the result.",
     portLabel: "Port",
-    authWarning: "The server binds to a TCP port without authentication. While enabled, the daemon will not apply its own RGB effects.",
+    authWarning: "The SDK server has no authentication, so any local process can control your lighting. The daemon's own RGB effects pause while it is enabled.",
   },
   drift: {
     title: "RGB Drift Detection",

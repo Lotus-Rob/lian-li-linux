@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, watch } from "vue";
-import OpenRgbRegionsToggle from "@/components/rgb/OpenRgbRegionsToggle.vue";
+import OpenRgbOptions from "@/components/rgb/OpenRgbOptions.vue";
 import { backendText, invoke } from "@/utils/backendText";
 import { ExternalLink } from "lucide-vue-next";
 import { useExternalLink } from "@/composables/useExternalLink";
@@ -251,18 +251,22 @@ function onHidBackend(v: "hidraw" | "rusb") {
         <h2 class="section-title">OpenRGB</h2>
         <span class="status-tag"><StatusDot :color="openrgbDot" />{{ openrgbStatus }}</span>
       </div>
-      <n-checkbox v-model:checked="openrgbEnabled" style="margin-top: 1rem;">{{ t("settings.openrgb.enableServer") }}</n-checkbox>
-      <OpenRgbRegionsToggle v-if="openrgbEnabled" />
+      <div class="openrgb-row">
+        <n-checkbox v-model:checked="openrgbEnabled">{{ t("settings.openrgb.enableServer") }}</n-checkbox>
+        <label v-if="openrgbEnabled" class="port-row">
+          <span class="muted">{{ t("settings.openrgb.portLabel") }}</span>
+          <n-input-number v-model:value="openrgbPort" :min="1" :max="65535" size="small" />
+        </label>
+      </div>
+      <template v-if="openrgbEnabled">
+        <p class="hint">{{ t("settings.openrgb.authWarning") }}</p>
+        <OpenRgbOptions class="openrgb-options" />
+      </template>
       <n-alert v-if="daemon.connected && daemon.openrgbEnabled && daemon.openrgbError" type="error" style="margin-top: 1rem;">{{ backendText(daemon.openrgbError, daemon.openrgbErrorUi) }}</n-alert>
       <n-button v-if="daemon.connected && daemon.openrgbEnabled && daemon.openrgbError && !daemon.openrgbRunning" :loading="retryingOpenRgb" :disabled="retryingOpenRgb || !daemon.canWrite || !daemon.info?.capabilities.includes('openrgb_retry')" @click="retryOpenRgb">{{ t("settings.openrgb.retry") }}</n-button>
       <p v-if="daemon.openrgbError && daemon.connected" class="hint">{{ t("settings.openrgb.retryHint") }}</p>
       <p v-if="openrgbRetryQueued" class="hint">{{ t("settings.openrgb.retryQueued") }}</p>
       <p v-if="openrgbFeedback" class="hint">{{ openrgbFeedback }}</p>
-      <div class="field" v-if="openrgbEnabled">
-        <label class="muted">{{ t("settings.openrgb.portLabel") }}</label>
-        <n-input-number v-model:value="openrgbPort" :min="1" :max="65535" size="small" />
-      </div>
-      <p class="hint" v-if="openrgbEnabled">{{ t("settings.openrgb.authWarning") }}</p>
     </section>
 
     <!-- RGB Drift Detection -->
@@ -349,6 +353,25 @@ function onHidBackend(v: "hidraw" | "rusb") {
   flex-direction: column;
   gap: var(--space-1);
   margin-top: var(--space-2);
+}
+.openrgb-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-3);
+}
+.port-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+.port-row .n-input-number {
+  width: 110px;
+}
+.openrgb-options {
+  margin-top: var(--space-3);
 }
 .hint {
   color: var(--text-muted);

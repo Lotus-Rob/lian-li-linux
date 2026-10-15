@@ -41,7 +41,7 @@ const messages: typeof en = {
     retryHint: "重试将使用已保存的端口。保存后编辑内容才会生效。",
     retryQueued: "已按保存的 OpenRGB 设置排队重试。请查看服务器状态了解结果。",
     portLabel: "端口",
-    authWarning: "该服务器绑定的 TCP 端口没有身份验证。启用期间，守护进程不会应用自身的 RGB 灯效。",
+    authWarning: "SDK 服务器没有身份验证，任何本地进程都可以控制 RGB 灯效。启用期间，守护进程自身的 RGB 灯效会暂停。",
   },
   drift: {
     title: "RGB 漂移检测",

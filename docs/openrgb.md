@@ -2,6 +2,14 @@
 
 Enable the OpenRGB SDK server in RGB or Settings and connect OpenRGB to its configured port (6743 by default). Lian Li Linux continues handling cooling and the LCD. Disable OpenRGB's native detectors for devices already controlled by this daemon.
 
+## Wireless fan groups
+
+Each wireless fan group appears as one **Fans** zone running across the group in the same order as Sync lighting, so OpenRGB effects such as Rainbow Wave flow across every fan. Both sides of a TL fan share one colour per position. SL V4 groups and devices without Sync lighting keep one zone per fan.
+
+Enable **One zone per wireless fan** and save to expose each fan as its own zone instead. Changing the setting reconnects OpenRGB; reselect the affected devices in OpenRGB and the Effects plugin afterwards.
+
+Every colour update to a wireless device is a full RF upload, so Direct updates are limited to about five per second for each device and fewer when several devices animate. When an effect repeats, the daemon detects the loop, uploads it once and lets the fans play it in step with the transmitter clock. Live updates resume when the effect changes. Effects that never repeat, such as random, audio or screen effects, stay on the limited live updates.
+
 ## AL V2 inner and outer regions
 
 Enable **AL V2 inner/outer regions** and save. Each populated AL V2 fan group appears as one device with Inner and Outer zones in OpenRGB when connected using SDK v6. Select a zone to change its effect independently.
@@ -38,7 +46,7 @@ The bridge keeps the latest complete update for each fan group and sends it thro
 
 ## Configuration and access
 
-The setting is `rgb.openrgb_regions`, disabled by default.
+The settings are `rgb.openrgb_regions` and `rgb.openrgb_per_fan_zones`, both disabled by default.
 
 Each connection has a bounded outgoing queue and one socket writer. A client that cannot keep up is disconnected so it can reconnect and read the current state; its socket writes do not block other clients.
 

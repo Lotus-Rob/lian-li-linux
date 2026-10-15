@@ -9,7 +9,7 @@ const messages: typeof en = {
     port: "端口",
     enableOpenrgb: "启用 OpenRGB SDK 服务器",
     openrgbWarning:
-      "OpenRGB SDK 服务器绑定到一个 TCP 端口，且没有身份验证。任何本地进程都可以控制 RGB 设备。启用期间，守护进程不会应用自己的 RGB 灯效。",
+      "SDK 服务器没有身份验证，任何本地进程都可以控制 RGB 灯效。启用期间，守护进程自身的 RGB 灯效会暂停。",
     lighting: "灯效",
     deviceCountOne: "{count} 个设备",
     deviceCountMany: "{count} 个设备",
@@ -107,7 +107,14 @@ const messages: typeof en = {
   },
   openrgbRegions: {
     label: "AL V2 内圈/外圈分区",
-    hint: "为每个风扇组分别设置内圈和外圈灯效。保存后会重新连接 OpenRGB，之后需按新布局重新创建配置文件。",
+    hint: "为每个 AL V2 风扇组分别设置内圈和外圈灯效。",
+  },
+  openrgbFanZones: {
+    label: "每个无线风扇单独作为一个区域",
+    hint: "灯效在每个风扇上分别运行，而不是贯穿整个风扇组。",
+  },
+  openrgbOptions: {
+    reconnectNote: "保存更改后会重新连接 OpenRGB。之后需重新选择相关设备或重新创建其配置文件。",
   },
   ledStrip: {
     led: "LED {index}",

@@ -909,12 +909,19 @@ impl ServiceManager {
 
     /// Start or restart the OpenRGB SDK server based on config.
     pub(super) fn start_openrgb_server(&mut self) {
-        let (enabled, port, regions_enabled) = self
+        let (enabled, port, regions_enabled, per_fan_zones) = self
             .config
             .as_ref()
             .and_then(|c| c.rgb.as_ref())
-            .map(|rgb| (rgb.openrgb_server, rgb.openrgb_port, rgb.openrgb_regions))
-            .unwrap_or((false, 6743, false));
+            .map(|rgb| {
+                (
+                    rgb.openrgb_server,
+                    rgb.openrgb_port,
+                    rgb.openrgb_regions,
+                    rgb.openrgb_per_fan_zones,
+                )
+            })
+            .unwrap_or((false, 6743, false, false));
 
         let current_state = self.openrgb.state.lock().clone();
         let needs_restart = self.openrgb.thread.as_ref().is_some_and(|thread| {
@@ -922,6 +929,7 @@ impl ServiceManager {
                 || current_state.error.is_some()
                 || current_state.port != Some(port)
                 || current_state.regions_enabled != regions_enabled
+                || current_state.per_fan_zones != per_fan_zones
                 || !enabled
         });
 
@@ -954,6 +962,7 @@ impl ServiceManager {
                 Arc::clone(&self.controllers.direct_color_buffer),
                 port,
                 regions_enabled,
+                per_fan_zones,
                 Arc::clone(&self.openrgb.stop),
                 Arc::clone(&self.openrgb.state),
             ));

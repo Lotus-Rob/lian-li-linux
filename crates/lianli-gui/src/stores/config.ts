@@ -145,7 +145,7 @@ export const useConfigStore = defineStore("config", () => {
 
   function ensureRgb() {
     if (!config.rgb) {
-      config.rgb = { enabled: true, openrgb_server: false, openrgb_port: 6743, openrgb_regions: false, devices: [] };
+      config.rgb = { enabled: true, openrgb_server: false, openrgb_port: 6743, openrgb_regions: false, openrgb_per_fan_zones: false, devices: [] };
     }
     return config.rgb;
   }

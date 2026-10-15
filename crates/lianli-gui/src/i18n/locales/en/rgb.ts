@@ -7,7 +7,7 @@ export default {
     port: "Port",
     enableOpenrgb: "Enable OpenRGB SDK server",
     openrgbWarning:
-      "The OpenRGB SDK server binds to a TCP port without authentication. Any local process can control your RGB devices. While enabled, the daemon will not apply its own RGB effects.",
+      "The SDK server has no authentication, so any local process can control your lighting. The daemon's own RGB effects pause while it is enabled.",
     lighting: "Lighting",
     deviceCountOne: "{count} device",
     deviceCountMany: "{count} devices",
@@ -106,7 +106,14 @@ export default {
   },
   openrgbRegions: {
     label: "AL V2 inner/outer regions",
-    hint: "Give each fan group independent inner and outer lighting effects. Save to reconnect OpenRGB, then recreate profiles for the new layout.",
+    hint: "Separate inner and outer effects for each AL V2 fan group.",
+  },
+  openrgbFanZones: {
+    label: "One zone per wireless fan",
+    hint: "Run effects on each fan separately instead of across the whole group.",
+  },
+  openrgbOptions: {
+    reconnectNote: "Saving a change reconnects OpenRGB. Reselect the affected devices or recreate their profiles afterwards.",
   },
   ledStrip: {
     led: "LED {index}",

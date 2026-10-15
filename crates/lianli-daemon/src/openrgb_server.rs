@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
 mod clients;
+mod fan_groups;
 #[cfg(test)]
 mod integration_tests;
 mod legacy;
@@ -161,6 +162,7 @@ pub struct OpenRgbServerState {
     pub running: bool,
     pub port: Option<u16>,
     pub regions_enabled: bool,
+    pub per_fan_zones: bool,
     pub error: Option<UiText>,
 }
 
@@ -170,6 +172,7 @@ pub fn start_openrgb_server(
     direct_buffer: Arc<Mutex<DirectColorBuffer>>,
     port: u16,
     regions_enabled: bool,
+    per_fan_zones: bool,
     stop_flag: Arc<AtomicBool>,
     state: Arc<Mutex<OpenRgbServerState>>,
 ) -> thread::JoinHandle<()> {
@@ -179,6 +182,7 @@ pub fn start_openrgb_server(
             direct_buffer,
             port,
             regions_enabled,
+            per_fan_zones,
             &stop_flag,
             &state,
         ) {
@@ -202,6 +206,7 @@ fn run_server(
     direct_buffer: Arc<Mutex<DirectColorBuffer>>,
     port: u16,
     regions_enabled: bool,
+    per_fan_zones: bool,
     stop_flag: &Arc<AtomicBool>,
     state: &Arc<Mutex<OpenRgbServerState>>,
 ) -> anyhow::Result<()> {
@@ -236,21 +241,22 @@ fn run_server(
         s.running = true;
         s.port = Some(port);
         s.regions_enabled = regions_enabled;
+        s.per_fan_zones = per_fan_zones;
         s.error = None;
     }
 
     let client_count = Arc::new(AtomicUsize::new(0));
     let mut clients = Clients::default();
     let notifications = Arc::new(Mutex::new(clients::Notifications::default()));
-    let (mut caps, revision, mut observed_revision, mut groups) = {
+    let (mut caps, mut fan_groups, revision, mut observed_revision, mut groups) = {
         let rgb = rgb.lock();
-        let caps = rgb.exposed_capabilities();
+        let (caps, fan_groups) = fan_groups::expose(rgb.exposed_capabilities(), per_fan_zones);
         let revision = rgb.capabilities_revision();
         let observed = revision.load(Ordering::Acquire);
         let groups = regions::groups(&caps, &rgb, &Default::default(), regions_enabled);
-        (caps, revision, observed, groups)
+        (caps, fan_groups, revision, observed, groups)
     };
-    let mut legacy_states = legacy::states(&caps, &Default::default(), &rgb.lock());
+    let mut legacy_states = legacy::states(&caps, &Default::default(), &fan_groups, &rgb.lock());
     let mut delivery_devices: std::collections::HashMap<_, _> = {
         let rgb = rgb.lock();
         caps.iter()
@@ -263,8 +269,10 @@ fn run_server(
         clients.reap();
         let current_revision = revision.load(Ordering::Acquire);
         if current_revision != observed_revision {
-            let current = rgb.lock().exposed_capabilities();
+            let (current, current_fan_groups) =
+                fan_groups::expose(rgb.lock().exposed_capabilities(), per_fan_zones);
             if current != caps {
+                fan_groups = current_fan_groups;
                 // Existing clients must not send commands using reassigned device indexes.
                 clients = Clients::default();
                 notifications.lock().reset();
@@ -274,7 +282,7 @@ fn run_server(
                     .map(|cap| cap.device_id.clone())
                     .collect();
                 direct_buffer.lock().retain_devices(&retained);
-                legacy_states = legacy::states(&current, &legacy_states, &rgb.lock());
+                legacy_states = legacy::states(&current, &legacy_states, &fan_groups, &rgb.lock());
                 groups = regions::groups(&current, &rgb.lock(), &groups, regions_enabled);
                 for (id, group) in &groups {
                     if !retained.contains(id) {

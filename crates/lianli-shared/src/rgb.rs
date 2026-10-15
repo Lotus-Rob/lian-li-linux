@@ -738,6 +738,10 @@ pub struct RgbAppConfig {
     /// Expose independent AL V2 inner/outer controls, grouped as zones on SDK v6.
     #[serde(default)]
     pub openrgb_regions: bool,
+    /// Expose wireless fan groups as one zone per fan instead of one zone
+    /// spanning the group.
+    #[serde(default)]
+    pub openrgb_per_fan_zones: bool,
     /// Per-device RGB settings.
     #[serde(default)]
     pub devices: Vec<RgbDeviceConfig>,
@@ -760,6 +764,7 @@ impl Default for RgbAppConfig {
             openrgb_server: false,
             openrgb_port: default_openrgb_port(),
             openrgb_regions: false,
+            openrgb_per_fan_zones: false,
             devices: Vec::new(),
             merge_lighting: None,
         }
@@ -849,8 +854,11 @@ mod led_count_tests {
     fn old_openrgb_configuration_keeps_legacy_topology() {
         let mut config: RgbAppConfig = serde_json::from_str(r#"{"openrgb_server":true}"#).unwrap();
         assert!(!config.openrgb_regions);
+        assert!(!config.openrgb_per_fan_zones);
         assert!(!RgbAppConfig::default().openrgb_regions);
+        assert!(!RgbAppConfig::default().openrgb_per_fan_zones);
         config.openrgb_regions = true;
+        config.openrgb_per_fan_zones = true;
         let restored: RgbAppConfig =
             serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
         assert_eq!(restored, config);
