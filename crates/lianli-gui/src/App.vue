@@ -12,6 +12,7 @@ import AppSidebar from "@/components/layout/AppSidebar.vue";
 import AppHeader from "@/components/layout/AppHeader.vue";
 import InstallationNotice from "@/components/common/InstallationNotice.vue";
 import CompatibilityNotice from "@/components/common/CompatibilityNotice.vue";
+import WirelessNotice from "@/components/common/WirelessNotice.vue";
 
 const daemon = useDaemonStore();
 const config = useConfigStore();
@@ -137,6 +138,7 @@ onUnmounted(() => {
               <div class="main">
                 <AppHeader />
                 <CompatibilityNotice />
+                <WirelessNotice />
                 <div class="content">
                   <router-view v-slot="{ Component }">
                     <transition name="page" mode="out-in">

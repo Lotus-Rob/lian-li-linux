@@ -1,12 +1,15 @@
 use super::ServiceManager;
 use lianli_devices::wireless::{
-    DonglePresence, RecoveryAttempt, RecoveryLadder, RecoveryPlan, WirelessController,
+    Dongle, DonglePresence, RecoveryAttempt, RecoveryLadder, RecoveryPlan, WirelessController,
 };
+use lianli_shared::ipc::WirelessDongle;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 use tracing::{debug, info, warn};
+
+const UNRESPONSIVE_AFTER_RESETS: usize = 2;
 
 struct RecoveryWorker {
     stop: Arc<AtomicBool>,
@@ -21,6 +24,7 @@ pub(super) struct WirelessRecovery {
     link_up: bool,
     ever_connected: bool,
     last_error: Option<String>,
+    unresponsive: Option<Dongle>,
 }
 
 impl WirelessRecovery {
@@ -29,6 +33,43 @@ impl WirelessRecovery {
             return None;
         }
         self.worker.take().map(|worker| worker.handle.join())
+    }
+
+    pub(super) fn unresponsive_dongle(&self) -> Option<WirelessDongle> {
+        self.unresponsive.map(|dongle| match dongle {
+            Dongle::Tx => WirelessDongle::Transmitter,
+            Dongle::Rx => WirelessDongle::Receiver,
+        })
+    }
+
+    /// A dongle that stays plugged in through repeated failed companion
+    /// resets needs a physical replug.
+    fn record(&mut self, attempt: &RecoveryAttempt, now: Instant) {
+        self.ladder.record(attempt, now);
+        if attempt.result.is_ok() {
+            self.unresponsive = None;
+            return;
+        }
+        if let Some(target) = attempt.reset {
+            if self.ladder.resets() >= UNRESPONSIVE_AFTER_RESETS && self.present(target) {
+                self.unresponsive = Some(target);
+            }
+        }
+    }
+
+    fn present(&self, dongle: Dongle) -> bool {
+        location(self.presence, dongle).is_some()
+    }
+
+    /// Stores a fresh scan and reports whether it changed. A flagged dongle
+    /// that moved or vanished was replugged, so the flag no longer applies.
+    fn observe(&mut self, presence: DonglePresence) -> bool {
+        if let Some(dongle) = self.unresponsive {
+            if location(presence, dongle) != location(self.presence, dongle) {
+                self.unresponsive = None;
+            }
+        }
+        std::mem::replace(&mut self.presence, presence) != presence
     }
 
     pub(super) fn cancel(&self) {
@@ -48,7 +89,25 @@ impl WirelessRecovery {
     }
 }
 
+fn location(presence: DonglePresence, dongle: Dongle) -> Option<(u8, u8)> {
+    match dongle {
+        Dongle::Tx => presence.tx,
+        Dongle::Rx => presence.rx,
+    }
+}
+
 impl ServiceManager {
+    fn observe_wireless_presence(&mut self, presence: DonglePresence) -> bool {
+        let flagged = self.wireless_recovery.unresponsive.is_some();
+        let changed = self.wireless_recovery.observe(presence);
+        if flagged && self.wireless_recovery.unresponsive.is_none() {
+            self.ipc.state.lock().state_health.wireless_unavailable(
+                "A wireless dongle was reconnected. The daemon is reconnecting the dongles.",
+            );
+        }
+        changed
+    }
+
     pub(super) fn connect_wireless_at_startup(&mut self) {
         let presence = DonglePresence::scan();
         self.wireless_recovery.presence = presence;
@@ -71,7 +130,7 @@ impl ServiceManager {
             return;
         };
         // A companion reset re-enumerates the dongle; that must not count as hotplug.
-        self.wireless_recovery.presence = DonglePresence::scan();
+        self.observe_wireless_presence(DonglePresence::scan());
         let attempt = match finished {
             Ok((controller, attempt)) => {
                 if attempt.result.is_ok() {
@@ -108,9 +167,8 @@ impl ServiceManager {
 
         let now = Instant::now();
         let presence = DonglePresence::scan();
-        if presence != self.wireless_recovery.presence {
+        if self.observe_wireless_presence(presence) {
             debug!(?presence, "Wireless dongle presence changed");
-            self.wireless_recovery.presence = presence;
             self.wireless_recovery.ladder.hotplug(now);
         }
         let recoverable = presence.tx.is_some()
@@ -154,16 +212,19 @@ impl ServiceManager {
     }
 
     fn finish_wireless_attempt(&mut self, attempt: RecoveryAttempt) {
-        self.wireless_recovery
-            .ladder
-            .record(&attempt, Instant::now());
+        self.wireless_recovery.record(&attempt, Instant::now());
         if let Err(error) = attempt.result {
             let error = format!("{error:#}");
-            self.ipc
-                .state
-                .lock()
-                .state_health
-                .wireless_unavailable(&error);
+            let unresponsive = self.wireless_recovery.unresponsive_dongle();
+            {
+                let mut state = self.ipc.state.lock();
+                match unresponsive {
+                    Some(dongle) => state
+                        .state_health
+                        .wireless_dongle_unresponsive(dongle, &error),
+                    None => state.state_health.wireless_unavailable(&error),
+                }
+            }
             if self.wireless_recovery.last_error.as_ref() != Some(&error) {
                 warn!(%error, "Wireless reconnect failed; wireless fans and pumps keep their last speed until it recovers");
                 self.wireless_recovery.last_error = Some(error);
@@ -206,5 +267,102 @@ impl ServiceManager {
         } else {
             state.state_health.wireless_ready();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn attempt(reset: Option<Dongle>, ok: bool) -> RecoveryAttempt {
+        RecoveryAttempt {
+            reset,
+            result: if ok {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!("TX is not accepting USB writes"))
+            },
+        }
+    }
+
+    fn with_both_dongles() -> WirelessRecovery {
+        WirelessRecovery {
+            presence: DonglePresence {
+                tx: Some((8, 22)),
+                rx: Some((8, 21)),
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn present_dongle_is_unresponsive_only_after_repeated_failed_resets() {
+        let now = Instant::now();
+        let mut recovery = with_both_dongles();
+        recovery.record(&attempt(None, false), now);
+        recovery.record(&attempt(Some(Dongle::Tx), false), now);
+        assert_eq!(recovery.unresponsive_dongle(), None);
+        recovery.record(&attempt(Some(Dongle::Tx), false), now);
+        assert_eq!(
+            recovery.unresponsive_dongle(),
+            Some(WirelessDongle::Transmitter)
+        );
+        recovery.record(&attempt(None, false), now);
+        assert_eq!(
+            recovery.unresponsive_dongle(),
+            Some(WirelessDongle::Transmitter)
+        );
+        recovery.record(&attempt(None, true), now);
+        assert_eq!(recovery.unresponsive_dongle(), None);
+    }
+
+    #[test]
+    fn replugging_the_flagged_dongle_clears_it_even_mid_attempt() {
+        let now = Instant::now();
+        let mut recovery = with_both_dongles();
+        for _ in 0..2 {
+            recovery.record(&attempt(Some(Dongle::Tx), false), now);
+        }
+        let stuck = recovery.presence;
+        assert!(!recovery.observe(stuck));
+        assert!(recovery.unresponsive_dongle().is_some());
+        let unplugged = DonglePresence { tx: None, ..stuck };
+        assert!(recovery.observe(unplugged));
+        assert_eq!(recovery.unresponsive_dongle(), None);
+
+        for _ in 0..2 {
+            recovery.record(&attempt(Some(Dongle::Tx), false), now);
+        }
+        assert_eq!(recovery.unresponsive_dongle(), None);
+        let replugged = DonglePresence {
+            tx: Some((8, 30)),
+            ..stuck
+        };
+        recovery.observe(replugged);
+        for _ in 0..2 {
+            recovery.record(&attempt(Some(Dongle::Tx), false), now);
+        }
+        assert!(recovery.unresponsive_dongle().is_some());
+        recovery.observe(DonglePresence {
+            tx: Some((8, 31)),
+            ..replugged
+        });
+        assert_eq!(recovery.unresponsive_dongle(), None);
+    }
+
+    #[test]
+    fn missing_dongle_is_never_reported_as_unresponsive() {
+        let now = Instant::now();
+        let mut recovery = WirelessRecovery {
+            presence: DonglePresence {
+                tx: None,
+                rx: Some((8, 21)),
+            },
+            ..Default::default()
+        };
+        for _ in 0..3 {
+            recovery.record(&attempt(Some(Dongle::Tx), false), now);
+        }
+        assert_eq!(recovery.unresponsive_dongle(), None);
     }
 }

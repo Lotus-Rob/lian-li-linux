@@ -22,6 +22,14 @@ const messages: typeof en = {
     remediation:
       "检查发射器和接收器的连接、守护进程日志和 USB 权限。链路恢复前，无线风扇和水泵保持最后的转速。守护进程会自动重试并重置无响应的无线控制器。“重新检查”仅读取状态。",
   },
+  wirelessTransmitterUnresponsive: {
+    title: "无线发射器已停止响应",
+    remediation: "请拔下无线发射器并重新插入。软件重置未能使其重新启动。在其恢复响应前，无线风扇和水泵保持最后的转速。",
+  },
+  wirelessReceiverUnresponsive: {
+    title: "无线接收器已停止响应",
+    remediation: "请拔下无线接收器并重新插入。软件重置未能使其重新启动。在其恢复响应前，无线风扇和水泵保持最后的转速。",
+  },
   deviceOpenFailed: {
     title: "无法打开设备",
     remediation:

@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
 const TX_FAILURE_THRESHOLD: u32 = 5;
+const MAX_MASTER_QUERY_WRITE_FAILURES: u32 = 3;
 
 /// Builds the RF_ClockSync frame. rf_data[14..64] always carries the vendor
 /// 0x14 "unset" sentinel: targeted frames read rx_type and channel from that
@@ -224,6 +225,7 @@ impl WirelessController {
             .collect();
 
         let mut last_transport_error = None;
+        let mut write_failures = 0;
         for channel in channels_to_try {
             let attempts = if channel == 8 { 3 } else { 1 };
             for attempt in 1..=attempts {
@@ -251,10 +253,17 @@ impl WirelessController {
                 }
                 if let Err(error) = handle.write(&cmd, USB_TIMEOUT) {
                     debug!(channel, attempt, %error, "Master query write failed");
-                    last_transport_error =
-                        Some(anyhow::anyhow!(error).context("writing master MAC query"));
+                    let error = anyhow::anyhow!(error).context("writing master MAC query");
+                    write_failures += 1;
+                    // A rejected USB write does not depend on the channel, so
+                    // scanning further only delays the TX reset.
+                    if write_failures >= MAX_MASTER_QUERY_WRITE_FAILURES {
+                        return Err(error).context("Wireless TX is not accepting USB writes");
+                    }
+                    last_transport_error = Some(error);
                     continue;
                 }
+                write_failures = 0;
 
                 let mut response = [0u8; 64];
                 let len = match handle.read(&mut response, Duration::from_millis(500)) {

@@ -137,7 +137,10 @@ export interface TelemetrySnapshot {
   openrgb_status: OpenRgbServerStatus;
   /** Active pixel cleaner sessions keyed by target ID, card index, or "all" for multi-LCD concurrency. */
   pixel_clean_statuses?: Record<string, PixelCleanStatus>;
+  unresponsive_dongle?: WirelessDongle | null;
 }
+
+export type WirelessDongle = "transmitter" | "receiver";
 
 export interface DesktopStreamStatus {
   bus: number;

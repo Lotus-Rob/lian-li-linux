@@ -24,6 +24,16 @@ export default {
     remediation:
       "Check the transmitter and receiver connections, daemon logs and USB permissions. Wireless fans and pumps keep their last speed until the link recovers. The daemon retries and resets unresponsive dongles automatically. Recheck only reads status.",
   },
+  wirelessTransmitterUnresponsive: {
+    title: "Wireless transmitter stopped responding",
+    remediation:
+      "Unplug the wireless transmitter and plug it back in. Software resets did not restart it. Wireless fans and pumps keep their last speed until it responds.",
+  },
+  wirelessReceiverUnresponsive: {
+    title: "Wireless receiver stopped responding",
+    remediation:
+      "Unplug the wireless receiver and plug it back in. Software resets did not restart it. Wireless fans and pumps keep their last speed until it responds.",
+  },
   deviceOpenFailed: {
     title: "Device could not open",
     remediation:

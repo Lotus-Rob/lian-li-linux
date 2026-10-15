@@ -21,6 +21,14 @@ export default {
     openGuide: "Open guide",
     reviewChecks: "Review checks",
   },
+  wirelessNotice: {
+    transmitterTitle: "Wireless transmitter stopped responding",
+    transmitterBody:
+      "Unplug the wireless transmitter and plug it back in. Software resets did not restart it. Wireless fans and pumps keep their last speed until it responds.",
+    receiverTitle: "Wireless receiver stopped responding",
+    receiverBody:
+      "Unplug the wireless receiver and plug it back in. Software resets did not restart it. Wireless fans and pumps keep their last speed until it responds.",
+  },
   compatibilityNotice: {
     title: "Changes disabled",
   },

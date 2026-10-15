@@ -7,7 +7,7 @@ import { useConfigStore } from "@/stores/config";
 import { useThermalStore } from "@/stores/thermal";
 import { useLcdStore } from "@/stores/lcd";
 import { DONGLE_FAMILIES } from "@/constants";
-import type { DaemonInfo, SensorInfo, TelemetrySnapshot } from "@/types";
+import type { DaemonInfo, SensorInfo, TelemetrySnapshot, WirelessDongle } from "@/types";
 import type { UiMessage } from "@/utils/backendText";
 
 function findTemp(sensors: SensorInfo[], kind: "cpu" | "gpu"): number | null {
@@ -45,6 +45,7 @@ export const useDaemonStore = defineStore("daemon", () => {
   const openrgbError = ref("");
   const openrgbErrorUi = ref<UiMessage | null>(null);
   const openrgbPort = ref<number | null>(null);
+  const unresponsiveDongle = ref<WirelessDongle | null>(null);
 
   let wasConnected = false;
   let lastDeviceCount = -1;
@@ -67,6 +68,7 @@ export const useDaemonStore = defineStore("daemon", () => {
       openrgbError.value = result.telemetry.openrgb_status.error ?? "";
       openrgbErrorUi.value = result.telemetry.openrgb_status.error_ui ?? null;
       openrgbPort.value = result.telemetry.openrgb_status.port;
+      unresponsiveDongle.value = result.telemetry.unresponsive_dongle ?? null;
 
       devices.applyPoll(result.devices, result.telemetry);
       lcd.applyCleanerTelemetry(result.telemetry.pixel_clean_statuses);
@@ -95,6 +97,7 @@ export const useDaemonStore = defineStore("daemon", () => {
       connected.value = false;
       mediaPreparation.value = {};
       desktopStreams.value = [];
+      unresponsiveDongle.value = null;
       info.value = null;
       writeError.value = null;
       writeErrorUi.value = null;
@@ -134,6 +137,7 @@ export const useDaemonStore = defineStore("daemon", () => {
     openrgbError,
     openrgbErrorUi,
     openrgbPort,
+    unresponsiveDongle,
     refresh,
     start,
     stop,

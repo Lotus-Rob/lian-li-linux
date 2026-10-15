@@ -695,6 +695,16 @@ pub struct TelemetrySnapshot {
     /// Map of active pixel cleaner sessions per target (keyed by target ID, card index, or "all") to support independent concurrent sessions.
     #[serde(default)]
     pub pixel_clean_statuses: HashMap<String, PixelCleanStatus>,
+    /// A wireless dongle that stays present but did not recover after companion resets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unresponsive_dongle: Option<WirelessDongle>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WirelessDongle {
+    Transmitter,
+    Receiver,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

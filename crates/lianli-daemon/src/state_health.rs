@@ -1,6 +1,7 @@
 use lianli_shared::installation::{
     CheckState, FindingSeverity, InstallationFinding, InstallationGuide,
 };
+use lianli_shared::ipc::WirelessDongle;
 use std::collections::BTreeMap;
 
 #[derive(Default)]
@@ -59,6 +60,27 @@ impl StateHealth {
 
     pub fn wireless_receiver_incomplete(&mut self, error: &str) {
         self.wireless_finding(error, FindingSeverity::Warning);
+    }
+
+    pub fn wireless_dongle_unresponsive(&mut self, dongle: WirelessDongle, error: &str) {
+        let (title, remediation, key) = match dongle {
+            WirelessDongle::Transmitter => (
+                "Wireless transmitter stopped responding",
+                "Unplug the wireless transmitter and plug it back in. Software resets did not restart it. Wireless fans and pumps keep their last speed until it responds.",
+                "daemon.wirelessTransmitterUnresponsive",
+            ),
+            WirelessDongle::Receiver => (
+                "Wireless receiver stopped responding",
+                "Unplug the wireless receiver and plug it back in. Software resets did not restart it. Wireless fans and pumps keep their last speed until it responds.",
+                "daemon.wirelessReceiverUnresponsive",
+            ),
+        };
+        self.wireless_finding(error, FindingSeverity::Error);
+        if let Some(finding) = &mut self.wireless {
+            finding.title = title.into();
+            finding.remediation = remediation.into();
+            finding.message_key = Some(key.into());
+        }
     }
 
     fn wireless_finding(&mut self, error: &str, severity: FindingSeverity) {

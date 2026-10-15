@@ -552,6 +552,7 @@ impl ServiceManager {
             ipc_state.telemetry.fan_rpms = fan_rpms;
             ipc_state.telemetry.coolant_temps = coolant_temps;
             ipc_state.telemetry.pixel_clean_statuses = ipc_state.pixel_clean_statuses();
+            ipc_state.telemetry.unresponsive_dongle = self.wireless_recovery.unresponsive_dongle();
             ipc_state.devices = devices;
         }
     }
