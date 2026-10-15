@@ -596,6 +596,7 @@ impl ClientHandler {
                     }
                     let mut state = state.lock();
                     state.commit_mode(next);
+                    self.direct_buffer.lock().discard(&cap.device_id);
                     state.queue_colors(&self.direct_buffer, None);
                     state.update(kind)
                 };

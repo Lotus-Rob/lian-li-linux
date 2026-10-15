@@ -3,6 +3,8 @@ mod capabilities;
 mod configuration;
 mod control;
 mod direct_color;
+mod live_loop;
+mod live_wireless;
 mod playback;
 mod regions;
 mod render;

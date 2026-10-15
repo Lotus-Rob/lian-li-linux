@@ -176,6 +176,77 @@ impl RgbController {
         Ok(())
     }
 
+    pub(super) fn is_wireless_rgb(&self, id: &str) -> bool {
+        self.wireless_state.contains_key(id) && self.software_controlled(id)
+    }
+
+    pub(super) fn wireless_live_layout(&self, id: &str) -> Option<(Vec<usize>, Vec<[u8; 3]>)> {
+        if !self.is_wireless_rgb(id) {
+            return None;
+        }
+        let state = self.render_state(id).ok()?;
+        Some((state.counts, state.colors))
+    }
+
+    pub(super) fn wireless_loop_target(
+        &self,
+        id: &str,
+    ) -> anyhow::Result<(Arc<WirelessController>, [u8; 6])> {
+        self.ensure_individual_control(id)?;
+        anyhow::ensure!(self.is_wireless_rgb(id), "RGB device not found: {id}");
+        let wireless = self
+            .wireless
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("wireless controller is unavailable"))?;
+        Ok((wireless, self.wireless_state[id].mac))
+    }
+
+    pub(super) fn submit_wireless_loop(
+        &mut self,
+        id: &str,
+        wireless: &Arc<WirelessController>,
+        upload: Arc<WirelessRgbUpload>,
+        colors: &[[u8; 3]],
+    ) -> anyhow::Result<()> {
+        let (current, mac) = self.wireless_loop_target(id)?;
+        anyhow::ensure!(
+            Arc::ptr_eq(&current, wireless),
+            "wireless controller changed"
+        );
+        let mut state = self.render_state(id)?;
+        anyhow::ensure!(
+            state.colors.len() == colors.len(),
+            "RGB device layout changed"
+        );
+        self.upload_worker
+            .submit(current, mac, Command::Upload(upload.clone()))?;
+        self.uploads.insert(id.to_owned(), upload);
+        state.colors.copy_from_slice(colors);
+        state.effects.fill(None);
+        state.regions = None;
+        for zone in 0..state.counts.len() as u8 {
+            let range = state.range(zone)?;
+            self.last_direct
+                .insert((id.to_owned(), zone), colors[range].to_vec());
+        }
+        // The loop replaces the last single-frame upload, so an identical
+        // live frame must not be skipped as already applied.
+        self.applied.remove(id);
+        self.rendered.insert(id.to_owned(), state);
+        self.mb_sync_state.insert(id.to_owned(), false);
+        Ok(())
+    }
+
+    pub(super) fn wireless_upload_current(
+        &self,
+        id: &str,
+        upload: &Arc<WirelessRgbUpload>,
+    ) -> bool {
+        self.uploads
+            .get(id)
+            .is_some_and(|current| Arc::ptr_eq(current, upload))
+    }
+
     pub fn resync_wireless_direct_colors(&mut self) {
         self.resync_wireless_effects();
     }

@@ -1,7 +1,8 @@
+use super::live_wireless::LiveWireless;
 use super::RgbController;
 use lianli_shared::rgb::RgbEffect;
 use parking_lot::Mutex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -10,28 +11,60 @@ use tracing::debug;
 
 pub struct DirectColorBuffer {
     pending: HashMap<String, HashMap<u8, Vec<[u8; 3]>>>,
+    arrivals: HashMap<String, Instant>,
+    discarded: HashSet<String>,
     groups: HashMap<String, GroupDelivery>,
     next_revision: u64,
+}
+
+struct DirectUpdates {
+    colors: HashMap<String, HashMap<u8, Vec<[u8; 3]>>>,
+    arrivals: HashMap<String, Instant>,
+    discarded: HashSet<String>,
 }
 
 impl DirectColorBuffer {
     pub fn new() -> Self {
         Self {
             pending: HashMap::new(),
+            arrivals: HashMap::new(),
+            discarded: HashSet::new(),
             groups: HashMap::new(),
             next_revision: 0,
         }
     }
 
     pub fn set(&mut self, device_id: String, zone: u8, colors: Vec<[u8; 3]>) {
+        self.arrivals.insert(device_id.clone(), Instant::now());
         self.pending
             .entry(device_id)
             .or_default()
             .insert(zone, colors);
     }
 
+    #[cfg(test)]
     pub fn take_all(&mut self) -> HashMap<String, HashMap<u8, Vec<[u8; 3]>>> {
+        self.arrivals.clear();
         std::mem::take(&mut self.pending)
+    }
+
+    /// Drops queued colours and any live stream state after a mode change.
+    pub fn discard(&mut self, device_id: &str) {
+        self.pending.remove(device_id);
+        self.arrivals.remove(device_id);
+        self.discarded.insert(device_id.to_owned());
+    }
+
+    pub(super) fn take_discarded(&mut self) -> HashSet<String> {
+        std::mem::take(&mut self.discarded)
+    }
+
+    fn take_updates(&mut self) -> DirectUpdates {
+        DirectUpdates {
+            colors: std::mem::take(&mut self.pending),
+            arrivals: std::mem::take(&mut self.arrivals),
+            discarded: std::mem::take(&mut self.discarded),
+        }
     }
 
     pub fn set_group(&mut self, id: String, effects: Vec<RgbEffect>) {
@@ -101,11 +134,14 @@ impl DirectColorBuffer {
 
     pub fn clear(&mut self) {
         self.pending.clear();
+        self.arrivals.clear();
+        self.discarded.clear();
         self.groups.clear();
     }
 
     pub fn retain_devices(&mut self, ids: &std::collections::HashSet<String>) {
         self.pending.retain(|id, _| ids.contains(id));
+        self.arrivals.retain(|id, _| ids.contains(id));
         self.groups.retain(|id, _| ids.contains(id));
     }
 
@@ -148,14 +184,22 @@ pub fn start_direct_color_writer(
 ) -> JoinHandle<()> {
     thread::spawn(move || {
         debug!("Direct color writer started");
-        let mut failed_zones = std::collections::HashSet::<(String, u8)>::new();
+        let mut failed_zones = HashSet::<(String, u8)>::new();
+        let mut live = LiveWireless::default();
 
         loop {
             if stop_flag.load(Ordering::Relaxed) {
                 break;
             }
 
-            let updates = buffer.lock().take_all();
+            let DirectUpdates {
+                colors: updates,
+                arrivals,
+                discarded,
+            } = buffer.lock().take_updates();
+            for id in &discarded {
+                live.forget(id);
+            }
             let groups = buffer.lock().take_due_groups(Instant::now());
             for write in groups {
                 if stop_flag.load(Ordering::Relaxed) {
@@ -192,14 +236,30 @@ pub fn start_direct_color_writer(
             }
 
             if !updates.is_empty() {
-                let mut wireless = Vec::new();
+                let mut software = Vec::new();
                 let mut wired = Vec::new();
                 {
                     let rgb = rgb.lock();
+                    // Mode changes are applied under the RGB lock, so frames
+                    // taken before a discard seen here are stale.
+                    let late_discards = buffer.lock().take_discarded();
+                    for id in &late_discards {
+                        live.forget(id);
+                    }
                     failed_zones.retain(|(id, _)| rgb.clone_wired_device(id).is_some());
                     for (device_id, zones) in &updates {
-                        if rgb.software_controlled(device_id) {
-                            wireless.push((device_id.clone(), zones.clone()));
+                        if late_discards.contains(device_id) {
+                            continue;
+                        }
+                        if rgb.is_wireless_rgb(device_id) {
+                            let at = arrivals
+                                .get(device_id)
+                                .copied()
+                                .unwrap_or_else(Instant::now);
+                            live.receive(&rgb, device_id, zones, at);
+                        } else if rgb.software_controlled(device_id) {
+                            live.forget(device_id);
+                            software.push((device_id.clone(), zones.clone()));
                         } else if let Some(dev) = rgb.clone_wired_device(device_id) {
                             let z: Vec<_> = zones.iter().map(|(&k, v)| (k, v.clone())).collect();
                             wired.push((dev, device_id.clone(), z));
@@ -207,11 +267,11 @@ pub fn start_direct_color_writer(
                     }
                 }
 
-                if !wireless.is_empty() {
+                if !software.is_empty() {
                     let mut rgb = rgb.lock();
-                    for (device_id, zones) in wireless {
+                    for (device_id, zones) in software {
                         if let Err(e) = rgb.apply_wireless_batch(&device_id, &zones) {
-                            debug!("Wireless flush error for {device_id}: {e}");
+                            debug!("Software RGB flush error for {device_id}: {e}");
                         }
                     }
                 }
@@ -240,6 +300,10 @@ pub fn start_direct_color_writer(
                         }
                     }
                 }
+            }
+            let now = Instant::now();
+            if !stop_flag.load(Ordering::Relaxed) && live.has_work(now) {
+                live.service(&rgb, &buffer, now);
             }
             thread::sleep(Duration::from_millis(16));
         }
@@ -308,6 +372,19 @@ mod tests {
         assert_eq!(next.effects, effects([0, 0, 255]));
         buffer.complete_group(&next, true, now);
         assert!(buffer.take_due_groups(now).is_empty());
+    }
+
+    #[test]
+    fn mode_change_drops_queued_colours_and_reports_the_device_once() {
+        let mut buffer = DirectColorBuffer::new();
+        buffer.set("fans".into(), 0, vec![[1, 2, 3]]);
+        buffer.set("strip".into(), 0, vec![[4, 5, 6]]);
+        buffer.discard("fans");
+        let updates = buffer.take_updates();
+        assert_eq!(updates.colors.keys().collect::<Vec<_>>(), ["strip"]);
+        assert_eq!(updates.arrivals.keys().collect::<Vec<_>>(), ["strip"]);
+        assert_eq!(updates.discarded, HashSet::from(["fans".to_owned()]));
+        assert!(buffer.take_updates().discarded.is_empty());
     }
 
     #[test]
