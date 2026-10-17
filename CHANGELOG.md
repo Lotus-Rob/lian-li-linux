@@ -3,6 +3,16 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v1.2.2 — 2026-10-17
+
+### Features
+- **rgb**: Loop repeating OpenRGB streams on wireless devices and rate limit live frames  (`78cc910`)
+- **rgb**: Expose wireless fan groups to OpenRGB as one zone  (`0f29c6c`)
+
+### Fixes
+- **wireless**: Fail fast on a stuck transmitter and ask for a replug  (`bfec75f`)
+- **wireless**: Keep transmitter I/O off the fan control thread  (`e177edf`)
+
 ## v1.2.1 — 2026-10-14
 
 ### Documentation
