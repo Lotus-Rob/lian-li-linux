@@ -1,4 +1,4 @@
-use super::controller::WirelessController;
+use super::controller::{record_tx_result, send_master_clock, WirelessController};
 use super::discovery::{DeviceHealthMap, DiscoveredDevice, ACK_FRESHNESS};
 use super::transport::{
     with_ready_transport, with_transport_recovery, DongleLink, RecoveryBackoff, SharedTransport,
@@ -8,7 +8,7 @@ use anyhow::{ensure, Context, Result};
 use lianli_transport::usb::USB_TIMEOUT;
 use parking_lot::Mutex;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -20,6 +20,7 @@ const TICK_INTERVAL: Duration = Duration::from_millis(100);
 // RGB acknowledgement must not indefinitely suppress cooling keepalives.
 const RGB_CONTROL_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_PENDING_COMMANDS: usize = 256;
+const ORDER_WAIT: Duration = Duration::from_millis(50);
 
 pub(super) type BindingMac = Arc<Mutex<Option<[u8; 6]>>>;
 
@@ -47,6 +48,25 @@ pub(super) struct PendingCommand {
     pub last_sent: Instant,
     queued_at: Instant,
     pub description: String,
+    // Cooling commands leave the first send to the convergence thread so a
+    // stalled TX cannot hold the fan loop.
+    initial_send_pending: bool,
+}
+
+pub(super) type MasterClock = Arc<Mutex<Option<[u8; 220]>>>;
+
+pub(super) struct ConvergenceShared {
+    pub tx: SharedTransport,
+    pub queue: PendingQueue,
+    pub health_map: DeviceHealthMap,
+    pub rgb_targets: RgbTargets,
+    pub binding_mac: BindingMac,
+    pub picture_target: BindingMac,
+    pub master_clock: MasterClock,
+    pub master_mac: Arc<Mutex<[u8; 6]>>,
+    pub master_channel: Arc<Mutex<u8>>,
+    pub tx_failures: Arc<AtomicU32>,
+    pub stop: Arc<AtomicBool>,
 }
 
 impl PendingCommand {
@@ -84,7 +104,15 @@ impl WirelessController {
         description: impl Into<String>,
         retries: u32,
     ) -> Result<()> {
-        let _order = self.command_order.lock();
+        let deferred = retries > 0 && matches!(ack, AckSignal::Pwm(_));
+        // Cooling callers must not wait out another command's synchronous send on a stalled TX.
+        let _order = if deferred {
+            self.command_order
+                .try_lock_for(ORDER_WAIT)
+                .context("wireless command path is busy")?
+        } else {
+            self.command_order.lock()
+        };
         ensure!(
             !matches!(ack, AckSignal::CmdSeq(_)) || *self.picture_target.lock() != Some(device.mac),
             "A wireless image upload is running for this device"
@@ -116,9 +144,13 @@ impl WirelessController {
             last_sent: Instant::now(),
             queued_at: Instant::now(),
             description: description.into(),
+            initial_send_pending: deferred,
         };
 
         admit_command(&mut queue.lock(), cmd.clone())?;
+        if deferred {
+            return Ok(());
+        }
         if retries == 0 {
             return with_ready_transport(
                 self.tx.as_ref().context("wireless TX is unavailable")?,
@@ -162,30 +194,17 @@ impl WirelessController {
     }
 
     pub(super) fn spawn_convergence_loop(
-        tx: SharedTransport,
-        queue: PendingQueue,
-        health_map: DeviceHealthMap,
-        rgb_targets: RgbTargets,
-        binding_mac: BindingMac,
-        picture_target: BindingMac,
-        stop: Arc<AtomicBool>,
+        shared: ConvergenceShared,
     ) -> Result<thread::JoinHandle<()>> {
         thread::Builder::new()
             .name("wireless-convergence".into())
             .spawn(move || {
                 info!("wireless convergence loop started (100ms tick)");
-                while !stop.load(Ordering::SeqCst) {
+                while !shared.stop.load(Ordering::SeqCst) {
                     let tick_start = Instant::now();
 
-                    drain_pending(
-                        &tx,
-                        &queue,
-                        &health_map,
-                        &rgb_targets,
-                        &binding_mac,
-                        &picture_target,
-                        &stop,
-                    );
+                    send_queued_master_clock(&shared);
+                    drain_pending(&shared);
 
                     let elapsed = tick_start.elapsed();
                     if elapsed < TICK_INTERVAL {
@@ -205,15 +224,42 @@ fn next_target_sequence(previous: Option<u8>, observed: u8) -> u8 {
     }
 }
 
-fn drain_pending(
-    tx: &SharedTransport,
-    queue: &PendingQueue,
-    health_map: &DeviceHealthMap,
-    rgb_targets: &RgbTargets,
-    binding_mac: &BindingMac,
-    picture_target: &BindingMac,
-    stop: &Arc<AtomicBool>,
-) {
+fn send_queued_master_clock(shared: &ConvergenceShared) {
+    if lianli_transport::usb::shutting_down() {
+        return;
+    }
+    let Some(payload) = shared.master_clock.lock().take() else {
+        return;
+    };
+    let master_mac = *shared.master_mac.lock();
+    let master_ch = *shared.master_channel.lock();
+    let mut attempted = false;
+    let result = with_transport_recovery(&shared.tx, &super::TX_IDS, "TX", &shared.stop, |h| {
+        attempted = true;
+        send_master_clock(h, &master_mac, master_ch, &payload)
+    });
+    if counts_as_tx_attempt(attempted, &result) {
+        record_tx_result(&shared.tx_failures, &shared.stop, &result);
+    }
+    if let Err(err) = result {
+        if !err.is::<RecoveryBackoff>() {
+            debug!("master clock send failed: {err:#}");
+        }
+    }
+}
+
+fn drain_pending(shared: &ConvergenceShared) {
+    let ConvergenceShared {
+        tx,
+        queue,
+        health_map,
+        rgb_targets,
+        binding_mac,
+        picture_target,
+        tx_failures,
+        stop,
+        ..
+    } = shared;
     if lianli_transport::usb::shutting_down() {
         return;
     }
@@ -247,7 +293,9 @@ fn drain_pending(
             (acked, changing_rgb)
         };
 
-        if acked {
+        let initial = cmd.initial_send_pending;
+        // An initial send may be a keepalive for a value the device already reports.
+        if acked && !initial {
             debug!(
                 "ack received for {} ({}) after {} retries",
                 cmd.mac_str(),
@@ -257,9 +305,9 @@ fn drain_pending(
             continue;
         }
 
-        let due = retry_due(now.duration_since(cmd.last_sent), changing_rgb, &cmd.ack);
+        let due = initial || retry_due(now.duration_since(cmd.last_sent), changing_rgb, &cmd.ack);
         if due {
-            if cmd.remaining_retries == 0 {
+            if !initial && cmd.remaining_retries == 0 {
                 debug!(
                     "command remained unacknowledged for {} ({}) after {} retries",
                     cmd.mac_str(),
@@ -291,7 +339,12 @@ fn drain_pending(
             if obsolete {
                 continue;
             }
-            if !deferred {
+            if counts_as_tx_attempt(attempted, &result) {
+                record_tx_result(tx_failures, stop, &result);
+            }
+            if initial {
+                cmd.initial_send_pending = !attempted;
+            } else if !deferred {
                 account_retry(&mut cmd.remaining_retries, attempted, &result);
             }
             if !result
@@ -299,8 +352,9 @@ fn drain_pending(
                 .is_err_and(|error| error.is::<RecoveryBackoff>())
             {
                 if let Err(e) = result {
+                    let stage = if initial { "initial send" } else { "re-send" };
                     warn!(
-                        "re-send failed for {} ({}): {e:#}",
+                        "{stage} failed for {} ({}): {e:#}",
                         cmd.mac_str(),
                         cmd.description,
                     );
@@ -315,6 +369,13 @@ fn drain_pending(
             warn!(mac = ?cmd.mac, operation = %cmd.description, "Wireless command retry discarded because the queue is full");
         }
     }
+}
+
+fn counts_as_tx_attempt(attempted: bool, result: &Result<()>) -> bool {
+    attempted
+        || result
+            .as_ref()
+            .is_err_and(|error| !error.is::<RecoveryBackoff>())
 }
 
 fn account_retry(remaining: &mut u32, attempted: bool, result: &Result<()>) {

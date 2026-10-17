@@ -243,8 +243,8 @@ fn fan_control_thread(inputs: FanControlInputs) {
                     ..Default::default()
                 };
                 let payload = build_payload(&snap);
-                if let Err(err) = w.send_master_clock(&payload) {
-                    debug!("master clock send failed: {err}");
+                if let Err(err) = w.queue_master_clock(&payload) {
+                    debug!("master clock not queued: {err}");
                 }
             }
             last_heartbeat = now;

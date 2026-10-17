@@ -21,6 +21,7 @@ fn command(mac: u8, pwm: u8, queued_at: Instant) -> PendingCommand {
         last_sent: queued_at,
         queued_at,
         description: "PWM".into(),
+        initial_send_pending: false,
     }
 }
 
@@ -151,4 +152,17 @@ fn recovery_cooldown_preserves_budget_only_before_a_send() {
     remaining = 2;
     super::account_retry(&mut remaining, true, &Ok(()));
     assert_eq!(remaining, 1);
+}
+
+#[test]
+fn recovery_backoff_without_a_send_does_not_count_toward_tx_disconnect() {
+    let backoff = || Err(anyhow::Error::new(RecoveryBackoff));
+    assert!(!counts_as_tx_attempt(false, &backoff()));
+    assert!(counts_as_tx_attempt(true, &backoff()));
+    assert!(counts_as_tx_attempt(
+        false,
+        &Err(anyhow::anyhow!("reopen failed"))
+    ));
+    assert!(counts_as_tx_attempt(true, &Ok(())));
+    assert!(!counts_as_tx_attempt(false, &Ok(())));
 }

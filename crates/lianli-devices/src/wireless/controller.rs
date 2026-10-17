@@ -1,4 +1,4 @@
-use super::convergence::{PendingQueue, TargetSeqMap};
+use super::convergence::{ConvergenceShared, MasterClock, PendingQueue, TargetSeqMap};
 use super::discovery::{
     is_smeared_local_master, is_valid_address, poll_and_discover, traffic_channel, DeviceHealth,
     DeviceHealthMap, DiscoveredDevice, MasterEntryMap, ReceiverState, ACK_FRESHNESS,
@@ -40,6 +40,47 @@ fn master_clock_rf_data(master_mac: &[u8; 6], payload: &[u8; 220]) -> Vec<u8> {
     rf_data
 }
 
+pub(super) fn send_master_clock(
+    handle: DongleLink<'_>,
+    master_mac: &[u8; 6],
+    master_ch: u8,
+    payload: &[u8; 220],
+) -> Result<()> {
+    let rf_data = master_clock_rf_data(master_mac, payload);
+    handle.paced_frame(&rf_data, || {
+        for chunk_idx in 0..RF_CHUNKS as u8 {
+            let mut packet = [0u8; 64];
+            packet[0] = USB_CMD_SEND_RF;
+            packet[1] = chunk_idx;
+            packet[2] = master_ch;
+            packet[3] = 0xFF;
+
+            let start = chunk_idx as usize * RF_CHUNK_SIZE;
+            let end = start + RF_CHUNK_SIZE;
+            packet[4..64].copy_from_slice(&rf_data[start..end]);
+
+            handle
+                .write(&packet, USB_TIMEOUT)
+                .context("sending master clock packet")?;
+            thread::sleep(Duration::from_millis(1));
+        }
+        Ok(())
+    })
+}
+
+pub(super) fn record_tx_result<R>(failures: &AtomicU32, stop: &AtomicBool, result: &Result<R>) {
+    match result {
+        Ok(_) => failures.store(0, Ordering::Relaxed),
+        Err(_) if stop.load(Ordering::Acquire) => {}
+        Err(_) => {
+            let n = failures.fetch_add(1, Ordering::Relaxed) + 1;
+            if n == TX_FAILURE_THRESHOLD {
+                warn!("Wireless TX: {n} consecutive failures, marking disconnected");
+            }
+        }
+    }
+}
+
 struct RuntimeClaim(Arc<AtomicBool>);
 
 impl RuntimeClaim {
@@ -74,6 +115,7 @@ pub struct WirelessController {
     pub(super) device_health: DeviceHealthMap,
     pub(super) master_entries: MasterEntryMap,
     pub(super) tx_failures: Arc<AtomicU32>,
+    pub(super) master_clock: MasterClock,
     pub(super) desired_effects: Arc<Mutex<std::collections::HashMap<[u8; 6], [u8; 4]>>>,
     pub(super) mb_rgb_targets: MbRgbTargetMap,
     pub(super) command_order: Arc<Mutex<()>>,
@@ -105,6 +147,7 @@ impl Clone for WirelessController {
             device_health: Arc::clone(&self.device_health),
             master_entries: Arc::clone(&self.master_entries),
             tx_failures: Arc::clone(&self.tx_failures),
+            master_clock: Arc::clone(&self.master_clock),
             desired_effects: Arc::clone(&self.desired_effects),
             mb_rgb_targets: Arc::clone(&self.mb_rgb_targets),
             command_order: Arc::clone(&self.command_order),
@@ -138,6 +181,7 @@ impl WirelessController {
             device_health: Arc::new(Mutex::new(Default::default())),
             master_entries: Arc::new(Mutex::new(Default::default())),
             tx_failures: Arc::new(AtomicU32::new(0)),
+            master_clock: Arc::new(Mutex::new(None)),
             desired_effects: Arc::new(Mutex::new(std::collections::HashMap::new())),
             mb_rgb_targets: Arc::new(Mutex::new(Default::default())),
             command_order: Arc::new(Mutex::new(())),
@@ -464,17 +508,19 @@ impl WirelessController {
         );
 
         if let Some(queue) = self.pending_commands.clone() {
-            let conv_stop = self.poll_stop.clone();
-            let device_health = Arc::clone(&self.device_health);
-            self.convergence_thread = Some(Self::spawn_convergence_loop(
-                Arc::clone(&tx),
+            self.convergence_thread = Some(Self::spawn_convergence_loop(ConvergenceShared {
+                tx: Arc::clone(&tx),
                 queue,
-                device_health,
-                Arc::clone(&self.desired_effects),
-                Arc::clone(&self.binding_mac),
-                Arc::clone(&self.picture_target),
-                conv_stop,
-            )?);
+                health_map: Arc::clone(&self.device_health),
+                rgb_targets: Arc::clone(&self.desired_effects),
+                binding_mac: Arc::clone(&self.binding_mac),
+                picture_target: Arc::clone(&self.picture_target),
+                master_clock: Arc::clone(&self.master_clock),
+                master_mac: Arc::clone(&self.master_mac),
+                master_channel: Arc::clone(&self.master_channel),
+                tx_failures: Arc::clone(&self.tx_failures),
+                stop: self.poll_stop.clone(),
+            })?);
         }
 
         Ok(())
@@ -514,37 +560,17 @@ impl WirelessController {
         Ok(())
     }
 
-    /// Broadcast a "master clock" sync packet (RF sub-command 0x14). This
-    /// must be sent once per second; missing
-    /// it appears to put the fan firmware into an autonomous fallback that
-    /// occasionally spikes RPM.
-    pub fn send_master_clock(&self, payload: &[u8; 220]) -> Result<()> {
-        let master_mac = *self.master_mac.lock();
-        let master_ch = *self.master_channel.lock();
-
-        let rf_data = master_clock_rf_data(&master_mac, payload);
-
-        self.tx_recover(|handle| {
-            handle.paced_frame(&rf_data, || {
-                for chunk_idx in 0..RF_CHUNKS as u8 {
-                    let mut packet = vec![0u8; 64];
-                    packet[0] = USB_CMD_SEND_RF;
-                    packet[1] = chunk_idx;
-                    packet[2] = master_ch;
-                    packet[3] = 0xFF;
-
-                    let start = chunk_idx as usize * RF_CHUNK_SIZE;
-                    let end = start + RF_CHUNK_SIZE;
-                    packet[4..64].copy_from_slice(&rf_data[start..end]);
-
-                    handle
-                        .write(&packet, USB_TIMEOUT)
-                        .context("sending master clock packet")?;
-                    thread::sleep(Duration::from_millis(1));
-                }
-                Ok(())
-            })
-        })?;
+    /// Queues the master clock sync packet (RF sub-command 0x14) for the
+    /// convergence thread, which sends the latest payload. Callers must queue
+    /// one every second; missing it appears to put the fan firmware into an
+    /// autonomous fallback that occasionally spikes RPM.
+    pub fn queue_master_clock(&self, payload: &[u8; 220]) -> Result<()> {
+        anyhow::ensure!(self.tx.is_some(), "TX device not connected");
+        anyhow::ensure!(
+            !self.poll_stop.load(Ordering::Acquire),
+            "wireless controller is stopping"
+        );
+        *self.master_clock.lock() = Some(*payload);
         Ok(())
     }
 
@@ -606,16 +632,7 @@ impl WirelessController {
     {
         let tx = self.tx.as_ref().context("TX device not connected")?;
         let result = with_transport_recovery(tx, &TX_IDS, "TX", &self.poll_stop, op);
-        match &result {
-            Ok(_) => self.tx_failures.store(0, Ordering::Relaxed),
-            Err(_) if self.poll_stop.load(Ordering::Acquire) => {}
-            Err(_) => {
-                let n = self.tx_failures.fetch_add(1, Ordering::Relaxed) + 1;
-                if n == TX_FAILURE_THRESHOLD {
-                    warn!("Wireless TX: {n} consecutive failures, marking disconnected");
-                }
-            }
-        }
+        record_tx_result(&self.tx_failures, &self.poll_stop, &result);
         result
     }
 
@@ -991,6 +1008,7 @@ impl WirelessController {
             if let Some(queue) = &self.pending_commands {
                 queue.lock().clear();
             }
+            *self.master_clock.lock() = None;
         }
         if std::mem::take(&mut self.owns_transports) {
             self.poll_stop.store(true, Ordering::SeqCst);
