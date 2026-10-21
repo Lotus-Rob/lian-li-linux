@@ -487,16 +487,17 @@ mod tests {
     fn unresponsive_bus_cannot_hold_session_authorization_indefinitely() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bus");
-        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
-        let worker = std::thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
-            std::thread::sleep(Duration::from_secs(2));
-            drop(stream);
-        });
+        // The backlog completes the connection without accept(), so the peer never answers.
+        let _listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
         let address = CString::new(format!("unix:path={}", path.display())).unwrap();
         let started = std::time::Instant::now();
-        assert!(LoginMonitor::connect_address(&address).is_err());
+        let Err(error) = LoginMonitor::connect_address(&address) else {
+            panic!("connected to a bus that never authenticates");
+        };
         assert!(started.elapsed() < Duration::from_millis(1500));
-        worker.join().unwrap();
+        assert!(
+            format!("{error:#}").contains("timed out"),
+            "unexpected error: {error:#}"
+        );
     }
 }
