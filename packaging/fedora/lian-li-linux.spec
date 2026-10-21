@@ -26,7 +26,7 @@ BuildRequires:  pkgconfig(libdrm)
 BuildRequires:  pkgconfig(webkit2gtk-4.1)
 BuildRequires:  pkgconfig(gtk+-3.0)
 BuildRequires:  pkgconfig(appindicator3-0.1)
-# Fedora ships ffmpeg-free; full ffmpeg from rpmfusion is needed for H.264 LCD.
+# H.264 LCD needs libx264 from rpmfusion: full ffmpeg or libavcodec-freeworld.
 BuildRequires:  pkgconfig(libavcodec)
 BuildRequires:  pkgconfig(libavformat)
 BuildRequires:  pkgconfig(libswscale)

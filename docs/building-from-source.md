@@ -39,7 +39,8 @@ sudo dnf install libusb1-devel fontconfig-devel \
 # install libevdi 1.14/1.15 and a compatible host module:
 #   https://github.com/DisplayLink/evdi
 #   https://github.com/displaylink-rpm/displaylink-rpm
-# Make sure to replace ffmpeg-free with ffmpeg if ffmpeg-free is installed
+# With ffmpeg-free installed, replace it with ffmpeg, or keep it and install
+# ffmpeg-free-devel and libavcodec-freeworld instead of ffmpeg and ffmpeg-devel.
 ```
 
 3) Build:

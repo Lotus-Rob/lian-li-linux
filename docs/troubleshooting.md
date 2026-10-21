@@ -428,7 +428,8 @@ This finding alone does not mean `lianli-control` is missing.
 
 Follow [USB permissions](usb-permissions.md) for device access. For media, `ffmpeg` and
 `ffprobe` must be available in the **daemon's** environment, with software H.264 encoding
-through `libx264`. Fedora requires full FFmpeg from RPM Fusion instead of `ffmpeg-free`.
+through `libx264`. On Fedora, use full FFmpeg from RPM Fusion, or keep `ffmpeg-free` and add
+RPM Fusion's `libavcodec-freeworld`. Plain `ffmpeg-free` lacks `libx264`.
 Files and every parent directory must be accessible to the daemon account, including
 child images, video and fonts referenced by custom templates. A file accessible to your
 GUI user can still be inaccessible to the system daemon's `lianli` account.

@@ -120,7 +120,8 @@ makepkg -si
 For immutable Fedora distributions such as Bazzite, use the
 [recommended Distrobox installation](#distrobox-and-immutable-hosts) below.
 
-Enable RPM Fusion Free for full FFmpeg with libx264, then install the project package:
+Enable RPM Fusion Free for FFmpeg with libx264, then install the project package. Systems
+that keep `ffmpeg-free` use `libavcodec-freeworld` from RPM Fusion instead of full FFmpeg:
 
 ```sh
 sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm

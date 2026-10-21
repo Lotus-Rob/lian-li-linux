@@ -3,7 +3,7 @@
 For container installation, follow the [Distrobox guide](distrobox.md). If you need to install directly on the base instead, `dnf install` doesn't apply on rpm-ostree. Packages layer into a new deployment that only takes effect after a reboot, and the daemon won't start on its own.
 
 ```bash
-# 1. Enable rpmfusion (full ffmpeg with libx264)
+# 1. Enable rpmfusion (ffmpeg with libx264)
 sudo rpm-ostree install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm
 sudo systemctl reboot
 
