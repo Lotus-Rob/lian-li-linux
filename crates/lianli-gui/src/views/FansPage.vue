@@ -9,8 +9,10 @@ import FanCurveEditor from "@/components/fans/FanCurveEditor.vue";
 import FanGroupCard from "@/components/fans/FanGroupCard.vue";
 import SensorSelect from "@/components/common/SensorSelect.vue";
 import type { SensorSource, DeviceInfo } from "@/types";
+import { MB_SYNC_KEY } from "@/types";
 import { enumerateSensorsAsOptions } from "@/stores/sensorOptions";
 import { useTranslate } from "@/i18n";
+import { decodeSpeedMode, fillSlots, speedModeOf } from "@/components/fans/speedMode";
 
 const config = useConfigStore();
 const devices = useDevicesStore();
@@ -64,6 +66,41 @@ const assignmentGroups = computed(() => {
   }
   return result;
 });
+
+const allFanModeOptions = computed(() => [
+  { label: t("common.off"), value: "off" },
+  ...curves.value.map((c) => ({ label: t("fans.speedMode.curve", { name: c.name }), value: `curve:${c.name}` })),
+  { label: t("fans.speedMode.constantPwm"), value: "constant" },
+  // Shown only to label uniform MB Sync; each device chooses its own sync source.
+  { label: t("fans.speedMode.mbSync"), value: MB_SYNC_KEY, disabled: true },
+]);
+
+const allFansMode = computed(() => {
+  const modes = new Set(
+    assignmentGroups.value.flatMap(({ device, group }) =>
+      Array.from({ length: Math.min(device.fan_count ?? 1, 4) }, (_, slot) => speedModeOf(group.speeds, slot)),
+    ),
+  );
+  const [mode] = modes;
+  return modes.size === 1 && allFanModeOptions.value.some((option) => option.value === mode) ? mode : null;
+});
+
+function applyToAllFans(value: string) {
+  const option = allFanModeOptions.value.find((o) => o.value === value);
+  if (!option || option.disabled) return;
+  const groups = assignmentGroups.value.map(({ group }) => group);
+  const speed = decodeSpeedMode(value);
+  dialog.warning({
+    title: t("fans.page.applyAllTitle"),
+    content: t("fans.page.applyAllContent", { mode: option.label }),
+    positiveText: t("common.apply"),
+    negativeText: t("common.cancel"),
+    onPositiveClick: () => {
+      for (const group of groups) fillSlots(group, speed);
+      config.markDirty();
+    },
+  });
+}
 
 const fanLabels = computed(() => devices.labels);
 const curveUsers = computed(() => {
@@ -260,6 +297,14 @@ function onHysteresisPwm(percent: number | null) {
             <label class="muted">{{ t("fans.page.usedBy") }}</label>
             <span class="used-by">{{ curveUsers.length ? curveUsers.join(t("fans.page.usedBySeparator")) : t("fans.page.noFansUseCurve") }}</span>
           </div>
+          <n-button
+            v-if="assignmentGroups.length"
+            size="small"
+            class="use-for-all"
+            @click="applyToAllFans(`curve:${current.name}`)"
+          >
+            {{ t("fans.page.useForAllFans") }}
+          </n-button>
         </div>
       </div>
       <div v-else class="empty muted">{{ t("fans.page.noCurves") }}</div>
@@ -267,7 +312,19 @@ function onHysteresisPwm(percent: number | null) {
 
     <!-- Section 2: Fan speed assignments -->
     <section class="card section">
-      <h2 class="section-title">{{ t("fans.page.fanSpeedAssignments") }}</h2>
+      <div class="section-head">
+        <h2 class="section-title">{{ t("fans.page.fanSpeedAssignments") }}</h2>
+        <div v-if="assignmentGroups.length > 1" class="all-fans">
+          <span class="muted">{{ t("fans.page.allFans") }}</span>
+          <n-select
+            size="small"
+            :value="allFansMode"
+            :options="allFanModeOptions"
+            :placeholder="t('fans.groupCard.mixed')"
+            @update:value="applyToAllFans"
+          />
+        </div>
+      </div>
       <div v-if="assignmentGroups.length" class="groups">
         <FanGroupCard
           v-for="ag in assignmentGroups"
@@ -409,6 +466,20 @@ function onHysteresisPwm(percent: number | null) {
   flex-direction: column;
   gap: var(--space-3);
   min-width: 0;
+}
+.use-for-all {
+  align-self: flex-start;
+}
+.all-fans {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.all-fans .muted {
+  white-space: nowrap;
+}
+.all-fans .n-select {
+  width: 220px;
 }
 .used-by {
   font-size: var(--font-size-sm);

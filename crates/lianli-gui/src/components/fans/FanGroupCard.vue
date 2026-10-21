@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { ChevronDown, ChevronRight, Fan } from "lucide-vue-next";
 import type { DeviceInfo, FanGroup, FanSpeed, PwmHeader } from "@/types";
 import { MB_SYNC_KEY, MB_SYNC_PREFIX } from "@/types";
+import { decodeSpeedMode, fillSlots, isMbSyncGroup, speedModeOf } from "./speedMode";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
 import { useDeviceNamesStore } from "@/stores/deviceNames";
@@ -49,8 +50,7 @@ function onAllModes(value: string) {
     onMode(0, value);
     return;
   }
-  const decoded = decodeMode(value);
-  setAllSlots(decoded);
+  setAllSlots(decodeSpeedMode(value));
 }
 
 const perFan = computed(() => props.device.per_fan_control ?? false);
@@ -67,28 +67,14 @@ function setSpeed(slot: number, value: FanSpeed) {
   config.markDirty();
 }
 
-// MB Sync is a port-wide hardware setting, not per-fan: when it's on, every
-// fan on the port follows the motherboard PWM header. So selecting it applies
+// MB Sync is a port-wide hardware setting, not per-fan: selecting it applies
 // to all slots, and leaving it clears it from the whole port.
 function groupIsMbSync(): boolean {
-  return props.group.speeds.some(
-    (s) => typeof s === "string" && s.startsWith("__mb_sync__"),
-  );
+  return isMbSyncGroup(props.group.speeds);
 }
 function setAllSlots(value: FanSpeed) {
-  props.group.speeds = [value, value, value, value] as [
-    FanSpeed,
-    FanSpeed,
-    FanSpeed,
-    FanSpeed,
-  ];
+  fillSlots(props.group, value);
   config.markDirty();
-}
-function decodeMode(value: string): FanSpeed {
-  if (value === "off") return "off";
-  if (value === "constant") return 128;
-  if (value.startsWith("curve:")) return value.slice("curve:".length);
-  return 128;
 }
 
 // Speed mode dropdown options: Off / curve names / Constant PWM / MB Sync.
@@ -113,18 +99,11 @@ const pwmHeaderOptions = computed(() => {
 });
 
 function modeOf(slot: number): string {
-  // MB Sync is port-wide: if any slot is MB Sync, every fan on the port is —
-  // even when the stored config only marks one slot (e.g. loaded from disk or
-  // authored by the Slint GUI, which wrote it per-slot).
-  if (groupIsMbSync()) return "__mb_sync__";
-  const s = speedAt(slot);
-  if (typeof s === "number") return "constant";
-  if (s === "off" || s === "") return "off";
-  return `curve:${s}`;
+  return speedModeOf(props.group.speeds, slot);
 }
 
 function onMode(slot: number, value: string) {
-  if (value === "__mb_sync__") {
+  if (value === MB_SYNC_KEY) {
     if (props.device.mb_sync_support) {
       setAllSlots(MB_SYNC_KEY);
     } else {
@@ -133,7 +112,7 @@ function onMode(slot: number, value: string) {
     }
     return;
   }
-  const decoded = decodeMode(value);
+  const decoded = decodeSpeedMode(value);
   if (groupIsMbSync()) {
     // Leaving MB Sync is also port-wide: reset the whole port to a constant
     // default, then apply the chosen mode to this fan.
