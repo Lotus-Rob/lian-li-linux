@@ -34,7 +34,9 @@ BuildRequires:  pkgconfig(libavutil)
 BuildRequires:  pkgconfig(libavfilter)
 
 Requires:       hicolor-icon-theme
-Requires:       ffmpeg
+# H.264 LCD needs libx264: full ffmpeg has it, and so does ffmpeg-free once
+# libavcodec-freeworld replaces its libavcodec.
+Requires:       (ffmpeg or (ffmpeg-free and libavcodec-freeworld))
 Requires:       systemd-libs
 Recommends:     polkit
 Suggests:       %{name}-evdi = %{version}-%{release}
