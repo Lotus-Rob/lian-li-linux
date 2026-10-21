@@ -407,6 +407,18 @@ impl ServiceManager {
                 .is_some_and(|t| present_topos.contains(t))
         });
 
+        // Devices reopened below must release the claims their old RGB handles still hold.
+        if let Some(rgb) = &self.controllers.rgb {
+            let mut kept = already_opened.clone();
+            kept.extend(
+                usb_devs
+                    .iter()
+                    .map(Self::rusb_device_id)
+                    .filter(|id| self.startup_image_quarantine.contains(id)),
+            );
+            rgb.lock().retain_wired(&kept);
+        }
+
         const OPEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
         let mut pending = Vec::new();
