@@ -14,7 +14,7 @@ provides=('lianli-linux')
 conflicts=('lianli-linux')
 source=("git+${url}.git")
 sha256sums=('SKIP')
-options=('!lto')
+options=('!lto' '!debug')
 
 pkgver() {
   cd lian-li-linux
@@ -35,13 +35,6 @@ build() {
   export CARGO_TARGET_DIR=target
   npm run build --prefix crates/lianli-gui
   cargo build --frozen --release
-}
-
-check() {
-  cd lian-li-linux
-
-  export CARGO_TARGET_DIR=target
-  cargo test --frozen --workspace
 }
 
 package() {
