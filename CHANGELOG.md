@@ -3,6 +3,20 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v1.2.3 — 2026-10-21
+
+### Documentation
+- **packaging**: Document ffmpeg-free with libavcodec-freeworld on Fedora  (`73e3035`)
+
+### Features
+- **gui**: Apply one speed setting to all fans  (`b70e7ac`)
+
+### Fixes
+- **rgb**: Release stale wired RGB handles before reopening devices  (`dc0027e`)
+- **display**: Stop the logind timeout test hanging when the bus connect fails  (`8480152`)
+- **packaging**: Skip tests and the debug package in the Arch PKGBUILDs  (`35e8dd9`)
+- **packaging**: Accept ffmpeg-free with libavcodec-freeworld for the ffmpeg dependency  ([#262](https://github.com/sgtaziz/lian-li-linux/pull/262))
+
 ## v1.2.2 — 2026-10-17
 
 ### Features
