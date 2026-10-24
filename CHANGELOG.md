@@ -3,6 +3,14 @@
 Generated from git history by git-cliff (see .github/cliff.toml).
 Regenerate rather than editing by hand.
 
+## v1.2.4 — 2026-10-24
+
+### Features
+- **gui**: Notify when a new release is available  (`99eeb63`)
+
+### Fixes
+- **fan**: Avoid startup full-speed burst (fixes [#264](https://github.com/sgtaziz/lian-li-linux/issues/264))
+
 ## v1.2.3 — 2026-10-21
 
 ### Documentation
