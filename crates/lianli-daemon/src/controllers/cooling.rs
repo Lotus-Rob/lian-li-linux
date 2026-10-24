@@ -1,12 +1,77 @@
+use lianli_shared::fan::{FanCurve, FanSpeed};
 use lianli_shared::installation::{
     CheckState, FindingSeverity, InstallationFinding, InstallationGuide,
 };
 use lianli_shared::sensors::SensorReading;
-use std::collections::{BTreeMap, HashMap};
+use lianli_shared::sensors::SensorSource;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 pub(super) const TEMPERATURE_GRACE: Duration = Duration::from_secs(5);
+pub(super) const FIRST_SAMPLE_WAIT: Duration = Duration::from_secs(3);
+
+pub(super) fn usable_reading(reading: &SensorReading, now: Instant) -> bool {
+    reading.value.is_finite()
+        && reading.value > 0.0
+        && reading.value <= 100.0
+        && now.saturating_duration_since(reading.observed_at) < TEMPERATURE_GRACE
+}
+
+pub(super) fn curve_sources<'a>(
+    speeds: impl IntoIterator<Item = &'a FanSpeed>,
+    curves: impl Fn(&str) -> Option<&'a FanCurve>,
+) -> HashSet<SensorSource> {
+    speeds
+        .into_iter()
+        .filter_map(|speed| match speed {
+            FanSpeed::Curve(name) => curves(name).map(FanCurve::effective_source),
+            _ => None,
+        })
+        .collect()
+}
+
+// Sampled sources have no value until their background poll first completes. Their
+// channels are left as they are until a sample arrives or the wait ends, so that gap
+// is not read as a lost temperature.
+pub(super) struct FirstSamples {
+    pending: HashSet<SensorSource>,
+    deadline: Instant,
+}
+
+impl FirstSamples {
+    pub fn new(sources: HashSet<SensorSource>, now: Instant) -> Self {
+        Self {
+            pending: sources,
+            deadline: now + FIRST_SAMPLE_WAIT,
+        }
+    }
+
+    /// Returns whether any source stopped pending.
+    pub fn refresh(
+        &mut self,
+        now: Instant,
+        mut read: impl FnMut(&SensorSource) -> Option<SensorReading>,
+    ) -> bool {
+        let before = self.pending.len();
+        if now >= self.deadline {
+            self.pending.clear();
+        } else {
+            self.pending.retain(|source| {
+                !read(source).is_some_and(|reading| usable_reading(&reading, now))
+            });
+        }
+        self.pending.len() != before
+    }
+
+    pub fn is_pending(&self, source: &SensorSource) -> bool {
+        self.pending.contains(source)
+    }
+
+    pub fn waiting(&self) -> bool {
+        !self.pending.is_empty()
+    }
+}
 
 pub(super) struct TemperatureState {
     last_valid: Option<(Instant, f32)>,
@@ -137,12 +202,7 @@ impl TemperatureState {
     }
 
     pub fn update_reading(&mut self, reading: Option<SensorReading>, now: Instant, alpha: f32) {
-        let reading = reading.filter(|reading| {
-            reading.value.is_finite()
-                && reading.value > 0.0
-                && reading.value <= 100.0
-                && now.saturating_duration_since(reading.observed_at) < TEMPERATURE_GRACE
-        });
+        let reading = reading.filter(|reading| usable_reading(reading, now));
         self.recovered = self.fallback && reading.is_some();
         if let Some(reading) = reading.filter(|reading| {
             self.last_valid
@@ -177,6 +237,55 @@ impl TemperatureState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn command(cmd: &str) -> SensorSource {
+        SensorSource::Command { cmd: cmd.into() }
+    }
+
+    #[test]
+    fn only_curve_slots_with_known_curves_contribute_sources() {
+        let curve = FanCurve {
+            name: "gpu".into(),
+            temp_source: None,
+            temp_command: "gpu-temp".into(),
+            curve: Vec::new(),
+        };
+        let speeds = [
+            FanSpeed::Curve("gpu".into()),
+            FanSpeed::Curve("missing".into()),
+            FanSpeed::Constant(128),
+            FanSpeed::Curve("gpu".into()),
+        ];
+        let sources = curve_sources(&speeds, |name| (name == "gpu").then_some(&curve));
+        assert_eq!(sources, HashSet::from([command("gpu-temp")]));
+    }
+
+    #[test]
+    fn each_source_waits_for_its_own_usable_sample_until_the_deadline() {
+        let start = Instant::now();
+        let (fast, slow) = (command("fast"), command("slow"));
+        let mut samples = FirstSamples::new(HashSet::from([fast.clone(), slow.clone()]), start);
+        let reading = |value, observed_at| SensorReading { value, observed_at };
+
+        assert!(!samples.refresh(start, |source| {
+            (source == &fast).then_some(reading(0.0, start))
+        }));
+        assert!(samples.is_pending(&fast));
+
+        let now = start + Duration::from_secs(1);
+        assert!(samples.refresh(now, |source| {
+            (source == &fast).then_some(reading(45.0, now))
+        }));
+        assert!(!samples.is_pending(&fast));
+        assert!(samples.is_pending(&slow));
+
+        let stale = start - TEMPERATURE_GRACE;
+        assert!(!samples.refresh(now, |_| Some(reading(45.0, stale))));
+        assert!(samples.is_pending(&slow));
+
+        assert!(samples.refresh(start + FIRST_SAMPLE_WAIT, |_| None));
+        assert!(!samples.waiting());
+    }
 
     #[test]
     fn cooling_findings_distinguish_fallback_recovery_and_unmanaged_channels() {

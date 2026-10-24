@@ -1,6 +1,6 @@
-use super::cooling::TemperatureState;
 #[cfg(test)]
 use super::cooling::TEMPERATURE_GRACE;
+use super::cooling::{curve_sources, FirstSamples, TemperatureState};
 use crate::service::DaemonEvent;
 use lianli_devices::traits::FanDevice;
 use lianli_devices::wireless::{build_payload, SensorSnapshot, WirelessController};
@@ -153,6 +153,13 @@ fn fan_control_thread(inputs: FanControlInputs) {
     let mut fan_states: HashMap<usize, FanState> = HashMap::new();
     let mut unavailable_wireless = HashSet::new();
     let mut failures = super::failure_log::FailureLog::default();
+    let mut first_samples = FirstSamples::new(
+        curve_sources(
+            config.speeds.iter().flat_map(|group| group.speeds.iter()),
+            |name| curves.get(name),
+        ),
+        Instant::now(),
+    );
 
     // Auto-detect CPU/GPU temp sensors for the wireless LCD clock-sync payload.
     let cpu_temp_source = picker::find_default_cpu_temp(all_sensors);
@@ -266,8 +273,14 @@ fn fan_control_thread(inputs: FanControlInputs) {
             last_drift_check = now;
         }
 
+        let samples_arrived = first_samples.waiting()
+            && first_samples.refresh(now, |source| {
+                read_temperature(source, &mut sensor_cache, all_sensors, &wired)
+            });
         let since_last = now.duration_since(last_update);
-        if since_last < update_interval && !temperatures.values().any(|state| state.needs_poll(now))
+        if since_last < update_interval
+            && !samples_arrived
+            && !temperatures.values().any(|state| state.needs_poll(now))
         {
             thread::sleep(Duration::from_millis(100));
             continue;
@@ -331,6 +344,15 @@ fn fan_control_thread(inputs: FanControlInputs) {
                         }
                     }
                 }
+            }
+
+            if group.speeds.iter().any(|speed| match speed {
+                FanSpeed::Curve(name) => curves
+                    .get(name)
+                    .is_some_and(|curve| first_samples.is_pending(&curve.effective_source())),
+                _ => false,
+            }) {
+                continue;
             }
 
             let speeds = calculate_fan_speeds(

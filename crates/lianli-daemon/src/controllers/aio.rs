@@ -1,4 +1,4 @@
-use super::cooling::TemperatureState;
+use super::cooling::{curve_sources, FirstSamples, TemperatureState};
 use lianli_devices::traits::FanDevice;
 use lianli_devices::wireless::{
     pump_rpm_to_timer, DiscoveredDevice, WirelessController, WirelessFanType, AIO_PARAM_LEN,
@@ -162,6 +162,41 @@ fn run(
     let all_sensors = enumerate_sensors();
     let mut sensor_cache = SensorCache::default();
     let mut wireless_state = WirelessAioState::default();
+    let present: HashSet<String> = wired
+        .keys()
+        .cloned()
+        .chain(
+            wireless
+                .devices()
+                .iter()
+                .filter(|device| device.is_aio())
+                .map(|device| format!("wireless:{}", device.mac_str())),
+        )
+        .collect();
+    let mut first_samples = {
+        let state = state.lock();
+        let cfg = &state.config;
+        FirstSamples::new(
+            curve_sources(
+                cfg.aio
+                    .iter()
+                    .filter(|(id, _)| present.contains(*id))
+                    .flat_map(|(_, aio)| {
+                        std::iter::once(&aio.pump_target_rpm).chain(&aio.fan_speeds)
+                    }),
+                |name| cfg.fan_curves.iter().find(|curve| curve.name == name),
+            ),
+            Instant::now(),
+        )
+    };
+    while first_samples.waiting() && !stop_flag.load(Ordering::Relaxed) {
+        first_samples.refresh(Instant::now(), |source| {
+            resolve_reading(source, &mut sensor_cache, &all_sensors)
+        });
+        if first_samples.waiting() {
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
 
     while !stop_flag.load(Ordering::Relaxed) {
         sensor_cache.tick = Instant::now();
