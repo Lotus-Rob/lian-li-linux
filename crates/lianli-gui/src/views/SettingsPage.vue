@@ -16,9 +16,11 @@ import { useIpc } from "@/composables/useIpc";
 import { DAEMON_MODE_LABELS } from "@/utils/serviceSetup";
 import { useTranslate } from "@/i18n";
 import { useLanguageStore, type LanguagePreference } from "@/stores/language";
+import { RELEASES_URL, useUpdatesStore } from "@/stores/updates";
 
 const t = useTranslate();
 const language = useLanguageStore();
+const updates = useUpdatesStore();
 const languageOptions = computed(() => [
   { label: t("language.system"), value: "system" },
   { label: "English", value: "en" },
@@ -308,6 +310,22 @@ function onHidBackend(v: "hidraw" | "rusb") {
       </p>
       <button class="repo-link" @click="openExternal(REPO_URL)">
         <ExternalLink :size="13" /> github.com/sgtaziz/lian-li-linux
+      </button>
+      <div class="kv">
+        <span class="muted">{{ t("settings.about.updateCheck") }}</span>
+        <n-switch
+          :value="updates.enabled"
+          :aria-label="t('settings.about.updateCheck')"
+          @update:value="updates.setEnabled"
+        />
+      </div>
+      <p class="hint">{{ t("settings.about.updateCheckHint") }}</p>
+      <button
+        v-if="updates.available"
+        class="repo-link"
+        @click="openExternal(`${RELEASES_URL}/tag/v${updates.available}`)"
+      >
+        <ExternalLink :size="13" /> {{ t("settings.about.updateAvailable", { version: updates.available }) }}
       </button>
     </section>
   </div>

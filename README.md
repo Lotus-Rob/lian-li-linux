@@ -187,6 +187,10 @@ save to recreate active video streams without restarting the daemon. See
 LCD cards also offer [pixel conditioning](docs/pixel-conditioning.md), with
 cancellation and restoration of the previous display.
 
+The GUI checks GitHub for a newer release at most once a day and links to its release
+notes. Install updates through your package manager. Turn the check off in
+**Settings → About**.
+
 ## Help and diagnostics
 
 Start with [troubleshooting](docs/troubleshooting.md). Before opening an

@@ -23,6 +23,10 @@ const messages: typeof en = {
     openGuide: "打开指南",
     reviewChecks: "查看检查项",
   },
+  updateNotice: {
+    title: "Lian Li Linux {version} 现已可用",
+    releaseNotes: "查看发布说明",
+  },
   wirelessNotice: {
     transmitterTitle: "无线发射器已停止响应",
     transmitterBody: "请拔下无线发射器并重新插入。软件重置未能使其重新启动。在其恢复响应前，无线风扇和水泵保持最后的转速。",

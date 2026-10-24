@@ -21,6 +21,10 @@ export default {
     openGuide: "Open guide",
     reviewChecks: "Review checks",
   },
+  updateNotice: {
+    title: "Lian Li Linux {version} is available",
+    releaseNotes: "View release notes",
+  },
   wirelessNotice: {
     transmitterTitle: "Wireless transmitter stopped responding",
     transmitterBody:

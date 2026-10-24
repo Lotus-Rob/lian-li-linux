@@ -51,5 +51,8 @@ export default {
   about: {
     title: "About",
     tagline: "Open-source Linux replacement for L-Connect 3",
+    updateCheck: "Check for updates",
+    updateCheckHint: "Checks GitHub for a newer release at most once a day.",
+    updateAvailable: "Version {version} is available",
   },
 };

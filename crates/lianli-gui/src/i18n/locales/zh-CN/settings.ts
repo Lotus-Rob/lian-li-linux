@@ -53,6 +53,9 @@ const messages: typeof en = {
   about: {
     title: "关于",
     tagline: "L-Connect 3 的开源 Linux 替代品",
+    updateCheck: "检查更新",
+    updateCheckHint: "每天最多在 GitHub 上检查一次新版本。",
+    updateAvailable: "新版本 {version} 可用",
   },
 };
 

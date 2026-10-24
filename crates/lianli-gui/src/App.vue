@@ -13,6 +13,7 @@ import AppHeader from "@/components/layout/AppHeader.vue";
 import InstallationNotice from "@/components/common/InstallationNotice.vue";
 import CompatibilityNotice from "@/components/common/CompatibilityNotice.vue";
 import WirelessNotice from "@/components/common/WirelessNotice.vue";
+import UpdateNotice from "@/components/common/UpdateNotice.vue";
 
 const daemon = useDaemonStore();
 const config = useConfigStore();
@@ -137,9 +138,12 @@ onUnmounted(() => {
               <AppSidebar />
               <div class="main">
                 <AppHeader />
-                <CompatibilityNotice />
-                <WirelessNotice />
                 <div class="content">
+                  <div class="notices">
+                    <CompatibilityNotice />
+                    <WirelessNotice />
+                    <UpdateNotice />
+                  </div>
                   <router-view v-slot="{ Component }">
                     <transition name="page" mode="out-in">
                       <component :is="Component" />
@@ -171,5 +175,13 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: var(--space-6);
+}
+.notices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.notices:not(:empty) {
+  margin-bottom: var(--space-4);
 }
 </style>
