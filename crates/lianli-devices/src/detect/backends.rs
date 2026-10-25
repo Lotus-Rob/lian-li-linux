@@ -180,7 +180,7 @@ fn open_rusb_with_retry<T>(
     try_open_with_retry(Some(usb_device), "rusb open", open_fn)
 }
 
-fn usb_topology_string(bus: u8, port_numbers: &[u8]) -> String {
+pub(super) fn usb_topology_string(bus: u8, port_numbers: &[u8]) -> String {
     format!(
         "{}-{}",
         bus,
