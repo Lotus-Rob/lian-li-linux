@@ -269,6 +269,51 @@
       ]
     },
     {
+      "id": "retro-lcd-amber-horizontal",
+      "name": "Retro LCD / Amber",
+      "description": "Vintage amber seven-segment clock with date, CPU/GPU temperatures and load, and RAM usage bars.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.2.1",
+      "folder": "retro-lcd-amber-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "e8e06bb0b6537a93dfbd93805ab0a4aa56a4f140e8f58c36bf31c3812c35b4e2",
+      "preview": "preview.png",
+      "preview_sha256": "d76bd4b5abafb8dc9b60f63c4575986aebf661f15acd5294b83f969cfbb39352",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "files": [
+        {
+          "path": "CREDITS.md",
+          "sha256": "62a843e419bad6d2ee1453f891952ea52e4fbe8802beb731912597cca07bfd4d"
+        },
+        {
+          "path": "DSEG-LICENSE.txt",
+          "sha256": "c6ee0567859cb7cc8d992149bbd96ad359ef65fb7355f7feae0547555ffacd23"
+        },
+        {
+          "path": "DSEG7Classic-Bold.ttf",
+          "sha256": "d16181c4eeae29e695ca547ee9be437d01d4909ac1f8f349f04176dc6858873b"
+        },
+        {
+          "path": "README.md",
+          "sha256": "bab96e2b4b0257db8b4ea0804ed0ce23ec5d35bcb68ab39309e177e2533cfa06"
+        },
+        {
+          "path": "Rajdhani-OFL.txt",
+          "sha256": "f62ef357d3a1c3d27edd35a6e1ba350e8a8d13499797964eeadefbf0b3b15d1f"
+        },
+        {
+          "path": "Rajdhani-SemiBold.ttf",
+          "sha256": "94bbd25a18ca665999feb05a537de9fd2b860dcfb78bbe9ca00270825bf235da"
+        },
+        {
+          "path": "faceplate.png",
+          "sha256": "f5c3265d92a8706e93ca1c066abada1c4b541b4edc25298684487231084fc7b2"
+        }
+      ]
+    },
+    {
       "id": "maneki-neko-horizontal",
       "name": "Maneki Neko / Ivory",
       "description": "Light ivory lucky-cat dashboard with CPU/GPU temperature and load bars, RAM usage and a seconds clock.",
