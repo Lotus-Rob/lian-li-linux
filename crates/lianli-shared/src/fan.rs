@@ -134,6 +134,22 @@ pub struct FanGroup {
     pub speeds: [FanSpeed; 4],
 }
 
+impl FanGroup {
+    /// A wired port group drives every fan on its port with the first slot's
+    /// speed, so the remaining slots must not influence control decisions.
+    pub fn applied_speeds(&self) -> [FanSpeed; 4] {
+        let is_port_group = self.device_id.as_deref().is_some_and(|id| {
+            id.rsplit_once(":port")
+                .is_some_and(|(_, port)| port.parse::<u8>().is_ok())
+        });
+        if is_port_group {
+            std::array::from_fn(|_| self.speeds[0].clone())
+        } else {
+            self.speeds.clone()
+        }
+    }
+}
+
 /// Pads a fan-speed list of length 0..=4 out to exactly 4 slots, filling any
 /// missing trailing slots with `FanSpeed::Constant(0)` (unused/off). Hubs
 /// with fewer than 4 physically connected fans (e.g. a 3-fan Uni Hub) report
@@ -264,6 +280,29 @@ mod tests {
         assert!(!FanSpeed::Curve("Off".into()).is_off());
         assert!(!FanSpeed::Curve("__mb_sync__".into()).is_off());
         assert!(!FanSpeed::Constant(0).is_off());
+    }
+
+    #[test]
+    fn port_groups_apply_only_the_first_slot() {
+        let speeds = [
+            FanSpeed::Curve("GPU".into()),
+            FanSpeed::Curve("deleted".into()),
+            FanSpeed::Curve("off".into()),
+            FanSpeed::Curve("__mb_sync__".into()),
+        ];
+        let group = |device_id: &str| FanGroup {
+            device_id: Some(device_id.into()),
+            speeds: speeds.clone(),
+        };
+        let first = std::array::from_fn(|_| FanSpeed::Curve("GPU".into()));
+
+        assert_eq!(group("hid:0cf2:a102:1-13.1:port2").applied_speeds(), first);
+        assert_eq!(group("wireless:AA:BB:CC:DD:EE:FF").applied_speeds(), speeds);
+        assert_eq!(group("hid:0416:7395:1-13.3").applied_speeds(), speeds);
+        assert_eq!(
+            group("hid:0416:7395:1-13.3:portal").applied_speeds(),
+            speeds
+        );
     }
 
     #[test]

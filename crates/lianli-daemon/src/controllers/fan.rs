@@ -112,7 +112,7 @@ struct FanSensors {
 
 fn fan_control_thread(inputs: FanControlInputs) {
     let FanControlInputs {
-        config,
+        mut config,
         curves,
         wireless,
         wired,
@@ -122,6 +122,9 @@ fn fan_control_thread(inputs: FanControlInputs) {
         rgb_drift_enabled,
         rgb_drift_interval,
     } = inputs;
+    for group in &mut config.speeds {
+        group.speeds = group.applied_speeds();
+    }
     let all_sensors = all_sensors.as_slice();
     let update_interval = Duration::from_millis(config.update_interval_ms.clamp(100, 10_000));
     let heartbeat_interval = Duration::from_secs(1);

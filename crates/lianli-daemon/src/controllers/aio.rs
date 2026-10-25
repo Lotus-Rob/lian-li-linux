@@ -88,7 +88,7 @@ fn software_cooling_configured(config: &AppConfig, device_id: &str) -> bool {
                         || id
                             .strip_prefix(device_id)
                             .is_some_and(|suffix| suffix.starts_with(':'))
-                }) && group.speeds.iter().any(software)
+                }) && group.applied_speeds().iter().any(software)
             })
         })
 }
