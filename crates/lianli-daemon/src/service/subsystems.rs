@@ -164,6 +164,7 @@ pub struct DeviceRegistry {
     pub last_reinit: Option<std::time::Instant>,
     pub failed_open_ids: HashSet<String>,
     pub init_retry_count: u32,
+    pub next_init_retry: Option<std::time::Instant>,
     /// Cached USB device list from `enumerate_devices()` — refreshed every
     /// 10 s and surfaced to the GUI via `sync_ipc_state`.
     pub cached_usb_devices: Vec<DeviceInfo>,
@@ -188,6 +189,7 @@ impl DeviceRegistry {
             last_reinit: None,
             failed_open_ids: HashSet::new(),
             init_retry_count: 0,
+            next_init_retry: None,
             cached_usb_devices: Vec::new(),
             usb_locations: HashMap::new(),
             tl_lcd_port_index: HashMap::new(),

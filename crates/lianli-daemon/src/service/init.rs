@@ -22,6 +22,10 @@ use tracing::{debug, info, warn};
 
 const MAX_INIT_RETRIES: u32 = 18;
 
+fn init_retry_delay(failed_retries: u32) -> std::time::Duration {
+    std::time::Duration::from_secs(1 << failed_retries.min(3))
+}
+
 impl ServiceManager {
     pub(super) fn initialize_runtime(&mut self, tx: Sender<DaemonEvent>, signals: &SignalMonitor) {
         if signals.requested() {
@@ -304,6 +308,13 @@ impl ServiceManager {
         if pending.is_empty() || self.registry.init_retry_count >= MAX_INIT_RETRIES {
             return;
         }
+        if self
+            .registry
+            .next_init_retry
+            .is_some_and(|at| std::time::Instant::now() < at)
+        {
+            return;
+        }
         self.registry.init_retry_count += 1;
         info!(
             "Retrying {} device(s) that failed to open (attempt {}/{})",
@@ -578,11 +589,20 @@ impl ServiceManager {
                 );
             }
             self.registry.init_retry_count = 0;
-        } else {
+            self.registry.next_init_retry = None;
+        } else if self.registry.init_retry_count >= MAX_INIT_RETRIES {
             warn!(
-                "{} device(s) failed to open — will retry on next hotplug check",
+                "{} device(s) failed to open after {MAX_INIT_RETRIES} retries — waiting for a USB change",
                 failed_ids.len()
             );
+        } else {
+            let delay = init_retry_delay(self.registry.init_retry_count);
+            warn!(
+                "{} device(s) failed to open — will retry in {}s",
+                failed_ids.len(),
+                delay.as_secs()
+            );
+            self.registry.next_init_retry = Some(std::time::Instant::now() + delay);
         }
         self.registry.failed_open_ids = failed_ids;
         true

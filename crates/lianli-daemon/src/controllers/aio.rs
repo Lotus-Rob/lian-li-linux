@@ -137,8 +137,13 @@ impl AioController {
     }
 
     pub fn stop(mut self) {
+        self.stop_and_join();
+    }
+
+    fn stop_and_join(&mut self) {
         self.stop_flag.store(true, Ordering::Relaxed);
         if let Some(t) = self.thread.take() {
+            t.thread().unpark();
             let _ = t.join();
         }
     }
@@ -146,10 +151,18 @@ impl AioController {
 
 impl Drop for AioController {
     fn drop(&mut self) {
-        self.stop_flag.store(true, Ordering::Relaxed);
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
+        self.stop_and_join();
+    }
+}
+
+fn sleep_unless_stopped(stop_flag: &AtomicBool, duration: Duration) {
+    let deadline = Instant::now() + duration;
+    while !stop_flag.load(Ordering::Relaxed) {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return;
         }
+        thread::park_timeout(remaining);
     }
 }
 
@@ -246,7 +259,7 @@ fn run(
             .held_speeds
             .retain(|m, _| live_macs.contains(m));
 
-        thread::sleep(TICK);
+        sleep_unless_stopped(&stop_flag, TICK);
     }
 
     debug!("AioController stopped");
@@ -1092,5 +1105,19 @@ mod tests {
         let (val, ok) = read_optional(&None, &mut cache, &sensors);
         assert_eq!(val, 0);
         assert!(!ok);
+    }
+
+    #[test]
+    fn stop_interrupts_the_idle_tick() {
+        let mut controller = AioController::new(
+            Arc::new(WirelessController::new()),
+            Arc::new(HashMap::new()),
+            AppConfig::default(),
+        );
+        controller.start();
+        thread::sleep(Duration::from_millis(100));
+        let started = Instant::now();
+        controller.stop();
+        assert!(started.elapsed() < TICK / 2, "{:?}", started.elapsed());
     }
 }
