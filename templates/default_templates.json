@@ -314,6 +314,55 @@
       ]
     },
     {
+      "id": "cyber-rain-blue-horizontal",
+      "name": "Cyber Rain / Blue",
+      "description": "Blue rainy cyberpunk dashboard with analog CPU/GPU and network gauges, RAM, free disk space and NVMe temperature.",
+      "author": "marvinduranr",
+      "min_daemon_version": "1.2.1",
+      "folder": "cyber-rain-blue-horizontal",
+      "template_file": "template.json",
+      "template_sha256": "216c517fa13d0570a40e11b9271e9d60ce3048d855b1484e0936e7d0341c83cf",
+      "preview": "preview.jpg",
+      "preview_sha256": "35cd8a49620552b97ec8f7628beb18bb36c7492807ec1b2f271d97b45d6c7eb3",
+      "base_width": 1920,
+      "base_height": 480,
+      "rotated": true,
+      "files": [
+        {
+          "path": "CREDITS.md",
+          "sha256": "63cb688b9a4383b43c45c054d14f83b4ebfb90be0d0680e4572f1c9d5a768b37"
+        },
+        {
+          "path": "JetBrainsMono-Bold.ttf",
+          "sha256": "d22c4f3821d725eb01210d278d95dfcfcaadc34699a06658d47c8a5cc5830ada"
+        },
+        {
+          "path": "JetBrainsMono-OFL.txt",
+          "sha256": "a76abf002c49097d146e86740a3105a5d00450b1592e820a1109a8c5680cd697"
+        },
+        {
+          "path": "README.md",
+          "sha256": "888e2ef0e9bc331040d4087cdfa39f8760bfab474213c523a4b7d2e3ca178f72"
+        },
+        {
+          "path": "Rajdhani-OFL.txt",
+          "sha256": "f62ef357d3a1c3d27edd35a6e1ba350e8a8d13499797964eeadefbf0b3b15d1f"
+        },
+        {
+          "path": "Rajdhani-SemiBold.ttf",
+          "sha256": "94bbd25a18ca665999feb05a537de9fd2b860dcfb78bbe9ca00270825bf235da"
+        },
+        {
+          "path": "panels.png",
+          "sha256": "156f53a32c143e5f7856e89b6267ffde8b8c6369f4488240e8fa360c9333b510"
+        },
+        {
+          "path": "rain-city.jpg",
+          "sha256": "6c241d8046ddbc5f22f1d3ee1b563f68fe5c4b83434584f8121aa52480011e9c"
+        }
+      ]
+    },
+    {
       "id": "maneki-neko-horizontal",
       "name": "Maneki Neko / Ivory",
       "description": "Light ivory lucky-cat dashboard with CPU/GPU temperature and load bars, RAM usage and a seconds clock.",
