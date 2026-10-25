@@ -50,6 +50,9 @@ impl ServiceManager {
         if self.wireless.has_discovered_devices() {
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
+        if self.hid_backend() == HidBackend::Hidraw {
+            lianli_devices::detect::ensure_hid_devices_bound();
+        }
         if signals.requested() {
             return;
         }
