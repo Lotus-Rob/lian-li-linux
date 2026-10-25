@@ -29,7 +29,7 @@ pub fn ensure_hid_devices_bound() {
         };
         let topology = usb_topology_string(det.bus, &ports);
         let sysfs = Path::new(USB_SYSFS).join(&topology);
-        if !has_unbound_hid_interface(&sysfs) {
+        if !lacks_hid_node(&sysfs) {
             continue;
         }
         let label = format!(
@@ -59,17 +59,20 @@ pub fn ensure_hid_devices_bound() {
     }
 }
 
-/// Unreadable sysfs entries count as bound so that missing visibility, such as
-/// inside a container, never triggers a reset.
-fn has_unbound_hid_interface(device_dir: &Path) -> bool {
+/// A device counts as bound when any HID interface has a node, because some
+/// multi-interface devices may leave secondary interfaces without one. Unreadable
+/// sysfs entries also count as bound, so missing visibility, such as inside a
+/// container, never triggers a reset.
+fn lacks_hid_node(device_dir: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(device_dir) else {
         return false;
     };
-    entries
+    let mut interfaces = entries
         .flatten()
         .map(|entry| entry.path())
         .filter(|path| is_hid_interface(path))
-        .any(|interface| !has_kernel_hid_node(&interface))
+        .peekable();
+    interfaces.peek().is_some() && !interfaces.any(|interface| has_kernel_hid_node(&interface))
 }
 
 fn is_hid_interface(path: &Path) -> bool {
@@ -89,7 +92,7 @@ fn has_kernel_hid_node(interface: &Path) -> bool {
 fn wait_until_bound(device_dir: &Path, max_wait: Duration) -> bool {
     let start = std::time::Instant::now();
     while start.elapsed() < max_wait {
-        if !has_unbound_hid_interface(device_dir) {
+        if !lacks_hid_node(device_dir) {
             return true;
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -134,7 +137,7 @@ fn device_responds_to_descriptor(device: &Device<UsbContext>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::has_unbound_hid_interface;
+    use super::lacks_hid_node;
     use std::fs;
     use std::path::{Path, PathBuf};
 
@@ -170,25 +173,38 @@ mod tests {
     }
 
     #[test]
-    fn hid_interface_without_hidraw_is_unbound() {
+    fn hid_interface_without_hidraw_lacks_a_node() {
         let device = Fixture::new("unbound");
         device.interface("1-13.3:1.0", "ff", None);
         device.interface("1-13.3:1.1", "03", None);
-        assert!(has_unbound_hid_interface(device.path()));
+        assert!(lacks_hid_node(device.path()));
     }
 
     #[test]
-    fn hidraw_or_hwmon_nodes_count_as_bound() {
-        let device = Fixture::new("bound");
-        device.interface("1-13.3:1.0", "ff", None);
-        device.interface("1-13.3:1.1", "03", Some("hidraw"));
-        device.interface("1-13.3:1.2", "03", Some("hwmon"));
-        assert!(!has_unbound_hid_interface(device.path()));
+    fn hwmon_node_counts_as_bound() {
+        let device = Fixture::new("hwmon");
+        device.interface("1-13.3:1.0", "03", Some("hwmon"));
+        assert!(!lacks_hid_node(device.path()));
     }
 
     #[test]
-    fn invisible_device_is_never_reported_unbound() {
+    fn one_bound_interface_is_enough_for_multi_interface_devices() {
+        let device = Fixture::new("multi");
+        device.interface("1-4:1.0", "03", Some("hidraw"));
+        device.interface("1-4:1.1", "03", None);
+        assert!(!lacks_hid_node(device.path()));
+    }
+
+    #[test]
+    fn device_without_hid_interfaces_never_lacks_a_node() {
+        let device = Fixture::new("vendor-only");
+        device.interface("1-4:1.0", "ff", None);
+        assert!(!lacks_hid_node(device.path()));
+    }
+
+    #[test]
+    fn invisible_device_never_lacks_a_node() {
         let device = Fixture::new("invisible");
-        assert!(!has_unbound_hid_interface(&device.path().join("1-9")));
+        assert!(!lacks_hid_node(&device.path().join("1-9")));
     }
 }
